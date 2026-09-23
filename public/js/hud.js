@@ -209,12 +209,12 @@ export class Hud {
     while (f.children.length > 6) f.firstChild.remove();
     setTimeout(() => d.remove(), 9000);
   }
-  chant(text, cls = '') { const el = $('chant-text'); el.textContent = text; el.className = cls; }
+  chant(text, cls = '') { const el = $('chant-text'); if (el.textContent !== text) el.textContent = text; if (el.className !== cls) el.className = cls; }
   preview(spec) {
     const pv = $('chant-preview');
-    if (!spec) { pv.innerHTML = ''; return; }
+    if (!spec) { setHTML(pv, ''); return; }
     const S = SHAPES[spec.shape];
-    pv.innerHTML = `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${spec.cost} ${t('mana')}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`;
+    setHTML(pv, `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${spec.cost} ${t('mana')}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`);
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
   micState(on) { document.querySelector('.mic').classList.toggle('off', !on); }

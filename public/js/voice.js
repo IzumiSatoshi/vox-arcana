@@ -1,19 +1,29 @@
-// Web Speech API wrapper. Recognition runs continuously and is never stopped between chants,
-// so there is no restart gap. A "chant window" (hold key) collects the text spoken while it is open;
-// releasing returns the transcript immediately (instant cast).
+// Each push-to-talk chant owns its Web Speech results, including late events.
 import { clamp } from './util.js';
 
 export class Voice {
   constructor() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    this.SR = SR; this.supported = !!SR;
-    this.lang = 'en-US'; this.segs = []; this.base = 0; this.running = false; this.want = false;
-    this.win = null; // { seg, offset }
-    this.error = null; this.level = 0; this.peak = 0; this.handsFree = false;
-    this.onAuto = null; this.onStatus = null; this.lastResultAt = 0; this.version = 0;
+    this.SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.supported = !!this.SR;
+    this.lang = 'en-US'; this.running = false; this.want = false;
+    this.win = null; this.pending = null; this.session = null;
+    this.error = null; this.level = 0; this.peak = 0; this._handsFree = false;
+    this.onAuto = null; this.onStatus = null; this.onText = null; this.lastResultAt = 0; this.version = 0;
+  }
+  get handsFree() { return this._handsFree; }
+  set handsFree(value) {
+    this._handsFree = value;
+    if (this.want && !this.win && !this.pending) {
+      this.retire();
+      if (value) this.start();
+    }
   }
   async init(audioCtx) {
     if (!this.supported) { this.error = 'unsupported'; this.onStatus?.('unsupported'); return false; }
+    this.want = true;
+    // Start recognition independently of the optional loudness meter permission.
+    this.rec = new this.SR();
+    if (this.win || this.handsFree) this.start();
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (audioCtx) {
@@ -21,62 +31,110 @@ export class Voice {
         this.analyser = audioCtx.createAnalyser(); this.analyser.fftSize = 1024; src.connect(this.analyser);
         this.buf = new Float32Array(this.analyser.fftSize);
       }
-    } catch { this.error = 'mic-denied'; this.onStatus?.('mic-denied'); return false; }
-    this.rec = new this.SR();
-    this.rec.continuous = true; this.rec.interimResults = true; this.rec.maxAlternatives = 1; this.rec.lang = this.lang;
-    this.rec.onresult = (e) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        const seg = (this.segs[this.base + i] ||= { text: '', final: false, t0: performance.now() });
-        seg.text = r[0].transcript.trim(); if (r.isFinal && !seg.final) seg.tf = performance.now(); seg.final = r.isFinal;
-        if (r.isFinal && this.handsFree && !this.win && seg.text) this.onAuto?.(seg.text);
-      }
-      this.lastResultAt = performance.now(); this.version++;
-    };
-    this.rec.onstart = () => { this.running = true; this.onStatus?.('listening'); };
-    this.rec.onend = () => {
-      this.running = false;
-      for (const s of this.segs) s.final = true;
-      this.base = this.segs.length;
-      if (this.want) this.start(); else this.onStatus?.('idle'); // restart at once so the next press is heard
-    };
-    this.rec.onerror = (e) => {
-      if (e.error === 'no-speech' || e.error === 'aborted') return;
-      this.error = e.error; this.onStatus?.('error:' + e.error);
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') this.want = false;
-    };
-    this.want = true; this.start();
+    } catch {
+      // Recognition uses its own capture: meter failure must not disable it.
+      this.level = 0;
+    }
     return true;
   }
-  setLang(l) { this.lang = l; if (this.rec) { this.rec.lang = l; if (this.running) this.rec.stop(); } }
-  start() {
-    if (!this.rec || this.running) return;
-    try { this.rec.start(); } catch { setTimeout(() => { try { if (!this.running) this.rec.start(); } catch { /* busy */ } }, 30); }
+  retire() {
+    clearTimeout(this.retry);
+    const session = this.session;
+    this.session = null; this.running = false;
+    if (session) { try { session.rec.abort(); } catch { /* already ended */ } }
+    this.onStatus?.('idle');
   }
-
-  // Anything already recognised (even in an unfinished utterance) belongs to the past, not this chant.
+  start() {
+    if (!this.SR || !this.want || this.session || this.pending || (!this.win && !this.handsFree)) return;
+    clearTimeout(this.retry);
+    const rec = new this.SR(), win = this.win, chunk = [];
+    if (win) { win.chunks.push(chunk); win.ended = false; }
+    const session = this.session = { rec, win, chunk, stopping: false };
+    this.rec = rec;
+    rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1; rec.lang = this.lang;
+    rec.onstart = () => {
+      if (this.session !== session) return;
+      this.running = true; this.error = null; this.onStatus?.('listening');
+    };
+    rec.onresult = (e) => {
+      if (this.session !== session || win?.closed) return;
+      // Interim entries can be replaced or removed; results is a snapshot.
+      chunk.length = e.results.length;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i], previous = chunk[i];
+        chunk[i] = { text: r[0].transcript.trim(), final: r.isFinal };
+        if (!win && r.isFinal && !previous?.final && this.handsFree && !this.win && !this.pending && chunk[i].text) {
+          this.onAuto?.(chunk[i].text);
+        }
+      }
+      this.lastResultAt = performance.now(); this.version++;
+      this.onText?.();
+    };
+    rec.onend = () => {
+      if (this.session !== session) return;
+      this.session = null; this.running = false;
+      if (win) win.ended = true;
+      if (this.want && !session.stopping && (this.win || this.handsFree)) {
+        // Preserve a long chant across a browser-imposed recognition timeout.
+        this.retry = setTimeout(() => this.start(), this.error ? 300 : 0);
+      } else this.onStatus?.('idle');
+    };
+    rec.onerror = (e) => {
+      if (this.session !== session || e.error === 'no-speech' || e.error === 'aborted') return;
+      this.error = e.error; this.onStatus?.('error:' + e.error);
+      if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(e.error)) this.want = false;
+    };
+    try { rec.start(); }
+    catch (error) {
+      this.session = null;
+      if (error.name === 'InvalidStateError') this.retry = setTimeout(() => this.start(), 50);
+      else { this.want = false; this.error = error.name; this.onStatus?.('error:' + error.name); }
+    }
+  }
+  setLang(lang) {
+    if (this.lang === lang) return;
+    this.lang = lang;
+    this.cancelChant();
+  }
   beginChant() {
-    const n = this.segs.length, last = this.segs[n - 1], now = performance.now();
-    // pre-roll: an utterance that began just before the press is part of this chant
-    if (last && !last.final) this.win = { seg: n - 1, offset: last.consumed ?? (now - last.t0 < 1200 ? 0 : last.text.length) };
-    else this.win = { seg: n, offset: 0 };
-    this.peak = 0; this.chantT0 = performance.now();
-    if (!this.running) this.start();
+    // No pre-roll or character offsets: corrections stay with their old session.
+    if (this.win) this.win.closed = true;
+    if (this.pending) this.pending.closed = true;
+    this.pending = null;
+    this.retire();
+    this.win = { chunks: [], closed: false, ended: false, t0: performance.now() };
+    this.peak = 0;
+    this.start();
   }
   textOf(win) {
-    if (!win) return '';
-    return this.segs.slice(win.seg).map((s, i) => (i === 0 ? s.text.slice(win.offset) : s.text).trim()).filter(Boolean).join(' ');
+    if (!win || win.closed) return '';
+    return win.chunks.flat().map((s) => s.text).filter(Boolean).join(' ');
   }
   chantText() { return this.textOf(this.win); }
-  // Instant: returns what has been recognised so far. `win` is returned so late words can still be read
-  // for a short grace period when nothing had been recognised yet.
   endChant() {
-    const win = this.win; this.win = null;
-    const last = this.segs[this.segs.length - 1];
-    if (last && !last.final) last.consumed = last.text.length; // words already used by this chant never leak into the next
-    return { text: this.textOf(win), chantSeconds: (performance.now() - (this.chantT0 || performance.now())) / 1000, loudness: this.peak, win };
+    const win = this.win, text = this.textOf(win);
+    this.win = null; this.pending = win;
+    const result = { text, chantSeconds: win ? (performance.now() - win.t0) / 1000 : 0, loudness: this.peak, win };
+    if (text) this.finishChant(win);
+    else if (this.session) {
+      this.session.stopping = true;
+      try { this.session.rec.stop(); } catch { /* browser already ending */ }
+    }
+    return result;
   }
-  cancelChant() { this.win = null; }
+  finishChant(win) {
+    if (win) win.closed = true;
+    if (this.pending === win) this.pending = null;
+    if (this.session?.win === win) this.retire();
+    if (!this.win && this.handsFree) this.start();
+  }
+  cancelChant() {
+    if (this.win) this.win.closed = true;
+    if (this.pending) this.pending.closed = true;
+    this.win = null; this.pending = null;
+    this.retire();
+    if (this.handsFree) this.start();
+  }
   update() {
     if (!this.analyser) return;
     this.analyser.getFloatTimeDomainData(this.buf);

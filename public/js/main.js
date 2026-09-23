@@ -139,6 +139,8 @@ class Game {
     if (c.model) this.scene.remove(c.model.root);
   }
   clearArena() {
+    this.voice?.cancelChant(); this.grace = null; this.chanting = false;
+    audio.chantStop();
     this.spells.clear();
     for (const c of [...this.combatants]) this.removeCombatant(c);
     this.bots = []; this.remotes.clear(); this.player = null;
@@ -230,17 +232,24 @@ class Game {
   async initVoice() {
     if (this.voiceInit) return; this.voiceInit = true;
     this.voice.lang = this.settings.lang; this.voice.handsFree = this.settings.handsFree;
+    this.voice.onText = () => {
+      // Dispatch late words from the recognition event, without waiting for a render frame.
+      if (!this.grace || this.paused || this.mode === 'menu') return;
+      this.resolveVoiceGrace();
+    };
     this.voice.onStatus = (s) => {
       this.hud.micState(s === 'listening');
       if (s === 'listening' && this.hintErr) { this.hintErr = false; this.hud.hint('hint.chant'); }
       if (s === 'unsupported') this.hud.hint('hint.noSR');
-      else if (s === 'mic-denied') this.hud.hint('hint.mic');
+      else if (s === 'mic-denied' || s === 'error:not-allowed' || s === 'error:audio-capture') this.hud.hint('hint.mic');
       else if (s.startsWith('error:network')) { this.hud.hint('hint.net'); this.hintErr = true; }
     };
     this.voice.onAuto = async (text) => {
-      if (this.mode === 'menu' || this.chanting || localParse(text).isSpell < 1) return;
+      if (this.mode === 'menu' || this.paused || this.chanting || this.channel || localParse(text).isSpell < 1) return;
+      const player = this.player;
       const meta = { chantSeconds: text.length / 12, loudness: this.voice.level };
       const j = this.settings.useJev && this.jevOnline ? await askJev(text, meta) : null;
+      if (this.player !== player || this.mode === 'menu' || this.paused || this.chanting || this.channel) return;
       this.castIncantation(text, meta, j);
     };
     await this.voice.init(audio.ctx);
@@ -279,11 +288,23 @@ class Game {
   endChant() {
     if (!this.chanting) return;
     this.chanting = false; this.player.chanting = false; audio.chantStop();
-    if (!this.voice.rec) { this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
+    if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
     const res = this.voice.endChant();
     if (res.text) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
     // nothing recognised yet: allow a short grace for late recognition (a new press cancels it instantly)
     this.grace = { win: res.win, meta: res, until: performance.now() + 700 };
+  }
+  resolveVoiceGrace() {
+    const g = this.grace;
+    if (!g) return;
+    const text = this.voice.textOf(g.win);
+    if (performance.now() > g.until || g.win?.closed || (!text && g.win?.ended)) {
+      this.voice.finishChant(g.win); this.grace = null;
+      this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
+    } else if (text) {
+      this.grace = null; this.voice.finishChant(g.win);
+      this.castIncantation(text, g.meta, this.bestJev(text));
+    }
   }
   castIncantation(text, meta, jev) {
     const p = this.player; if (!p || !p.alive) return;
@@ -737,11 +758,7 @@ class Game {
           this.castIncantation(ch.text, { chantSeconds: ch.dur, loudness: 0.4 }, ch.jev);
         }
       } else { this.chantProgress = Math.max(0, this.chantProgress - dt * 4); this.viewModel.setTier(0); this.chantAura(dt, null, null); }
-      if (this.grace) {
-        const text = this.voice.textOf(this.grace.win);
-        if (text) { const g = this.grace; this.grace = null; this.castIncantation(text, g.meta, this.bestJev(text)); }
-        else if (performance.now() > this.grace.until) { this.grace = null; this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0; }
-      }
+      if (this.grace) this.resolveVoiceGrace();
       this.boltCd -= dt;
       if (this.mouse.lmb) this.fireBolt();
       this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded });

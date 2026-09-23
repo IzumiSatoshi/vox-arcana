@@ -42,11 +42,14 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
 
 ## How a spell is made
 
-1. **Voice**: continuous recognition that is never stopped between chants, so there is no restart gap. Holding the key opens a
-   "chant window", and a mic analyser measures loudness. A local parser previews element, form, rank and mana cost live while you speak.
+1. **Voice**: each keypress starts an isolated Web Speech recognition session with live interim results. Previous casts and their
+   delayed corrections cannot reappear in a new chant. A mic analyser stays available for loudness; a local parser previews
+   element, form, rank and mana cost live while you speak. Hold the key before speaking; recognition startup depends on the browser.
 2. **Speculative Jev**: while you are still chanting, each new transcript is sent to Jev (throttled), so when you release,
    the interpretation is usually already there. The cast happens on release with no waiting for Jev or for speech finalization.
-   If nothing was recognized yet, a short grace window catches late words, and pressing again cancels it immediately.
+   If nothing was recognized yet, release calls `SpeechRecognition.stop()` to request pending words. A grace window of up to
+   700 ms catches them and casts directly from the recognition event; pressing again cancels it immediately. Hands-free mode
+   uses continuous recognition and final results. Web Speech service/network latency remains browser-dependent.
 3. **Jev** (`/api/spell` → `POST https://api.typesafe.ai/v1/systemone`): one request with typed questions:
    - `choice`: element (10), secondary element, form (14)
    - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos
