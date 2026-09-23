@@ -11,7 +11,7 @@ export class Voice {
     this.win = null; this.pending = null; this.session = null;
     this.error = null; this.level = 0; this.peak = 0; this._handsFree = false;
     this.onAuto = null; this.onStatus = null; this.onText = null; this.lastResultAt = 0; this.version = 0;
-    this.preferLocal = true; this.prewarm = true; this.localAvailability = 'unchecked';
+    this.preferLocal = false; this.prewarm = false; this.localAvailability = 'unchecked';
     this.localByLanguage = new Map(); this.localFailed = new Set();
     this.trackSupported = false; this.history = []; this.nextId = 0;
   }
@@ -40,7 +40,7 @@ export class Voice {
   }
   async init(audioCtx, { stream } = {}) {
     if (!this.supported) { this.error = 'unsupported'; this.onStatus?.('unsupported'); return false; }
-    this.want = true; this.rec = new this.SR();
+    this.want = true; this.rec = new this.SR(); this.externalStream = !!stream;
     void this.checkLocal();
     if (this.win || this.handsFree) this.start();
     try {
@@ -53,7 +53,7 @@ export class Voice {
         // An ended audio track MUST synchronously throw InvalidStateError when
         // the start(track) overload is implemented. Older engines may ignore it.
         // Probe only while idle, after capture was explicitly enabled.
-        if (!this.session && !this.win) this.probeTrackSupport();
+        if ((this.prewarm || this.externalStream) && !this.session && !this.win) this.probeTrackSupport();
       }
     } catch { this.level = 0; }
     this.prepareNext();
@@ -172,7 +172,7 @@ export class Voice {
       if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(e.error)) this.want = false;
     };
     try {
-      if (this.trackSupported && this.source && this.audioCtx.state === 'running') {
+      if ((this.prewarm || this.externalStream) && this.trackSupported && this.source && this.audioCtx.state === 'running') {
         const gain = this.audioCtx.createGain(), dest = this.audioCtx.createMediaStreamDestination();
         gain.gain.value = prepared ? 0 : 1;
         this.source.connect(gain); gain.connect(dest);
@@ -220,16 +220,18 @@ export class Voice {
     return win.chunks.flat().map((s) => s.text).filter(Boolean).join(' ');
   }
   chantText() { return this.textOf(this.win); }
-  endChant() {
+  endChant({ waitForWords = false } = {}) {
     const win = this.win, text = this.textOf(win), now = performance.now();
     this.win = null; this.pending = win;
     if (win) { win.metric.releasedAt = now; win.metric.outcome = 'pending'; }
     const result = { text, chantSeconds: win ? (now - win.t0) / 1000 : 0, loudness: this.peak, win };
-    if (text) this.finishChant(win);
+    if (text && !waitForWords) this.finishChant(win);
     else if (this.session) {
       this.session.stopping = true;
+      // Chromium can discard buffered audio when stop() is called on a supplied
+      // track. Send silence while its pending words finish, then retire the cast.
       if (this.session.input) this.session.input.gain.gain.value = 0;
-      try { this.session.rec.stop(); } catch { /* browser already ending */ }
+      else { try { this.session.rec.stop(); } catch { /* browser already ending */ } }
     }
     return result;
   }

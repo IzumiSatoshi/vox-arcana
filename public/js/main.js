@@ -23,9 +23,16 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, botJev: true, botVoice: true, handsFree: false, localVoice: true, warmVoice: true, name: '' };
+const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2, name: '' };
 function loadSettings() {
-  let s; try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('voxarcana') || '{}') }; } catch { s = { ...DEFAULTS }; }
+  let s;
+  try {
+    const saved = JSON.parse(localStorage.getItem('voxarcana') || '{}');
+    s = { ...DEFAULTS, ...saved };
+    // The previous release enabled experimental speech paths for everyone.
+    // Migrate once so existing users also return to direct microphone capture.
+    if (saved.voiceDefaultsVersion !== 2) { s.localVoice = false; s.warmVoice = false; s.voiceDefaultsVersion = 2; saveSettings(s); }
+  } catch { s = { ...DEFAULTS }; }
   if (!s.lang) s.lang = s.ui === 'ja' ? 'ja-JP' : 'en-US';
   return s;
 }
@@ -298,19 +305,22 @@ class Game {
     if (!this.chanting) return;
     this.chanting = false; this.player.chanting = false; audio.chantStop();
     if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
-    const res = this.voice.endChant();
-    if (res.text) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
-    // nothing recognised yet: allow a short grace for late recognition (a new press cancels it instantly)
-    this.grace = { win: res.win, meta: res, until: performance.now() + 700 };
+    const text = this.voice.chantText();
+    const ready = !!text && localParse(text).isSpell >= 0.65;
+    const res = this.voice.endChant({ waitForWords: !ready });
+    if (ready) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
+    // Missing or incomplete words: allow delayed spell words (a new press cancels instantly).
+    this.grace = { win: res.win, meta: res, until: performance.now() + 1800 };
   }
   resolveVoiceGrace() {
     const g = this.grace;
     if (!g) return;
     const text = this.voice.textOf(g.win);
-    if (performance.now() > g.until || g.win?.closed || (!text && g.win?.ended)) {
+    const ended = g.win?.ended || performance.now() > g.until;
+    if (g.win?.closed || (ended && !text)) {
       this.voice.finishChant(g.win); this.grace = null;
       this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
-    } else if (text) {
+    } else if (text && (localParse(text).isSpell >= 0.65 || ended)) {
       this.grace = null; this.voice.finishChant(g.win);
       this.castIncantation(text, g.meta, this.bestJev(text));
     }

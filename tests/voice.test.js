@@ -118,7 +118,7 @@ function fakeAudio() {
 }
 async function preparedVoice() {
   const v = new Voice(); v.SR = TrackRecognition;
-  await v.init(fakeAudio(), { stream: {} }); return v;
+  v.preferLocal = true; v.prewarm = true; await v.init(fakeAudio(), { stream: {} }); return v;
 }
 test('prepared recognizer receives silence until claimed, then is retired before the next cast', async () => {
   const v = await preparedVoice(); const ready = v.session;
@@ -184,7 +184,7 @@ test('latency history is bounded', async () => {
 
 test('replacement recognition waits for asynchronous abort teardown', async () => {
   const v = new Voice(); v.SR = class extends TrackRecognition { abort() { this.aborted = true; } };
-  await v.init(fakeAudio(), { stream: {} });
+  v.preferLocal = true; v.prewarm = true; await v.init(fakeAudio(), { stream: {} });
   v.beginChant(); const old = v.rec; old.result([['fire']]); v.endChant();
   assert.equal(v.session, null); assert.ok(v.draining);
   v.beginChant(); assert.equal(v.session, null);
@@ -203,7 +203,32 @@ test('missing end after abort cannot stall the next chant indefinitely', async t
 test('preparation waits for an outstanding local capability check', async () => {
   let resolve;
   const v = new Voice(); v.SR = class extends TrackRecognition { static available() { return new Promise(r => { resolve = r; }); } };
-  await v.init(fakeAudio(), { stream: {} }); assert.equal(v.session, null);
+  v.preferLocal = true; v.prewarm = true; await v.init(fakeAudio(), { stream: {} }); assert.equal(v.session, null);
   resolve('available'); await Promise.resolve();
   assert.equal(v.session.local, true); assert.equal(v.session.prepared, true); v.dispose();
+});
+
+test('default gameplay uses browser microphone capture even with audio-track support', async () => {
+  const v = await setup(); v.SR = TrackRecognition;
+  v.audioCtx = fakeAudio(); v.source = v.audioCtx.createMediaStreamSource(); v.trackSupported = true;
+  v.localByLanguage.set(v.lang, 'available');
+  assert.equal(v.prewarm, false); assert.equal(v.preferLocal, false);
+  v.prepareNext(); assert.equal(v.session, null);
+  v.beginChant(); assert.equal(v.rec.input, undefined); assert.equal(v.rec.processLocally, false);
+  v.rec.result([['fireball']]); assert.equal(v.endChant().text, 'fireball'); v.dispose();
+});
+
+test('incomplete release can keep accepting revisions until spell words arrive', async () => {
+  const v = await setup(); v.beginChant(); const rec = v.rec;
+  rec.result([['sum']]); const res = v.endChant({ waitForWords: true });
+  assert.equal(res.win.closed, false); assert.equal(rec.stopped, true);
+  rec.result([['summon an ice spear', true]]);
+  assert.equal(v.textOf(res.win), 'summon an ice spear'); v.finishChant(res.win); v.dispose();
+});
+test('supplied audio track sends silence on release while buffered words finish', async () => {
+  const v = await preparedVoice(); v.beginChant(); const session = v.session;
+  const res = v.endChant({ waitForWords: true });
+  assert.equal(session.input.gain.gain.value, 0); assert.equal(session.rec.stopped, undefined);
+  session.rec.result([['ice spear', true]]); assert.equal(v.textOf(res.win), 'ice spear');
+  v.finishChant(res.win); v.dispose();
 });
