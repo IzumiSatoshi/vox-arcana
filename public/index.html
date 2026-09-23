@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vox Arcana</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Cinzel:wght@600;700;900&family=Noto+Sans+JP:wght@500;700;900&family=Noto+Serif+JP:wght@700;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- ===================== HUD ===================== -->
+<div id="hud" class="hidden">
+  <div id="screen-flash"></div>
+  <div id="hurt-vignette"></div>
+  <div id="frost-overlay"></div>
+  <div id="nameplates"></div>
+  <div id="popups"></div>
+
+  <div id="compass"><div id="compass-strip"></div><div id="compass-marks"></div><div class="compass-needle"></div></div>
+  <div id="round-info"></div>
+  <div id="minimap-wrap"><canvas id="minimap" width="180" height="180"></canvas><div id="jev-status"><span class="dot"></span><span class="txt">Jev</span></div></div>
+  <div id="scoreboard" class="hidden"></div>
+
+  <div id="feed"></div>
+
+  <div id="crosshair">
+    <svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="22" class="charge" id="charge-ring"/>
+      <path d="M50 40 L53 50 L50 60 L47 50 Z" class="dia"/>
+      <g class="ticks"><path d="M50 30 L52 35 L48 35 Z"/><path d="M50 70 L52 65 L48 65 Z"/><path d="M30 50 L35 48 L35 52 Z"/><path d="M70 50 L65 48 L65 52 Z"/></g>
+    </svg>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  </div>
+
+  <div id="self-panel">
+    <div class="portrait" id="portrait">
+      <svg class="p-frame" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" class="p-outer"/><circle cx="50" cy="50" r="40.5" class="p-inner"/><g class="p-ticks"><path d="M50 2v7M50 91v7M2 50h7M91 50h7"/></g><path class="p-gem" d="M50 0l4 5-4 5-4-5z"/></svg>
+      <svg class="p-runes" viewBox="0 0 100 100"><circle cx="50" cy="50" r="36" /></svg>
+      <div class="p-core" id="portrait-icon"></div>
+    </div>
+    <div class="self-body">
+      <div class="self-top"><span id="self-name">You</span><span id="self-auras"></span><span id="self-status"></span></div>
+      <div class="bar shieldbar"><div class="fill shield" id="self-shield"></div></div>
+      <div class="bar hpbar"><div class="lag" id="self-lag"></div><div class="fill hp" id="self-hp"></div><div class="seg"></div><span class="num" id="self-hp-num"></span></div>
+      <div class="bar manabar"><div class="fill mana" id="self-mana"></div><div class="cost" id="self-cost"></div><div class="seg"></div><span class="num" id="self-mana-num"></span></div>
+      <div class="bar thin"><div class="fill stam" id="self-stam"></div></div>
+    </div>
+  </div>
+
+  <div id="chant-box">
+    <div id="chant-preview"></div>
+    <div id="chant-text"></div>
+    <div id="chant-hint"><span class="mic"><span class="lvl" id="mic-lvl"></span></span><span id="chant-hint-txt" data-i18n="hint.chant"></span></div>
+  </div>
+
+  <div id="type-box" class="hidden"><input id="type-input" maxlength="300" data-i18n-ph="type.ph" autocomplete="off" /></div>
+
+  <div id="spell-card" class="hidden">
+    <div class="sc-head"><span class="sc-diamond" id="sc-tier-num">III</span><div><div id="sc-tier-name">Adept</div><div id="sc-stars"></div></div><span class="src" id="sc-src"></span></div>
+    <div class="sc-name" id="sc-name">Fireball</div>
+    <div class="sc-meta"><span id="sc-el"></span><span id="sc-el2"></span><span class="shape-chip" id="sc-shape"></span></div>
+    <div class="sc-quote" id="sc-quote"></div>
+    <div class="sc-params" id="sc-params"></div>
+    <div class="sc-cost" id="sc-cost"></div>
+  </div>
+
+  <div id="bubble" class="hidden"></div>
+  <div id="banner" class="hidden"><div class="b1"></div><div class="b2"></div></div>
+</div>
+
+<!-- ===================== MENUS ===================== -->
+<div id="menu" class="screen">
+  <div class="lang-switch"><button data-lang="en">EN</button><button data-lang="ja">日本語</button></div>
+  <div class="title-wrap">
+    <div class="title-small" data-i18n="title.small"></div>
+    <h1>VOX ARCANA</h1>
+    <div class="title-sub" data-i18n="title.sub"></div>
+  </div>
+  <div class="menu-buttons">
+    <button class="btn primary" data-action="duel" data-i18n="menu.duel"></button>
+    <button class="btn" data-action="online" data-i18n="menu.online"></button>
+    <button class="btn" data-action="practice" data-i18n="menu.practice"></button>
+    <button class="btn" data-action="howto" data-i18n="menu.howto"></button>
+    <button class="btn" data-action="settings" data-i18n="menu.settings"></button>
+  </div>
+  <div id="menu-status"></div>
+</div>
+
+<div id="online" class="screen hidden">
+  <div class="panel">
+    <h2 data-i18n="online.title"></h2>
+    <p class="muted" data-i18n="online.desc"></p>
+    <label><span data-i18n="online.name"></span> <input id="net-name" maxlength="20" /></label>
+    <label><span data-i18n="online.room"></span> <input id="net-room" maxlength="24" value="arena" /></label>
+    <div class="row"><button class="btn primary" id="net-join" data-i18n="online.join"></button><button class="btn" data-back data-i18n="back"></button></div>
+    <div id="net-msg" class="muted"></div>
+  </div>
+</div>
+
+<div id="settings" class="screen hidden">
+  <div class="panel">
+    <h2 data-i18n="set.title"></h2>
+    <div class="grid">
+      <label><span data-i18n="set.ui"></span>
+        <select id="set-ui"><option value="en">English</option><option value="ja">日本語</option></select></label>
+      <label><span data-i18n="set.voice"></span>
+        <select id="set-lang"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option></select></label>
+      <label><span data-i18n="set.diff"></span>
+        <select id="set-diff"><option value="easy" data-i18n="diff.easy"></option><option value="normal" data-i18n="diff.normal"></option><option value="hard" data-i18n="diff.hard"></option></select></label>
+      <label><span data-i18n="set.gfx"></span>
+        <select id="set-quality"><option value="1" data-i18n="gfx.high"></option><option value="0" data-i18n="gfx.perf"></option></select></label>
+      <label><span data-i18n="set.sens"></span> <input type="range" id="set-sens" min="0.3" max="3" step="0.05" value="1" /></label>
+      <label><span data-i18n="set.vol"></span> <input type="range" id="set-vol" min="0" max="1" step="0.01" value="0.8" /></label>
+      <label><span data-i18n="set.music"></span> <input type="range" id="set-music" min="0" max="1" step="0.01" value="0.35" /></label>
+      <label class="check"><input type="checkbox" id="set-jev" checked /> <span data-i18n="set.jev"></span></label>
+      <label class="check"><input type="checkbox" id="set-botjev" checked /> <span data-i18n="set.botjev"></span></label>
+      <label class="check"><input type="checkbox" id="set-botvoice" checked /> <span data-i18n="set.botvoice"></span></label>
+      <label class="check"><input type="checkbox" id="set-handsfree" /> <span data-i18n="set.handsfree"></span></label>
+    </div>
+    <div class="row"><button class="btn primary" data-back data-i18n="done"></button></div>
+  </div>
+</div>
+
+<div id="howto" class="screen hidden">
+  <div class="panel wide">
+    <h2 data-i18n="howto.title"></h2>
+    <div class="howto-grid">
+      <div>
+        <h3 data-i18n="howto.casting"></h3>
+        <p data-i18n="howto.p1"></p>
+        <p class="quote" data-i18n="howto.q1"></p>
+        <p class="quote" data-i18n="howto.q2"></p>
+        <p data-i18n="howto.p2"></p>
+        <h3 data-i18n="howto.controls"></h3>
+        <p data-i18n="howto.ctrl"></p>
+      </div>
+      <div>
+        <h3 data-i18n="howto.elements"></h3>
+        <div id="howto-elements" class="chips"></div>
+        <h3 data-i18n="howto.forms"></h3>
+        <div id="howto-shapes" class="chips"></div>
+        <h3 data-i18n="howto.reactions"></h3>
+        <ul class="reactions" id="howto-reactions"></ul>
+      </div>
+    </div>
+    <div class="row"><button class="btn primary" data-back data-i18n="close"></button></div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="panel">
+    <h2 data-i18n="pause.title"></h2>
+    <div class="menu-buttons">
+      <button class="btn primary" data-action="resume" data-i18n="pause.resume"></button>
+      <button class="btn" data-action="howto" data-i18n="menu.howto"></button>
+      <button class="btn" data-action="settings" data-i18n="menu.settings"></button>
+      <button class="btn" data-action="quit" data-i18n="pause.quit"></button>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="screen"><div class="loader"><div class="sigil"></div><div data-i18n="loading">Weaving the world…</div></div></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

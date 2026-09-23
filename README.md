@@ -1,0 +1,131 @@
+# Vox Arcana: a voice-cast magic duel
+
+A browser FPS magic PvP game where you fight by **speaking incantations**.
+Your words go through the Web Speech API, then **Jev** (TypeSafe's System One decision model) turns them into a
+procedurally generated spell: an element, a form, and a dozen continuous parameters.
+
+> "Fireball!" → a Novice-rank fireball.
+> "Summoning the spirit of fire, gathering the power of the earth, here I will cast the ultimate fireball!" →
+> a Legendary **Stone-Fireball**: a gathered sun of flame with a sigil, 2.5× damage and a huge blast.
+
+## Run
+
+```bash
+node server.js
+```
+
+Then open **http://localhost:8787** in **Chrome or Edge**, which have the Web Speech API. Allow the microphone.
+
+- No dependencies. Node 18+ is enough (Three.js loads from a CDN).
+- The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the endpoint and model with
+  `JEV_URL` / `JEV_MODEL` or a `jev.config.json` (`{ "url": "...", "model": "...", "keyFile": "..." }`).
+- Set `JEV_DEBUG=1` to print Jev's raw answers in the server console.
+- Without a key or server, the game falls back to a local keyword parser, and the HUD shows `LOCAL` instead of `JEV · 200ms`.
+
+## Language / 言語
+
+Use the **EN / 日本語** toggle on the title screen, or go to Settings. Japanese mode localizes the UI, spell names (e.g. 「究極・岩・紅蓮の火球」),
+reactions and statuses, and switches voice recognition to `ja-JP`. The rival also chants in Japanese
+(e.g. 「天よ、裂けよ、雷の裁き！」) and speaks it with a Japanese voice.
+
+## Controls
+
+| | |
+|---|---|
+| **Hold F / Right-click** | chant (speak), release to cast (instantly) |
+| **Enter** | type an incantation instead (a channel time scales with its length) |
+| **Left-click** | mana bolt (uses your last element) |
+| WASD / Space (hold to glide) / Shift / E / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
+| Esc | pause |
+
+Optional **hands-free mode** (Settings) casts whenever you say something that contains a spell.
+
+## How a spell is made
+
+1. **Voice**: continuous recognition that is never stopped between chants, so there is no restart gap. Holding the key opens a
+   "chant window", and a mic analyser measures loudness. A local parser previews element, form, rank and mana cost live while you speak.
+2. **Speculative Jev**: while you are still chanting, each new transcript is sent to Jev (throttled), so when you release,
+   the interpretation is usually already there. The cast happens on release with no waiting for Jev or for speech finalization.
+   If nothing was recognized yet, a short grace window catches late words, and pressing again cancels it immediately.
+3. **Jev** (`/api/spell` → `POST https://api.typesafe.ai/v1/systemone`): one request with typed questions:
+   - `choice`: element (10), secondary element, form (14)
+   - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos
+   - `noul`: is this actually a spell? should it home in?
+4. **Merge** (`public/js/spellbook.js`): Jev ~70–75% plus the local parser, plus bonuses for voice loudness and chant length.
+   This gives magnitude, a damage multiplier, mana cost, rank I–IX and a generated name.
+5. **Procedural runtime** (`public/js/spells.js`): 22 forms, each driven by those parameters:
+   - Attacks: orb · barrage · homing funnels · beam · tornado · meteor · nova · ground spikes · vortex/black hole · chain strike · storm · crescent · field (lingering pool) · wave (advancing surge)
+   - Self: ward (heal/shield) · enhance (elemental buff) · hand (a summoned spectral hand that fights beside you)
+   - Utility: leap · flight · blink (teleport) · construct (platform / stairs / box / pillar / rampart, which are solid, walkable and block spells)
+   - Defense: wall (barrier)
+6. **Composable genes**: Jev also picks four independent traits, and the missile engine combines them freely:
+   - pattern: single, fan, ring, cascade, crossfire, rain, spiral, swarm
+   - trajectory: straight, arc, spiral, zigzag, boomerang, orbit, serpentine, homing
+   - morph: orb, lance, shard, disc/chakram, star, blade, dragon (element beast), skull, bubble, cube
+   - payload: explode, split, linger, erupt, chain, implode, echo, crystallize, none
+
+   Payloads also apply to meteors, beams, tornados, vortices and waves. Names are composed too, e.g.
+   *"Superior Ring of Umbral Skulls Collapse"* or 「伝説の・追尾瘴気の龍・雨・分裂」.
+   Size, speed, gravity (weight), homing, spread (chaos), projectile count, duration, piercing (sharpness),
+   colour temperature (blue-white fire, violet absolute-zero ice), sigil complexity (rank) and dual-element fusion all come from the spec.
+
+## Power grades: why an ultimate spell looks nothing like a normal one
+
+Rank (I–IX, from Jev) and magnitude place every spell in one of four **grades**. Each grade adds new procedural layers
+instead of just scaling numbers:
+
+| Grade | Ranks | Adds |
+|---|---|---|
+| 0 Minor | I–III | 0.75× effective magnitude, plain impact |
+| 1 Standard | IV–V | the baseline |
+| 2 Greater | VI–VII | 1.35× magnitude, a ground sigil + pillar of light when cast, 3 orbiting escort projectiles, aftershock rings, glowing scars, energy strands spiraling around beams |
+| 3 Ultimate | VIII–IX | 1.9× magnitude, **domain** (sky, sunlight and fog take on the element and a colossal sigil opens overhead), 8 escorts, and a multi-stage **cataclysm**: blast, arena-wide shockwave, ring of secondary detonations, erupting core, lingering field, raining debris. Beams erupt continuously where they land. |
+
+Damage follows a steeper curve (a plain fireball ≈ ×0.8, an ultimate ≈ ×4). While you chant, stacked ground sigils
+and rising motes appear around you as the previewed grade climbs, and the screen edge burns once you reach ultimate.
+
+## Elements & reactions
+
+Fire, Ice, Water, Lightning, Wind, Earth, Darkness, Light, Nature, **Poison**, Arcane. Hits leave an elemental **aura**, and the next
+element reacts with it:
+
+- **Frozen** (Water + Ice), then **Shatter** it with earth or heavy spells
+- **Vaporize / Melt** (×2), **Overload** (explosion + launch), **Superconduct** (+40% damage taken), **Electro-Charged**
+- **Swirl** (wind spreads the aura), **Crystallize** (earth gives you a shield), **Bloom**, **Wildfire**, **Quicken**
+- **Eclipse** (Light + Darkness, ×3 true damage), **Hellfire**, **Solar Flare**, arcane **Resonance**
+- Darkness aura = **curse** (attackers leech life). Poison stacks damage over time and halves healing.
+- Nearly every element pair has its own reaction (47 in total): e.g. Toxic Blaze (poison + fire), Quagmire (water + earth, mired),
+  Gravity Prison, Magnetic Crush, Judgment (sky strike), Purge (strips buffs), Sandstorm, Singularity (pull), Aurora Step (haste)…
+  Statuses include mired, weakened, fractured (+damage taken), cursed, poisoned, stunned and frozen.
+- **Combos**: three different spells from the same caster in sequence trigger a finisher: Winter's Judgment (water → ice → earth),
+  Crown of the Storm (fire → wind → lightning), Worldbreaker (darkness → earth → fire), Cycle of Renewal (light → water → wind),
+  Plaguebringer (poison → wind → fire), Void Tide (water → darkness → lightning). Chaining different spells also ramps damage.
+
+## Modes
+
+- **Duel the Archmage**: best of three against an AI that chants generated incantations out loud (speech synthesis),
+  runs them through Jev, reads your aura to set up reactions, dodges, walls and heals.
+- **Online Duel**: free-for-all through the built-in WebSocket relay. Friends open `http://<your-ip>:8787`
+  (voice needs `localhost` or HTTPS, but typing works everywhere). Each client decides its own damage (the victim is authoritative).
+- **Training Grounds**: a regenerating golem to test spells on.
+
+## Files
+
+```
+server.js             static server + Jev bridge + WebSocket relay
+public/js/main.js     game loop, input, modes, casting flow, post-processing
+public/js/spellbook.js  local parser, Jev client, spec merge, AI incantation generator
+public/js/spells.js   14 procedural spell forms
+public/js/combat.js   combatants, auras, reactions, shields, DoTs
+public/js/fx.js       erosion-shaded flame/toon-smoke particles, mesh explosions, shockwaves, heat haze, ribbons, lightning, lights, cracks
+public/js/postfx.js   MSAA HDR, bloom, screen distortion, cinematic grade
+public/js/i18n.js     English / Japanese UI strings
+public/js/audio.js    fully synthesized, spatialized SFX + generative music
+public/js/world.js    sky, painterly terrain, wind-swept grass, fluffy trees, mountains, cumulus clouds, ruins
+public/js/characters.js  outlined cel-shaded battlemages + first-person magic staff
+public/js/voice.js    Web Speech API + mic level
+public/js/bot.js      rival AI
+public/js/hud.js      HUD, spell card, damage numbers
+```
+
+In the browser console, `VA.test('meteor', 'fire', { power: 1, tier: 1 })` casts a hand-made spec (debug).
