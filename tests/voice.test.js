@@ -95,3 +95,115 @@ test('cancellation closes the transcript and ignores delayed events', async () =
   v.cancelChant(); old.result([['fire', true]]);
   assert.equal(v.textOf(win), ''); assert.equal(v.session, null);
 });
+
+class TrackRecognition extends Recognition {
+  processLocally = false;
+  static availability = 'available';
+  static async available() { return this.availability; }
+  start(track) {
+    if (track?.readyState === 'ended') throw new DOMException('Ended track', 'InvalidStateError');
+    this.input = track;
+    super.start(); this.onaudiostart?.();
+  }
+}
+function fakeAudio() {
+  const makeTrack = () => ({ readyState: 'live', stop() { this.readyState = 'ended'; } });
+  const node = () => ({ connect() {}, disconnect() {} });
+  return {
+    state: 'running', createMediaStreamSource: node,
+    createAnalyser: () => ({ fftSize: 512, getFloatTimeDomainData: buf => buf.fill(0.12) }),
+    createGain: () => ({ ...node(), gain: { value: 1 } }),
+    createMediaStreamDestination: () => { const track = makeTrack(); return { ...node(), stream: { getAudioTracks: () => [track] } }; },
+  };
+}
+async function preparedVoice() {
+  const v = new Voice(); v.SR = TrackRecognition;
+  await v.init(fakeAudio(), { stream: {} }); return v;
+}
+test('prepared recognizer receives silence until claimed, then is retired before the next cast', async () => {
+  const v = await preparedVoice(); const ready = v.session;
+  assert.equal(v.useLocal, true); assert.equal(v.trackSupported, true);
+  assert.equal(ready.prepared, true); assert.equal(ready.input.gain.gain.value, 0);
+  v.beginChant(); assert.equal(v.session, ready); assert.equal(ready.input.gain.gain.value, 1);
+  ready.rec.result([['fireball']]); const input = ready.input, res = v.endChant(); v.markCast(res.win);
+  assert.equal(input.gain.gain.value, 0); assert.equal(input.track.readyState, 'ended');
+  assert.notEqual(v.session, ready); assert.equal(v.session.input.gain.gain.value, 0);
+  v.beginChant(); ready.rec.result([['old correction', true]]);
+  assert.equal(v.chantText(), ''); v.dispose();
+});
+test('unexpected results in a silent prepared session invalidate it', async () => {
+  const v = await preparedVoice(); const old = v.rec; old.result([['unexpected']]);
+  assert.equal(v.session, null); v.beginChant(); old.result([['late unexpected']]);
+  assert.equal(v.chantText(), ''); v.dispose();
+});
+test('local service failure falls back without contaminating the next cast', async () => {
+  const v = await preparedVoice(); v.beginChant(); const old = v.rec;
+  old.onerror({ error: 'language-not-supported' });
+  assert.equal(v.useLocal, false); assert.equal(v.rec.processLocally, false);
+  old.result([['obsolete', true]]); v.rec.result([['wind']]);
+  assert.equal(v.endChant().text, 'wind'); v.dispose();
+});
+test('downloadable language stays on browser service without initiating an installation', async () => {
+  const v = new Voice(); v.SR = class extends TrackRecognition { static availability = 'downloadable'; };
+  await v.checkLocal(); assert.equal(v.useLocal, false); assert.equal(v.localAvailability, 'downloadable');
+});
+test('language availability race cannot select the wrong engine', async () => {
+  const v = new Voice(); const queries = [];
+  v.SR = class extends TrackRecognition { static available() { return new Promise(resolve => queries.push(resolve)); } };
+  const old = v.checkLocal(); v.lang = 'ja-JP'; const current = v.checkLocal();
+  queries[1]('downloadable'); await current; queries[0]('available'); await old;
+  assert.equal(v.localAvailability, 'downloadable'); assert.equal(v.useLocal, false);
+});
+test('pause closes prepared audio and prevents restart', async () => {
+  const v = await preparedVoice(); const old = v.session, input = old.input;
+  v.setActive(false); assert.equal(input.track.readyState, 'ended'); assert.equal(v.session, null);
+  old.rec.onend(); v.prepareNext(); assert.equal(v.session, null);
+  v.setActive(true); assert.equal(v.session.prepared, true); v.dispose();
+});
+test('audio track failure falls back to direct microphone recognition', async () => {
+  const v = await preparedVoice(); v.beginChant(); v.rec.onerror({ error: 'audio-capture' });
+  assert.equal(v.trackSupported, false); assert.equal(v.rec.input, undefined);
+  v.rec.result([['ice']]); assert.equal(v.endChant().text, 'ice'); v.dispose();
+});
+test('timing records separate ready, sound, first text, and release-to-cast latency', async t => {
+  let now = 100; t.mock.method(performance, 'now', () => now);
+  const v = await preparedVoice(); v.beginChant();
+  now = 120; v.update(0.02); now = 170; v.rec.result([['fire']]);
+  now = 200; const res = v.endChant(); now = 205; v.markCast(res.win);
+  const m = v.diagnostics().recent[0];
+  assert.equal(m.audioReadyMs, 0); assert.equal(m.soundMs, 20);
+  assert.equal(m.firstTextMs, 70); assert.equal(m.soundToTextMs, 50); assert.equal(m.releaseToCastMs, 5);
+  assert.equal(m.prepared, true); assert.equal(m.outcome, 'cast');
+  assert.equal(JSON.stringify(v.diagnostics()).includes('fire'), false); v.dispose();
+});
+test('latency history is bounded', async () => {
+  const v = await setup();
+  for (let i = 0; i < 45; i++) { v.beginChant(); v.cancelChant(); }
+  assert.equal(v.diagnostics().recent.length, 30); assert.equal(v.diagnostics().recent[0].id, 16);
+});
+
+test('replacement recognition waits for asynchronous abort teardown', async () => {
+  const v = new Voice(); v.SR = class extends TrackRecognition { abort() { this.aborted = true; } };
+  await v.init(fakeAudio(), { stream: {} });
+  v.beginChant(); const old = v.rec; old.result([['fire']]); v.endChant();
+  assert.equal(v.session, null); assert.ok(v.draining);
+  v.beginChant(); assert.equal(v.session, null);
+  old.result([['old correction', true]]); assert.equal(v.chantText(), '');
+  old.onend(); assert.ok(v.session); assert.equal(v.session.win, v.win);
+  v.rec.result([['ice']]); assert.equal(v.chantText(), 'ice'); v.dispose();
+});
+
+test('missing end after abort cannot stall the next chant indefinitely', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const v = new Voice(); v.SR = class extends Recognition { abort() {} };
+  await v.init(); v.beginChant(); v.rec.result([['fire']]); v.endChant(); v.beginChant();
+  assert.equal(v.session, null); t.mock.timers.tick(1000);
+  assert.ok(v.session); v.rec.result([['ice']]); assert.equal(v.chantText(), 'ice'); v.dispose();
+});
+test('preparation waits for an outstanding local capability check', async () => {
+  let resolve;
+  const v = new Voice(); v.SR = class extends TrackRecognition { static available() { return new Promise(r => { resolve = r; }); } };
+  await v.init(fakeAudio(), { stream: {} }); assert.equal(v.session, null);
+  resolve('available'); await Promise.resolve();
+  assert.equal(v.session.local, true); assert.equal(v.session.prepared, true); v.dispose();
+});

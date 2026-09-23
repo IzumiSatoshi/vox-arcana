@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vox Arcana · Voice lab</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+<style>body{background:#111827;color:#e5e7eb;font:16px system-ui;max-width:1000px;margin:32px auto;padding:0 24px}button,select{font:inherit;padding:10px;margin:5px}pre{white-space:pre-wrap;background:#1f2937;padding:20px}canvas{max-width:100%;border:1px solid #374151}label{display:inline-block;margin:8px}</style>
+<h1>Voice lab</h1>
+<p>Browser capabilities and cast timings. Microphone capture starts only when you enable it.</p>
+<pre id="capabilities">Checking browser…</pre>
+<label>Recognition <select id="engine"><option value="auto">Automatic (local if installed)</option><option value="browser">Browser service</option></select></label>
+<label><input id="warm" type="checkbox" checked> Prepare next cast</label>
+<label>Language <select id="language"><option value="en-US">English</option><option value="ja-JP">日本語</option></select></label>
+<div><button id="mic">Enable microphone</button><button id="sample">Run synthetic speech comparison</button><button id="stop">Stop capture</button></div>
+<button id="chant" disabled>Hold to chant (or hold F)</button>
+<p id="status">Idle</p><p id="transcript">No words yet</p>
+<label>Visual test <select id="visual"><option value="live">Live microphone level</option><option value="silent">Simulated silence</option><option value="loud">Simulated loud voice</option></select></label>
+<canvas id="preview" width="800" height="360"></canvas>
+<p id="visual-state"></p><pre id="timings">No casts yet</pre>
+<script type="module">
+import { Voice } from './js/voice.js';
+import { smoothVoiceLevel } from './js/voice-feedback.js';
+import * as THREE from 'three';
+import { ViewModel, initViewEnv } from './js/characters.js';
+import { TIME } from './js/shaders.js';
+const $ = id => document.getElementById(id);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const out = { browser: navigator.userAgent, speechRecognition: !!SR, onDevice: !!SR && 'processLocally' in new SR() };
+if (out.onDevice && typeof SR.available === 'function') {
+  for (const lang of ['en-US', 'ja-JP']) {
+    try { out[lang] = await SR.available({ langs: [lang], processLocally: true }); }
+    catch (e) { out[lang] = e.name; }
+  }
+}
+document.getElementById('capabilities').textContent = JSON.stringify(out, null, 2);
+let voice = new Voice(), ctx, held = false, pending = null, sampleSource, testing = false, run = 0;
+const renderer = new THREE.WebGLRenderer({ canvas: $('preview'), antialias: true });
+renderer.setSize(800, 360, false); renderer.setPixelRatio(1);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x101827);
+const camera = new THREE.PerspectiveCamera(65, 800 / 360, 0.01, 30); scene.add(camera);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x243047, 2)); initViewEnv(renderer);
+const staff = new ViewModel(camera); staff.setTier(3); staff.setElement('fire');
+const history = [];
+function snapshot() {
+  $('timings').textContent = JSON.stringify({ ...voice.diagnostics(), comparisons: history }, null, 2);
+}
+function finish() {
+  if (!pending) return;
+  const text = voice.textOf(pending.win);
+  if (text && performance.now() <= pending.until) {
+    $('transcript').textContent = 'Cast: ' + text;
+    voice.markCast(pending.win); voice.finishChant(pending.win); pending = null;
+  } else if (performance.now() > pending.until || pending.win.ended) { voice.finishChant(pending.win); pending = null; }
+  snapshot();
+}
+function begin() {
+  if (held || !voice.want) return;
+  held = true; pending = null; $('transcript').textContent = 'Listening…'; voice.beginChant();
+}
+function release() {
+  if (!held) return;
+  held = false; const result = voice.endChant();
+  if (result.text) { voice.markCast(result.win); $('transcript').textContent = 'Cast: ' + result.text; }
+  else pending = { ...result, until: performance.now() + 700 };
+  snapshot();
+}
+function stop() {
+  run++; held = false; pending = null; testing = false;
+  sampleSource?.stop(); sampleSource = null; voice.dispose();
+  $('chant').disabled = true; $('status').textContent = 'Stopped';
+}
+async function enable(stream) {
+  voice.dispose(); voice = new Voice();
+  voice.lang = $('language').value; voice.preferLocal = $('engine').value === 'auto'; voice.prewarm = $('warm').checked;
+  voice.onStatus = s => { $('status').textContent = s; };
+  voice.onText = () => { if (held) $('transcript').textContent = voice.chantText(); finish(); };
+  await voice.init(ctx, { stream });
+  $('chant').disabled = false; snapshot();
+}
+$('mic').onclick = async () => {
+  stop(); ctx ||= new AudioContext(); await ctx.resume(); await enable();
+};
+$('stop').onclick = stop;
+$('chant').onpointerdown = e => { e.target.setPointerCapture(e.pointerId); begin(); };
+$('chant').onpointerup = release; $('chant').onpointercancel = release;
+window.addEventListener('keydown', e => { if (e.code === 'KeyF' && !e.repeat && !testing) { e.preventDefault(); begin(); } });
+window.addEventListener('keyup', e => { if (e.code === 'KeyF' && !testing) release(); });
+window.addEventListener('blur', () => { if (!testing) release(); });
+for (const id of ['engine', 'warm', 'language']) $(id).onchange = stop;
+// Generated Windows TTS fixtures, routed to an audio track, never to speakers.
+// Compares real browser recognition with repeatable input; does not use a mic.
+$('sample').onclick = async () => {
+  stop(); testing = true; const token = run;
+  ctx ||= new AudioContext(); await ctx.resume();
+  try {
+    const buffers = await Promise.all(['fireball', 'ice-spear'].map(async name => {
+      const res = await fetch('./voice-fixtures/' + name + '.wav'); if (!res.ok) throw new Error('Missing speech fixture');
+      return ctx.decodeAudioData(await res.arrayBuffer());
+    }));
+    for (const warm of [false, true]) {
+      if (run !== token) return;
+      $('warm').checked = warm;
+      const input = ctx.createMediaStreamDestination(); await enable(input.stream);
+      // Allow capability check and optional warm startup, outside measured casts.
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (run !== token) return;
+      if (!voice.trackSupported) throw new Error('This browser cannot run the audio-track comparison');
+      for (let i = 0; i < buffers.length; i++) {
+        if (run !== token) return;
+        if (warm) {
+          const deadline = performance.now() + 8000;
+          while (voice.session?.audioAt === undefined && performance.now() < deadline && run === token) await new Promise(resolve => setTimeout(resolve, 50));
+          if (run !== token) return;
+        }
+        begin();
+        const source = sampleSource = ctx.createBufferSource(); source.buffer = buffers[i]; source.connect(input);
+        source.start(ctx.currentTime + 0.12);
+        await new Promise(resolve => { source.onended = resolve; }); sampleSource = null; source.disconnect();
+        if (run !== token) return;
+        // Keep the chant open through a fixed silence tail so both engines can
+        // return revisions; firstTextMs still measures the first actual result.
+        await new Promise(resolve => setTimeout(resolve, 1800));
+        if (run !== token) return;
+        release();
+        await new Promise(resolve => setTimeout(resolve, 850)); finish();
+        if (run !== token) return;
+        history.push({ phrase: i ? 'ice spear' : 'fireball', ...voice.diagnostics().recent.at(-1), displayed: $('transcript').textContent });
+        snapshot();
+      }
+      voice.dispose(); input.disconnect();
+    }
+    $('status').textContent = 'Synthetic comparison complete';
+  } catch (e) { $('status').textContent = 'Comparison failed: ' + e.message; }
+  finally {
+    if (run === token) {
+      const status = $('status').textContent;
+      voice.dispose(); held = false; testing = false; $('chant').disabled = true; snapshot();
+      $('status').textContent = status;
+    }
+  }
+};
+let last = performance.now(), visualLevel = 0, infoAt = 0;
+function frame(now) {
+  const dt = Math.max(0, Math.min((now - last) / 1000, 0.05)); last = now; TIME.value += dt;
+  voice.update(dt); if (pending) finish();
+  const mode = $('visual').value, simulate = mode !== 'live';
+  visualLevel = smoothVoiceLevel(visualLevel, simulate ? (mode === 'loud' ? 1 : 0) : voice.level, dt);
+  staff.update(dt, { chanting: held || simulate, charge: 0.3, voiceLevel: visualLevel }); renderer.render(scene, camera);
+  if (now - infoAt > 250) {
+    infoAt = now; $('visual-state').textContent = `Level ${visualLevel.toFixed(2)} · Orb scale ${staff.orb.scale.x.toFixed(2)} · Glow ${staff.crystalMat.emissiveIntensity.toFixed(2)}`;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.addEventListener('pagehide', () => voice.dispose());
+</script>
+</html>

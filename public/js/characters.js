@@ -118,6 +118,7 @@ export class MageModel {
 }
 
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { voiceChargeFeedback } from './voice-feedback.js';
 let _env = null;
 export function initViewEnv(renderer) {
   const pm = new THREE.PMREMGenerator(renderer);
@@ -180,8 +181,9 @@ export class ViewModel {
   }
   set visible(v) { this.group.visible = v; }
   tipWorld(out = new THREE.Vector3()) { return this.crystal.getWorldPosition(out); }
-  update(dt, { speed = 0, chanting = false, charge = 0, grounded = true }) {
+  update(dt, { speed = 0, chanting = false, charge = 0, grounded = true, voiceLevel = 0 }) {
     const t = TIME.value;
+    const voice = voiceChargeFeedback(voiceLevel, chanting);
     this.bob += dt * speed * 1.4;
     this.kick = Math.max(0, this.kick - dt * 3.2); this.flick = Math.max(0, this.flick - dt * 6);
     this.charge += ((chanting ? 1 : 0) - this.charge) * Math.min(1, dt * 8);
@@ -189,14 +191,14 @@ export class ViewModel {
     const sway = Math.sin(t * 1.4) * 0.004;
     this.group.position.set(0.3 - c * 0.12 + Math.cos(this.bob) * 0.012 * b, -0.36 + c * 0.1 + Math.abs(Math.sin(this.bob)) * 0.02 * b + sway - k * 0.03, -0.62 - k * 0.14 - f * 0.06);
     this.group.rotation.set(0.12 + c * 0.25 - k * 0.55 - f * 0.25, -0.1 + c * 0.15, -0.1 - c * 0.12 + Math.sin(t * 2) * 0.01);
-    this.crystal.rotation.y += dt * (1.5 + c * 8);
+    this.crystal.rotation.y += dt * (1.5 + c * 8 + voice.spin);
     this.haloRing.rotation.x = Math.PI / 2 + Math.sin(t * 1.3) * 0.2; this.haloRing.rotation.z += dt * (0.5 + c * 3);
     this.runes.forEach((r, i) => { const a = t * (2 + c * 5) + (i * Math.PI * 2) / 3, R = 0.07 + c * 0.03; r.position.set(Math.cos(a) * R, 0.11 + Math.sin(t * 3 + i) * 0.02, Math.sin(a) * R); r.rotation.y += dt * 4; });
     const orbK = Math.max(c, k);
     this.orb.visible = orbK > 0.03;
-    this.orb.scale.setScalar(orbK * (0.6 + charge * 1.2) * (1 + Math.sin(t * 16) * 0.05));
-    this.crystalMat.emissiveIntensity = 0.7 + c * 1.6 + k * 2.4;
-    this.light.intensity = 0.3 + c * (0.6 + charge * 1.2) + k * 1.5;
+    this.orb.scale.setScalar(orbK * (0.6 + charge * 1.2) * (1 + Math.sin(t * 16) * 0.05) * voice.scale);
+    this.crystalMat.emissiveIntensity = 0.7 + c * 1.6 + k * 2.4 + voice.glow;
+    this.light.intensity = 0.3 + c * (0.6 + charge * 1.2) + k * 1.5 + voice.glow * 0.6;
     if (this.sigil) { this.sigil.target = c; this.sigil.update(dt); }
   }
 }

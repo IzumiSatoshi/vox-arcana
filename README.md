@@ -42,9 +42,13 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
 
 ## How a spell is made
 
-1. **Voice**: each keypress starts an isolated Web Speech recognition session with live interim results. Previous casts and their
-   delayed corrections cannot reappear in a new chant. A mic analyser stays available for loudness; a local parser previews
-   element, form, rank and mana cost live while you speak. Hold the key before speaking; recognition startup depends on the browser.
+1. **Voice**: each chant owns an isolated Web Speech recognition session with live interim results. On browsers supporting
+   audio-track input, the next session prepares against a muted track between casts; pressing the key opens that track.
+   Previous sessions and their delayed corrections cannot reappear in a new chant. Unsupported browsers start on keypress.
+   Installed on-device language packs are preferred, with ordinary browser recognition as fallback. Both preferences can be
+   disabled in Settings. The orb, staff glow and charging particles respond to microphone volume before any text arrives.
+   A local parser previews element, form, rank and mana cost live while you speak. Hold the key before speaking; startup and
+   transcription time still depend on the browser. A lit microphone indicator means audio capture is ready.
 2. **Speculative Jev**: while you are still chanting, each new transcript is sent to Jev (throttled), so when you release,
    the interpretation is usually already there. The cast happens on release with no waiting for Jev or for speech finalization.
    If nothing was recognized yet, release calls `SpeechRecognition.stop()` to request pending words. A grace window of up to
@@ -132,3 +136,19 @@ public/js/hud.js      HUD, spell card, damage numbers
 ```
 
 In the browser console, `VA.test('meteor', 'fire', { power: 1, tier: 1 })` casts a hand-made spec (debug).
+
+## Voice diagnostics
+
+`VA.voiceStats()` returns the last 30 manual chant timings and prints them as a console table. It records no transcript or audio.
+Timings include keypress to recognition start, audio ready, detected sound, first text, sound-to-text, and release-to-cast.
+`readyOnPress` distinguishes a ready session from one still preparing. Sound detection uses an amplitude threshold, so background
+noise can trigger it; this is not an acoustic speech-onset benchmark. History stays in this page's memory and is never uploaded.
+
+Open **http://localhost:8787/voice-lab.html** for capability checks, a microphone test, quiet/loud visual previews and a repeatable
+synthetic speech comparison. The comparison feeds two generated English phrases directly into Web Speech through Web Audio,
+without opening the microphone or playing through speakers. Choose Automatic or Browser service to compare recognition modes.
+Warm runs wait for capture readiness before the keypress; all runs include a 1.8-second silence tail before release. This checks
+startup and transcript completeness, not immediate-release accuracy or human microphone latency. Fixtures were generated with
+Windows Microsoft Zira Desktop at 16 kHz mono. Local language packs are checked but never downloaded automatically.
+
+Run regression tests with `node --test tests/voice.test.js tests/voice-feedback.test.js`.

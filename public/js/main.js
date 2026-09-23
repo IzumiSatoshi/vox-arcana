@@ -10,6 +10,7 @@ import { MagicCircle } from './magicCircle.js';
 import { BotBrain } from './bot.js';
 import { Hud, elChip } from './hud.js';
 import { Voice } from './voice.js';
+import { voiceChargeFeedback } from './voice-feedback.js';
 import { Net } from './net.js';
 import { audio } from './audio.js';
 import { t, setLang, getLang } from './i18n.js';
@@ -22,7 +23,7 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, botJev: true, botVoice: true, handsFree: false, name: '' };
+const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, botJev: true, botVoice: true, handsFree: false, localVoice: true, warmVoice: true, name: '' };
 function loadSettings() {
   let s; try { s = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('voxarcana') || '{}') }; } catch { s = { ...DEFAULTS }; }
   if (!s.lang) s.lang = s.ui === 'ja' ? 'ja-JP' : 'en-US';
@@ -225,6 +226,12 @@ class Game {
   showScreen(id) {
     for (const s of ['menu', 'online', 'settings', 'howto', 'pause']) $(s).classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
+    this.voice.setActive(this.mode !== 'menu' && !this.paused);
+    if (this.paused || this.mode === 'menu') {
+      this.grace = null; this.chanting = false;
+      if (this.player) this.player.chanting = false;
+      audio.chantStop();
+    }
   }
   lock() { $('c').requestPointerLock?.()?.catch?.(() => {}); }
 
@@ -232,13 +239,14 @@ class Game {
   async initVoice() {
     if (this.voiceInit) return; this.voiceInit = true;
     this.voice.lang = this.settings.lang; this.voice.handsFree = this.settings.handsFree;
+    this.voice.preferLocal = this.settings.localVoice; this.voice.prewarm = this.settings.warmVoice;
     this.voice.onText = () => {
       // Dispatch late words from the recognition event, without waiting for a render frame.
       if (!this.grace || this.paused || this.mode === 'menu') return;
       this.resolveVoiceGrace();
     };
     this.voice.onStatus = (s) => {
-      this.hud.micState(s === 'listening');
+      this.hud.micState(s === 'listening' || s === 'ready');
       if (s === 'listening' && this.hintErr) { this.hintErr = false; this.hud.hint('hint.chant'); }
       if (s === 'unsupported') this.hud.hint('hint.noSR');
       else if (s === 'mic-denied' || s === 'error:not-allowed' || s === 'error:audio-capture') this.hud.hint('hint.mic');
@@ -261,6 +269,7 @@ class Game {
     this.chanting = true; this.chantT = 0; p.chanting = true;
     this.spec = { map: new Map(), latest: null, order: 0, lastText: '', lastSend: 0, inflight: 0 };
     this.voice.beginChant();
+    this.chantParticles = 0;
     audio.chantStart(this.lastEl);
     this.hud.chant('', ''); this.hud.preview(null);
   }
@@ -311,7 +320,9 @@ class Game {
     const local = localParse(text);
     const spec = buildSpec(text, local, jev, meta);
     this.previewCost = 0;
-    if (spec.isSpell < 0.65) { this.hud.chant('“' + text + '” ' + t('chant.nomagic'), 'fizzle'); audio.ui('fizzle'); this.hud.preview(null); return; }
+    if (spec.isSpell < 0.65) { this.voice.finishMetric(meta.win, 'no-magic'); this.hud.chant('“' + text + '” ' + t('chant.nomagic'), 'fizzle'); audio.ui('fizzle'); this.hud.preview(null); return; }
+    if (p.canAct()) this.voice.markCast(meta.win);
+    else this.voice.finishMetric(meta.win, 'interrupted');
     this.performCast(spec, true);
   }
   performCast(spec, addToGrimoire) {
@@ -638,6 +649,12 @@ class Game {
     bind('set-botjev', 'botJev', Boolean, 'checked');
     bind('set-botvoice', 'botVoice', Boolean, 'checked');
     bind('set-handsfree', 'handsFree', Boolean, 'checked', () => (this.voice.handsFree = s.handsFree));
+    const voiceOptions = () => {
+      this.voice.preferLocal = s.localVoice; this.voice.prewarm = s.warmVoice;
+      this.voice.cancelChant(); this.voice.prepareNext();
+    };
+    bind('set-localvoice', 'localVoice', Boolean, 'checked', voiceOptions);
+    bind('set-warmvoice', 'warmVoice', Boolean, 'checked', voiceOptions);
     audio.volume = s.vol; audio.musicVolume = s.music;
     this.applyLanguage(s.ui);
   }
@@ -673,9 +690,9 @@ class Game {
     if (this.slowmo > 0) { this.slowmo -= raw; this.timeScale = 0.25; } else this.timeScale += (1 - this.timeScale) * Math.min(1, raw * 6);
     const dt = this.paused && this.mode !== 'online' ? 0 : raw * this.timeScale;
     TIME.value += dt;
+    this.voice.update(raw); // Sample before animating; speech feedback uses real time, including slow motion.
     if (this.mode === 'menu') this.updateMenuCam(raw);
     if (dt > 0) this.tick(dt, raw);
-    this.voice.update();
     audio.updateListener(this.camera);
     const u = this.post.uniforms, p = this.player;
     u.uCA.value = 0.25 + this.fx.shake * 3 + this.hud.hurt * 2 + (p?.frozen > 0 ? 1 : 0);
@@ -746,7 +763,10 @@ class Game {
         this.chantProgress = clamp(this.chantT / 7);
         audio.chantUpdate(this.chantProgress, el);
         const tip = this.viewModel.tipWorld(new THREE.Vector3());
-        if (Math.random() < 0.7) this.fx.element(el, tip, { count: 1, speed: 0.35, size: 0.035 + this.chantProgress * 0.06, life: 0.35 });
+        const response = voiceChargeFeedback(this.voice.level, true);
+        this.chantParticles = (this.chantParticles || 0) + raw * response.particleRate;
+        const motes = Math.floor(this.chantParticles); this.chantParticles -= motes;
+        if (motes) this.fx.element(el, tip, { count: motes, speed: 0.35 + this.voice.level * 0.55, size: (0.035 + this.chantProgress * 0.06) * response.scale, life: 0.35 });
         this.fx.attractors.push({ x: tip.x, y: tip.y, z: tip.z, r2: 1, k: 6, swirl: 2 });
         if (!p.canAct()) { this.voice.cancelChant(); this.chanting = false; p.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
       } else if (this.channel) {
@@ -761,7 +781,7 @@ class Game {
       if (this.grace) this.resolveVoiceGrace();
       this.boltCd -= dt;
       if (this.mouse.lmb) this.fireBolt();
-      this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded });
+      this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded, voiceLevel: this.chanting ? this.voice.level : 0 });
       this.viewModel.group.visible = p.alive;
       if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(); } }
       if (this.mode === 'online') this.sendState(raw);
@@ -795,6 +815,7 @@ class Game {
 window.game = new Game();
 // debug helper: VA.test('meteor', 'fire', {power:1}) casts a hand-made spec from the player
 window.VA = {
+  voiceStats() { const stats = window.game.voice.diagnostics(); console.table(stats.recent); return stats; },
   finalizeSpec, localParse, buildSpec,
   test(shape, element = 'fire', o = {}) {
     const g = window.game, p = g.player; if (!p) return;
