@@ -60,6 +60,7 @@ export class Voice {
     return true;
   }
   probeTrackSupport() {
+    this.trackProbed = true;
     const dest = this.audioCtx.createMediaStreamDestination(), track = dest.stream.getAudioTracks()[0];
     track.stop();
     const probe = new this.SR(); probe.onerror = () => {};
@@ -73,6 +74,10 @@ export class Voice {
   }
   prepareNext() {
     if (!this.want || !this.active || this.win || this.pending || this.session || this.checkingLocal) return;
+    if (this.prewarm && !this.handsFree && this.draining) { this.queuedStart = 'prepared'; return; }
+    // Settings can enable preparation after init. Probe only while idle and
+    // after the old recognizer has ended; never overlap its shared service.
+    if (this.prewarm && !this.trackProbed && !this.draining && this.audioCtx?.state === 'running' && this.source) this.probeTrackSupport();
     if (this.handsFree) this.start();
     else if (this.prewarm && this.trackSupported && this.audioCtx?.state === 'running') this.start(true);
   }

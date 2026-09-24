@@ -1,7 +1,8 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Actual game casting test</title>
 <style>body{background:#111827;color:#eee;font:16px system-ui}button{padding:12px}pre{white-space:pre-wrap}iframe{width:800px;height:420px;border:0}</style>
 <h1>Actual game casting test</h1>
-<p>Runs synthetic speech through the game's recognition, key-release handling and spell spawning. No microphone capture.</p>
+<p>Runs synthetic speech through the game's recognition, key-release handling and spell spawning. No microphone capture. Four casts, released immediately after speech, with 250 ms between resolved casts. Reload before another run.</p>
+<label><input type="checkbox" id="warm" checked> Prepare next recognition immediately after casting</label><br>
 <button id="run">Test immediate release in the game</button>
 <pre id="result">Ready</pre><iframe id="game" src="/"></iframe>
 <script type="module">
@@ -11,26 +12,32 @@ document.getElementById('run').onclick = async () => {
   const g = frame.contentWindow.game;
   if (!g) { output.textContent = 'Game still loading'; return; }
   const results = []; output.textContent = 'Running…';
+  document.getElementById('run').disabled = true;
   try {
     g.lock = () => {}; g.settings.botVoice = false; g.settings.useJev = false;
-    g.settings.lang = 'en-US'; g.settings.localVoice = false; g.settings.warmVoice = false;
+    g.settings.lang = 'en-US'; g.settings.localVoice = false; g.settings.warmVoice = document.getElementById('warm').checked;
     g.audio.init(); const ctx = g.audio.ctx; await ctx.resume();
     const input = ctx.createMediaStreamDestination();
     const init = g.voice.init.bind(g.voice);
     g.voice.init = audioCtx => init(audioCtx, { stream: input.stream });
     g.startMode('practice');
     const buffers = await Promise.all(['fireball','ice-spear'].map(async name => ctx.decodeAudioData(await (await fetch('./voice-fixtures/' + name + '.wav')).arrayBuffer())));
-    for (let i = 0; i < buffers.length; i++) {
-      await wait(1000);
+    await wait(1000);
+    for (let i = 0; i < 4; i++) {
+      const preparedBeforePress = !!g.voice.session?.prepared;
       const mana = g.player.mana;
       g.beginChant();
-      const source = ctx.createBufferSource(); source.buffer = buffers[i]; source.connect(input);
+      const source = ctx.createBufferSource(); source.buffer = buffers[i % buffers.length]; source.connect(input);
       source.start(ctx.currentTime + 0.12);
       await new Promise(resolve => { source.onended = resolve; }); source.disconnect();
       const beforeRelease = g.voice.chantText(); g.endChant();
-      await wait(2500);
-      results.push({ phrase: i ? 'ice spear' : 'fireball', beforeRelease, hud: frame.contentDocument.getElementById('chant-text').textContent,
+      const deadline = performance.now() + 2200;
+      while (g.grace && performance.now() < deadline) await wait(25);
+      results.push({ phrase: i % 2 ? 'ice spear' : 'fireball', preparedBeforePress, beforeRelease, hud: frame.contentDocument.getElementById('chant-text').textContent,
         manaBefore: mana, manaAfter: g.player.mana, metric: g.voice.diagnostics().recent.at(-1) });
+      await wait(250);
+      results.at(-1).nextSessionPrepared = !!g.voice.session?.prepared;
+      results.at(-1).nextSessionReady = g.voice.session?.audioAt !== undefined;
       output.textContent = JSON.stringify(results, null, 2);
     }
     g.voice.dispose(); input.disconnect();

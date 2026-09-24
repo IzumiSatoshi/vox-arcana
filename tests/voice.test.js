@@ -232,3 +232,42 @@ test('supplied audio track sends silence on release while buffered words finish'
   session.rec.result([['ice spear', true]]); assert.equal(v.textOf(res.win), 'ice spear');
   v.finishChant(res.win); v.dispose();
 });
+
+
+test('preparation enabled after microphone initialization probes and starts while idle', async () => {
+  const v = new Voice(); v.SR = TrackRecognition;
+  await v.init(fakeAudio());
+  assert.equal(v.trackProbed, undefined); assert.equal(v.session, null);
+  v.prewarm = true; v.prepareNext();
+  assert.equal(v.trackSupported, true); assert.equal(v.session.prepared, true);
+  assert.equal(v.session.local, false); assert.equal(v.session.input.gain.gain.value, 0);
+  v.dispose();
+});
+
+test('next browser session prepares after asynchronous teardown without another keypress', async () => {
+  const v = new Voice(); v.SR = class extends TrackRecognition { abort() { this.aborted = true; } };
+  v.prewarm = true; await v.init(fakeAudio(), { stream: {} });
+  v.beginChant(); const old = v.rec;
+  old.result([['fireball']]); v.endChant();
+  assert.equal(v.session, null); assert.equal(v.queuedStart, 'prepared');
+  old.onend();
+  const next = v.session;
+  assert.equal(next.prepared, true); assert.equal(next.input.gain.gain.value, 0);
+  assert.equal(next.local, false); assert.notEqual(next.rec, old);
+  old.result([['obsolete fireball', true]]);
+  v.beginChant(); assert.equal(v.session, next); assert.equal(v.chantText(), '');
+  next.rec.result([['ice spear']]); assert.equal(v.endChant().text, 'ice spear');
+  v.dispose();
+});
+
+
+test('enabling preparation during teardown defers the probe until end', async () => {
+  const v = new Voice(); v.SR = class extends TrackRecognition { abort() {} };
+  await v.init(fakeAudio()); v.beginChant(); const old = v.rec;
+  old.result([['fire']]); v.endChant();
+  v.prewarm = true; v.prepareNext();
+  assert.equal(v.trackProbed, undefined); assert.equal(v.queuedStart, 'prepared');
+  old.onend();
+  assert.equal(v.trackProbed, true); assert.equal(v.session.prepared, true);
+  v.dispose();
+});
