@@ -255,7 +255,8 @@ class Game {
     this.voice.onStatus = (s) => {
       this.hud.micState(s === 'listening' || s === 'ready');
       if (s === 'listening' && this.hintErr) { this.hintErr = false; this.hud.hint('hint.chant'); }
-      if (s === 'unsupported') this.hud.hint('hint.noSR');
+      if (s === 'fallback:microphone') this.hud.hint(this.settings.ui === 'ja' ? '通常のマイク認識に切り替えました。もう一度詠唱してください。' : 'Switched to standard microphone recognition. Repeat your chant.');
+      else if (s === 'unsupported') this.hud.hint('hint.noSR');
       else if (s === 'mic-denied' || s === 'error:not-allowed' || s === 'error:audio-capture') this.hud.hint('hint.mic');
       else if (s.startsWith('error:network')) { this.hud.hint('hint.net'); this.hintErr = true; }
     };
