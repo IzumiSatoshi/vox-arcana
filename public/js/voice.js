@@ -13,6 +13,7 @@ export class Voice {
     this.onAuto = null; this.onStatus = null; this.onText = null; this.lastResultAt = 0; this.version = 0;
     this.preferLocal = false; this.prewarm = false; this.localAvailability = 'unchecked';
     this.localByLanguage = new Map(); this.localFailed = new Set();
+    this.preparationFailure = null; this.captureError = null;
     this.trackSupported = false; this.history = []; this.nextId = 0;
   }
   get handsFree() { return this._handsFree; }
@@ -21,7 +22,8 @@ export class Voice {
     this._handsFree = value;
     if (this.want && !this.win && !this.pending) { this.retire(); this.prepareNext(); }
   }
-  get useLocal() { return this.preferLocal && this.localByLanguage.get(this.lang) === 'available' && !this.localFailed.has(this.lang); }
+  get canPrepare() { return this.prewarm && !this.preparationFailure; }
+  get useLocal() { return !this.preparationFailure && this.preferLocal && this.localByLanguage.get(this.lang) === 'available' && !this.localFailed.has(this.lang); }
   async checkLocal() {
     const lang = this.lang;
     if (!this.SR || !('processLocally' in new this.SR()) || typeof this.SR.available !== 'function') {
@@ -53,9 +55,9 @@ export class Voice {
         // An ended audio track MUST synchronously throw InvalidStateError when
         // the start(track) overload is implemented. Older engines may ignore it.
         // Probe only while idle, after capture was explicitly enabled.
-        if ((this.prewarm || this.externalStream) && !this.session && !this.win) this.probeTrackSupport();
+        if ((this.canPrepare || this.externalStream) && !this.session && !this.win) this.probeTrackSupport();
       }
-    } catch { this.level = 0; }
+    } catch (error) { this.level = 0; this.captureError = error.name || 'capture-failed'; }
     this.prepareNext();
     return true;
   }
@@ -74,12 +76,12 @@ export class Voice {
   }
   prepareNext() {
     if (!this.want || !this.active || this.win || this.pending || this.session || this.checkingLocal) return;
-    if (this.prewarm && !this.handsFree && this.draining) { this.queuedStart = 'prepared'; return; }
+    if (this.canPrepare && !this.handsFree && this.draining) { this.queuedStart = 'prepared'; return; }
     // Settings can enable preparation after init. Probe only while idle and
     // after the old recognizer has ended; never overlap its shared service.
-    if (this.prewarm && !this.trackProbed && !this.draining && this.audioCtx?.state === 'running' && this.source) this.probeTrackSupport();
+    if (this.canPrepare && !this.trackProbed && !this.draining && this.audioCtx?.state === 'running' && this.source) this.probeTrackSupport();
     if (this.handsFree) this.start();
-    else if (this.prewarm && this.trackSupported && this.audioCtx?.state === 'running') this.start(true);
+    else if (this.canPrepare && this.trackSupported && this.audioCtx?.state === 'running') this.start(true);
   }
   closeInput(session) {
     if (!session?.input) return;
@@ -117,7 +119,7 @@ export class Voice {
     clearTimeout(this.retry);
     const rec = new this.SR(), chunk = [], win = this.win;
     if (win) { win.chunks.push(chunk); win.ended = false; }
-    const session = this.session = { rec, win, chunk, stopping: false, prepared, local: this.useLocal, lang: this.lang };
+    const session = this.session = { rec, win, chunk, stopping: false, prepared, createdAt: performance.now(), local: this.useLocal, lang: this.lang };
     this.rec = rec;
     rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1; rec.lang = this.lang;
     if ('processLocally' in rec) rec.processLocally = session.local;
@@ -177,13 +179,14 @@ export class Voice {
       if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(e.error)) this.want = false;
     };
     try {
-      if ((this.prewarm || this.externalStream) && this.trackSupported && this.source && this.audioCtx.state === 'running') {
+      if ((this.canPrepare || this.externalStream) && this.trackSupported && this.source && this.audioCtx.state === 'running') {
         const gain = this.audioCtx.createGain(), dest = this.audioCtx.createMediaStreamDestination();
         gain.gain.value = prepared ? 0 : 1;
         this.source.connect(gain); gain.connect(dest);
         session.input = { gain, dest, track: dest.stream.getAudioTracks()[0] };
+        if (win) win.metric.input = 'audio-track';
         rec.start(session.input.track);
-      } else rec.start();
+      } else { if (win) win.metric.input = 'microphone'; rec.start(); }
     } catch (error) {
       const hadInput = !!session.input;
       this.closeInput(session); this.session = null;
@@ -212,7 +215,8 @@ export class Voice {
     const s = this.session;
     if (s?.prepared && s.input && s.lang === this.lang && s.local === this.useLocal && this.audioCtx.state === 'running') {
       s.prepared = false; s.win = this.win; this.win.chunks.push(s.chunk);
-      metric.prepared = true; metric.attempts = 1;
+      metric.prepared = true; metric.attempts = 1; metric.input = 'audio-track';
+      s.claimedAt = now;
       metric.readyOnPress = s.audioAt !== undefined;
       if (this.running) metric.startAt = now;
       if (s.audioAt !== undefined) metric.audioAt = now;
@@ -250,13 +254,46 @@ export class Voice {
   }
   diagnostics() {
     const elapsed = (end, start) => end === undefined || start === undefined ? null : Math.round(Math.max(0, end - start));
-    return { language: this.lang, localAvailability: this.localAvailability, localFailed: this.localFailed.has(this.lang), audioTrack: this.trackSupported,
+    return { preparationFailure: this.preparationFailure, captureError: this.captureError, audioContext: this.audioCtx?.state || null, microphoneLevel: this.level, language: this.lang, localAvailability: this.localAvailability, localFailed: this.localFailed.has(this.lang), audioTrack: this.trackSupported,
       engine: this.session ? (this.session.local ? 'local' : 'browser') : (this.useLocal ? 'local' : 'browser'), prepared: !!this.session?.prepared,
-      recent: this.history.map(m => ({ id: m.id, engine: m.engine, prepared: m.prepared, readyOnPress: m.readyOnPress, outcome: m.outcome, attempts: m.attempts,
+      recent: this.history.map(m => ({ id: m.id, input: m.input || null, fallback: m.fallback || null, engine: m.engine, prepared: m.prepared, readyOnPress: m.readyOnPress, outcome: m.outcome, attempts: m.attempts,
         startMs: elapsed(m.startAt, m.pressedAt), audioReadyMs: elapsed(m.audioAt, m.pressedAt), soundMs: elapsed(m.soundAt, m.pressedAt),
         firstTextMs: elapsed(m.resultAt, m.pressedAt), soundToTextMs: elapsed(m.resultAt, m.soundAt), releaseToCastMs: elapsed(m.castAt, m.releasedAt), error: m.error || null })) };
   }
+  failPreparation(reason) {
+    if (this.preparationFailure || this.externalStream) return;
+    this.preparationFailure = reason;
+    if (this.win) this.win.metric.fallback = reason;
+    // Fail closed for this page lifetime; never repeatedly retry a silent path.
+    // Captured audio cannot be replayed into the direct microphone API.
+    this.retire();
+    if (this.win) this.start();
+    this.onStatus?.('fallback:microphone');
+  }
+  checkPreparationHealth() {
+    const s = this.session;
+    if (!s?.input || this.externalStream || this.preparationFailure) return;
+    const now = performance.now();
+    if (this.audioCtx?.state !== 'running') {
+      this.failPreparation('audio-context-not-running'); return;
+    }
+    if (s.audioAt === undefined && now - (s.claimedAt ?? s.createdAt) >= 4000) {
+      this.failPreparation('audio-track-not-ready'); return;
+    }
+    const win = this.win;
+    if (win && win.metric.soundAt !== undefined && now - win.metric.soundAt >= 4000 && !this.textOf(win)) {
+      this.failPreparation('audio-detected-without-transcript');
+    }
+  }
   finishChant(win) {
+    // A short failed chant can end before the active watchdog runs. Disable the
+    // supplied track for the next chant when it produced no words. This is a
+    // conservative fallback, not proof that the browser or microphone failed.
+    if (win && !win.closed && !this.textOf(win) && win.metric.input === 'audio-track' && !this.externalStream) {
+      win.metric.fallback = win.metric.soundAt === undefined ? 'audio-track-no-transcript' : 'audio-detected-without-transcript';
+      this.preparationFailure = win.metric.fallback;
+      this.onStatus?.('fallback:microphone');
+    }
     if (win) { const recognized = !!this.textOf(win); win.closed = true; this.finishMetric(win, recognized ? 'recognized' : 'empty'); }
     if (this.pending === win) this.pending = null;
     if (this.session?.win === win) this.retire();
@@ -274,6 +311,7 @@ export class Voice {
     this.analyser = null; this.level = 0;
   }
   update(dt = 1 / 60) {
+    this.checkPreparationHealth();
     if (!this.analyser) return;
     this.analyser.getFloatTimeDomainData(this.buf);
     let s = 0; for (let i = 0; i < this.buf.length; i++) s += this.buf[i] * this.buf[i];
