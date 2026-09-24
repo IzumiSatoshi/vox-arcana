@@ -55,7 +55,7 @@ test('old saved defaults migrate once while later explicit opt-ins persist', () 
   const code = main.slice(main.indexOf('const DEFAULTS ='), main.indexOf('const REACTIONS ='));
   const context = vm.createContext({ navigator: { language: 'ja-JP' }, localStorage: { getItem: () => stored, setItem: (key, value) => { stored = value; } } });
   const settings = vm.runInContext(code + '\nloadSettings();', context);
-  assert.equal(settings.localVoice, false); assert.equal(settings.warmVoice, false); assert.equal(settings.lang, 'ja-JP');
+  assert.equal(settings.instantCast, true); assert.equal(settings.localVoice, false); assert.equal(settings.warmVoice, false); assert.equal(settings.lang, 'ja-JP');
   stored = JSON.stringify({ ...settings, localVoice: true });
   assert.equal(vm.runInContext('loadSettings()', context).localVoice, true);
 });

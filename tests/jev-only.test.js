@@ -11,7 +11,7 @@ function setup(ask = async () => ({ok: false})) {
     clamp: n => Math.max(0, Math.min(1,n)), ELEMENT_KEYS: ['arcane','fire','ice'], SHAPE_KEYS: ['orb','spear'], finalizeSpec: x => x,
     localParse: () => { throw new Error('Keyword parser must not run in Jev mode'); },
     buildSpec: () => { throw new Error('Hybrid builder must not run in Jev mode'); },
-    askJev: ask, audio: {chantStart() {}, ui() {}}, t: x => x,
+    performance: {now:()=>1000}, askJev: ask, audio: {chantStart() {}, chantStop() {}, ui() {}}, t: x => x,
   });
   vm.runInContext(builder, context);
   const Game = vm.runInContext(gameClass+'; Game;', context);
@@ -66,4 +66,43 @@ test('negative Jev interpretation of an unfinished fragment does not end recogni
   const {g}=setup();g.spec={map:new Map([['Sum',{ok:true,params:{isSpell:0}}]])};
   assert.equal(g.readyToInterpret('Sum',{chunks:[[{text:'Sum',final:false}]]}),false);
   assert.equal(g.readyToInterpret('Sum',{chunks:[[{text:'Sum',final:true}]]}),true);
+});
+
+
+function startSpec(g) {
+  g.settings.instantCast=true;
+  g.spec={map:new Map(),pending:new Map(),latest:null,latestMagic:null,order:0,lastText:'',lastSend:0,inflight:0};
+  g.chantT=1;g.voice.peak=0.4;
+}
+test('instant mode submits every changed transcript even with several requests in flight', async () => {
+  const calls=[];const {g}=setup(text=>{calls.push(text);return new Promise(()=>{});});startSpec(g);
+  await g.initVoice();g.chanting=true;
+  for(const text of ['a','ab','abc','abcd','abcde']) {g.voice.chantText=()=>text;g.voice.onText();}
+  g.voice.onText();assert.deepEqual(calls,['a','ab','abc','abcd','abcde']);
+});
+test('newest valid magic is chosen by transcript order, not response order', async () => {
+  const replies=[];const {g}=setup(()=>new Promise(r=>replies.push(r)));startSpec(g);
+  g.speculate('first');g.speculate('second');g.speculate('third');
+  replies[1](result);await Promise.resolve();
+  replies[2]({ok:true,params:{isSpell:0}});await Promise.resolve();
+  replies[0](result);await Promise.resolve();
+  assert.equal(g.spec.latestMagic.text,'second');
+});
+test('instant release freezes the newest completed magic and casts once', async () => {
+  const replies=[];const {g}=setup(()=>new Promise(r=>replies.push(r)));startSpec(g);
+  g.speculate('fire');replies[0](result);await Promise.resolve();
+  g.chanting=true;g.voice.rec={};g.voice.chantText=()=> 'fire with ice';
+  g.voice.endChant=()=>({text:'fire with ice',win:{},loudness:0.4});g.voice.finishChant=()=>{};
+  g.endChant();assert.equal(g.cast.length,1);assert.equal(g.cast[0].text,'fire');
+  replies[1]({...result,params:{...result.params,element:'ice'}});await Promise.resolve();
+  assert.equal(g.cast.length,1);assert.equal(g.cast[0].element,'fire');
+});
+test('superseded speculative replies cannot populate another chant', async () => {
+  let reply;const {g}=setup(()=>new Promise(r=>reply=r));startSpec(g);g.speculate('old');
+  startSpec(g);reply(result);await Promise.resolve();assert.equal(g.spec.latestMagic,null);
+});
+test('non-instant mode keeps throttling and exact-text casting', () => {
+  const calls=[];const {g}=setup(t=>{calls.push(t);return new Promise(()=>{});});startSpec(g);g.settings.instantCast=false;
+  g.speculate('one');g.speculate('two');assert.deepEqual(calls,['one']);
+  g.spec.latestMagic={text:'old',j:result};assert.equal(g.bestJev('two'),null);
 });

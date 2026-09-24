@@ -32,7 +32,7 @@ reactions and statuses, and switches voice recognition to `ja-JP`. The rival als
 
 | | |
 |---|---|
-| **Hold F / Right-click** | chant (speak), release to cast (waits for Jev if needed) |
+| **Hold F / Right-click** | chant (speak), release the latest Jev-recognized spell (instant mode defaults on) |
 | **Enter** | type an incantation instead (a channel time scales with its length) |
 | **Left-click** | mana bolt (uses your last element) |
 | WASD / Space (hold to glide) / Shift / E / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
@@ -49,9 +49,11 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    retires its recognizer before preparing a fresh one. No generated audio track is used for microphone gameplay.
    Existing settings migrate once to disable those previously automatic options. The orb, staff glow and charging
    particles respond to microphone volume before any text arrives. Previews use Jev results when enabled, or the
-   keyword parser when Jev is disabled. Hold the key before speaking; startup and transcription time depend on the browser.
-2. **Speculative Jev**: while you chant, each new transcript is sent to Jev (throttled). A recognized spell casts
-   on release when its exact-text Jev interpretation is ready, otherwise it waits for that response. If words are missing or still incomplete,
+   keyword parser when Jev is disabled. STT punctuation is removed before display and interpretation. Hold the key before speaking; startup and transcription time depend on the browser.
+2. **Speculative Jev**: instant cast is enabled by default. Each changed STT transcript goes directly to Jev,
+   without the normal 160 ms throttle or three-request cap. Release casts the newest valid interpretation already
+   received, ordered by transcript revision rather than reply arrival. The preview shows that spell. If no magic is
+   ready, the game waits for interpretation. Disable instant cast to wait for the exact submitted text instead. If words are missing or still incomplete,
    a grace window of up to 1.8 seconds accepts delayed spell words; pressing again cancels it immediately.
    Direct microphone sessions call `SpeechRecognition.stop()` on release to request pending words. Synthetic
    audio-track test sessions receive silence until pending words arrive. Hands-free mode uses continuous final results.

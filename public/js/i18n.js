@@ -1,6 +1,7 @@
 // Tiny i18n layer: English / 日本語
 const DICT = {
   en: {
+    'set.instantcast': 'Instant cast: release the latest spell recognized by Jev',
     'chant.jevwait': 'Jev is interpreting…', 'chant.jeverror': 'Jev could not interpret this chant. Please try again.',
     'title.small': 'A Voice-Cast Duel', 'title.sub': 'Speak, and the world answers. Powered by <b>Jev</b>.',
     'menu.duel': '⚔ Duel the Archmage', 'menu.online': '✦ Online Duel', 'menu.practice': '◎ Training Grounds', 'menu.howto': '❖ Grimoire (How to Cast)', 'menu.settings': '⚙ Settings',
@@ -31,6 +32,7 @@ const DICT = {
     'bot.rival': 'Archmage Rhea', 'bot.hard': 'Sage of Ruin', 'bot.easy': 'Apprentice Lio', 'bot.golem': 'Training Golem',
   },
   ja: {
+    'set.instantcast': '即時発動：Jevが解釈済みの最新の魔法を放つ',
     'chant.jevwait': 'Jevが詠唱を解釈中…', 'chant.jeverror': 'Jevが詠唱を解釈できませんでした。もう一度お試しください。',
     'title.small': '声で詠唱する魔法決闘', 'title.sub': '唱えよ、世界は応える。Powered by <b>Jev</b>',
     'menu.duel': '⚔ 大魔導師と決闘', 'menu.online': '✦ オンライン対戦', 'menu.practice': '◎ 修練場', 'menu.howto': '❖ 魔導書（遊び方）', 'menu.settings': '⚙ 設定',

@@ -24,7 +24,7 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2, name: '' };
+const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, instantCast: true, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2, name: '' };
 function loadSettings() {
   let s;
   try {
@@ -251,9 +251,10 @@ class Game {
     this.voice.lang = this.settings.lang; this.voice.handsFree = this.settings.handsFree;
     this.voice.preferLocal = this.settings.localVoice; this.voice.prewarm = this.settings.warmVoice;
     this.voice.onText = () => {
-      // Dispatch late words from the recognition event, without waiting for a render frame.
-      if (!this.grace || this.paused || this.mode === 'menu') return;
-      this.resolveVoiceGrace();
+      if (this.paused || this.mode === 'menu') return;
+      // Submit directly from recognition events; rendering must not drop revisions.
+      if (this.chanting || this.grace) this.speculate(this.voice.chantText() || this.voice.textOf(this.grace?.win));
+      if (this.grace) this.resolveVoiceGrace();
     };
     this.voice.onStatus = (s) => {
       this.hud.micState(s === 'listening' || s === 'ready');
@@ -274,7 +275,7 @@ class Game {
     this.pendingJevCast = null;
     this.grace = null; // a new chant always wins over a pending empty one
     this.chanting = true; this.chantT = 0; p.chanting = true;
-    this.spec = { map: new Map(), pending: new Map(), latest: null, order: 0, lastText: '', lastSend: 0, inflight: 0 };
+    this.spec = { map: new Map(), pending: new Map(), latest: null, latestMagic: null, order: 0, lastText: '', lastSend: 0, inflight: 0 };
     this.voice.beginChant();
     this.chantParticles = 0;
     audio.chantStart(this.lastEl);
@@ -283,19 +284,23 @@ class Game {
   // speculative Jev: interpret the chant while it is still being spoken
   speculate(text) {
     const S = this.spec;
-    if (!S || !text || !this.settings.useJev) return;
+    if (!S || S.closed || !text || !this.settings.useJev) return;
     const now = performance.now();
-    if (text === S.lastText || now - S.lastSend < 160 || S.inflight >= 3) return;
+    if (text === S.lastText) return;
+    if (!this.settings.instantCast && (now - S.lastSend < 160 || S.inflight >= 3)) return;
     S.lastText = text; S.lastSend = now; S.inflight++;
     const order = ++S.order;
     const promise = askJev(text, { chantSeconds: this.chantT, loudness: this.voice.peak });
     S.pending.set(text, promise);
     promise.then((j) => {
       S.inflight--;
+      if (this.spec !== S || S.closed || this.paused || this.mode === 'menu') return;
       this.noteJev(j);
       if (!j.ok) return;
       S.map.set(text, j);
       if (!S.latest || order > S.latest.order) S.latest = { order, text, j };
+      if (j.params?.isSpell >= 0.65 && (!S.latestMagic || order > S.latestMagic.order)) S.latestMagic = { order, text, j };
+      if (this.grace && this.settings.instantCast) this.resolveVoiceGrace();
     });
   }
   bestJev(text) {
@@ -315,6 +320,12 @@ class Game {
     this.chanting = false; this.player.chanting = false; audio.chantStop();
     if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
     const text = this.voice.chantText();
+    this.speculate(text);
+    const magic = this.settings.useJev && this.settings.instantCast && this.spec?.latestMagic;
+    if (magic) {
+      const res = this.voice.endChant(); this.voice.finishChant(res.win); this.spec.closed = true;
+      void this.castIncantation(magic.text, res, magic.j); return;
+    }
     const ready = this.readyToInterpret(text, this.voice.win);
     const res = this.voice.endChant({ waitForWords: !ready });
     if (ready) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
@@ -324,6 +335,11 @@ class Game {
   resolveVoiceGrace() {
     const g = this.grace;
     if (!g) return;
+    const magic = this.settings.useJev && this.settings.instantCast && this.spec?.latestMagic;
+    if (magic && !g.win?.closed) {
+      this.grace = null; this.voice.finishChant(g.win); this.spec.closed = true;
+      void this.castIncantation(magic.text, g.meta, magic.j); return;
+    }
     const text = this.voice.textOf(g.win);
     const ended = g.win?.ended || performance.now() > g.until;
     if (g.win?.closed || (ended && !text)) {
@@ -336,6 +352,7 @@ class Game {
   }
   async castIncantation(text, meta, jev) {
     const p = this.player; if (!p || !p.alive) return;
+    if (this.spec) this.spec.closed = true;
     let spec;
     if (this.settings.useJev) {
       const token = this.pendingJevCast = {}, mode = this.mode;
@@ -678,6 +695,7 @@ class Game {
     bind('set-vol', 'vol', Number, 'value', () => audio.setVolume(s.vol));
     bind('set-music', 'music', Number, 'value', () => audio.setMusic(s.music));
     bind('set-jev', 'useJev', Boolean, 'checked', () => { this.pendingJevCast = null; this.spec = null; this.previewCost = 0; this.hud.preview(null); });
+    bind('set-instantcast', 'instantCast', Boolean, 'checked');
     bind('set-botjev', 'botJev', Boolean, 'checked');
     bind('set-botvoice', 'botVoice', Boolean, 'checked');
     bind('set-handsfree', 'handsFree', Boolean, 'checked', () => (this.voice.handsFree = s.handsFree));
@@ -797,7 +815,8 @@ class Game {
         const local = text && !this.settings.useJev ? localParse(text) : null;
         this.speculate(text);
         const meta = { chantSeconds: this.chantT, loudness: this.voice.peak };
-        const pv = this.settings.useJev ? buildJevSpec(text, this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
+        const magic = this.settings.instantCast ? this.spec?.latestMagic : null;
+        const pv = this.settings.useJev ? buildJevSpec(magic?.text || text, magic?.j || this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
         this.hud.chant(text || '…', ''); this.hud.preview(pv); this.previewCost = pv?.cost || 0;
         const el = pv?.element || this.lastEl;
         this.hud.setEl(el); this.viewModel.setElement(el); this.viewModel.setTier(pv ? pv.tierInt : 1);

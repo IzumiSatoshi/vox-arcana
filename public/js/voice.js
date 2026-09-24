@@ -3,6 +3,11 @@
 import { clamp } from './util.js';
 import { smoothVoiceLevel } from './voice-feedback.js';
 
+// Normalize STT only; typed incantations keep the user's original punctuation.
+export function cleanTranscript(text) {
+  return text.replace(/['’]/gu, '').replace(/\p{P}+/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
+
 export class Voice {
   constructor() {
     this.SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -118,6 +123,7 @@ export class Voice {
     const session = this.session = { rec, win, chunk, stopping: false, prepared, resultFloor: 0, idleSpeech: false, local: this.useLocal, lang: this.lang };
     this.rec = rec;
     rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1; rec.lang = this.lang;
+    if ('unspokenPunctuation' in rec) rec.unspokenPunctuation = false;
     if ('processLocally' in rec) rec.processLocally = session.local;
     if (win) { win.metric.engine = session.local ? 'local' : 'browser'; win.metric.attempts++; }
     rec.onstart = () => {
@@ -147,7 +153,7 @@ export class Voice {
       chunk.length = Math.max(0, e.results.length - session.resultFloor);
       for (let i = Math.max(e.resultIndex, session.resultFloor); i < e.results.length; i++) {
         const r = e.results[i], j = i - session.resultFloor, previous = chunk[j];
-        chunk[j] = { text: r[0].transcript.trim(), final: r.isFinal };
+        chunk[j] = { text: cleanTranscript(r[0].transcript), final: r.isFinal };
         if (!win && r.isFinal && !previous?.final && this.handsFree && !this.win && !this.pending && chunk[j].text) this.onAuto?.(chunk[j].text);
       }
       this.lastResultAt = performance.now(); this.version++;

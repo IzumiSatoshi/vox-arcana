@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Voice } from '../public/js/voice.js';
+import { Voice, cleanTranscript } from '../public/js/voice.js';
 
 class Recognition {
   start() { this.starts = (this.starts || 0) + 1; this.onstart?.(); }
@@ -296,4 +296,17 @@ test('idle expiry renews ordinary microphone preparation but pause cancels renew
   assert.equal(v.session.prepared, true); assert.notEqual(v.rec, old);
   v.rec.onend(); v.setActive(false); t.mock.timers.tick(500);
   assert.equal(v.session, null); v.dispose();
+});
+
+
+test('STT punctuation is removed without merging separated English words', () => {
+  assert.equal(cleanTranscript("Summon: fire—ice, don't stop!"), 'Summon fire ice dont stop');
+  assert.equal(cleanTranscript('「氷の槍」、ファイアーボール！'), '氷の槍 ファイアーボール');
+  assert.equal(cleanTranscript('…！？'), '');
+});
+test('manual and hands-free callbacks receive punctuation-free STT', async () => {
+  const v = await setup(); v.beginChant(); v.rec.result([['Fire, ice!']]);
+  assert.equal(v.chantText(), 'Fire ice'); v.cancelChant();
+  const seen=[]; v.onAuto=text=>seen.push(text);v.handsFree=true;
+  v.rec.result([['「氷の槍」！',true]]); assert.deepEqual(seen,['氷の槍']);v.dispose();
 });
