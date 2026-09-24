@@ -20,7 +20,7 @@ Then open **http://localhost:8787** in **Chrome or Edge**, which have the Web Sp
 - The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the endpoint and model with
   `JEV_URL` / `JEV_MODEL` or a `jev.config.json` (`{ "url": "...", "model": "...", "keyFile": "..." }`).
 - Set `JEV_DEBUG=1` to print Jev's raw answers in the server console.
-- Without a key or server, the game falls back to a local keyword parser, and the HUD shows `LOCAL` instead of `JEV · 200ms`.
+- With Jev enabled, player casts use only Jev interpretation. A failed request shows an error; it does not cast via keywords. Disable Jev in Settings to use the local keyword parser. Browser offline speech recognition is a separate voice-to-text setting.
 
 ## Language / 言語
 
@@ -32,7 +32,7 @@ reactions and statuses, and switches voice recognition to `ja-JP`. The rival als
 
 | | |
 |---|---|
-| **Hold F / Right-click** | chant (speak), release to cast (instantly) |
+| **Hold F / Right-click** | chant (speak), release to cast (waits for Jev if needed) |
 | **Enter** | type an incantation instead (a channel time scales with its length) |
 | **Left-click** | mana bolt (uses your last element) |
 | WASD / Space (hold to glide) / Shift / E / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
@@ -48,10 +48,10 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    microphone recognition between casts. Idle words are discarded; pause/menu stops listening. Each completed cast
    retires its recognizer before preparing a fresh one. No generated audio track is used for microphone gameplay.
    Existing settings migrate once to disable those previously automatic options. The orb, staff glow and charging
-   particles respond to microphone volume before any text arrives. A local parser previews element, form, rank and
-   mana cost live. Hold the key before speaking; startup and transcription time depend on the browser.
+   particles respond to microphone volume before any text arrives. Previews use Jev results when enabled, or the
+   keyword parser when Jev is disabled. Hold the key before speaking; startup and transcription time depend on the browser.
 2. **Speculative Jev**: while you chant, each new transcript is sent to Jev (throttled). A recognized spell casts
-   immediately on release without waiting for Jev or speech finalization. If words are missing or still incomplete,
+   on release when its exact-text Jev interpretation is ready, otherwise it waits for that response. If words are missing or still incomplete,
    a grace window of up to 1.8 seconds accepts delayed spell words; pressing again cancels it immediately.
    Direct microphone sessions call `SpeechRecognition.stop()` on release to request pending words. Synthetic
    audio-track test sessions receive silence until pending words arrive. Hands-free mode uses continuous final results.
@@ -59,7 +59,8 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    - `choice`: element (10), secondary element, form (14)
    - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos
    - `noul`: is this actually a spell? should it home in?
-4. **Merge** (`public/js/spellbook.js`): Jev ~70–75% plus the local parser, plus bonuses for voice loudness and chant length.
+4. **Player spell parameters** (`public/js/spellbook.js`): Jev alone when enabled, or keywords alone when disabled.
+   Voice loudness and chant length still supply gameplay bonuses; keyword-derived values never override Jev.
    This gives magnitude, a damage multiplier, mana cost, rank I–IX and a generated name.
 5. **Procedural runtime** (`public/js/spells.js`): 22 forms, each driven by those parameters:
    - Attacks: orb · barrage · homing funnels · beam · tornado · meteor · nova · ground spikes · vortex/black hole · chain strike · storm · crescent · field (lingering pool) · wave (advancing surge)

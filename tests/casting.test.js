@@ -22,7 +22,7 @@ async function game() {
     localParse: text => ({ isSpell: /fire|ice/.test(text) ? 1 : 0 }),
   });
   const g = Object.create(Game.prototype); g.voice = new Voice(); await g.voice.init();
-  g.player = { chanting: true }; g.chanting = true; g.cast = [];
+  g.settings = { useJev: false }; g.player = { chanting: true }; g.chanting = true; g.cast = [];
   g.hud = { chant(text) { g.message = text; }, preview() {} };
   g.bestJev = () => null; g.castIncantation = text => g.cast.push(text);
   g.voice.beginChant();

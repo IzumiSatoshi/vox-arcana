@@ -1,6 +1,7 @@
 // Tiny i18n layer: English / 日本語
 const DICT = {
   en: {
+    'chant.jevwait': 'Jev is interpreting…', 'chant.jeverror': 'Jev could not interpret this chant. Please try again.',
     'title.small': 'A Voice-Cast Duel', 'title.sub': 'Speak, and the world answers. Powered by <b>Jev</b>.',
     'menu.duel': '⚔ Duel the Archmage', 'menu.online': '✦ Online Duel', 'menu.practice': '◎ Training Grounds', 'menu.howto': '❖ Grimoire (How to Cast)', 'menu.settings': '⚙ Settings',
     'online.title': 'Online Duel', 'online.desc': "Players in the same room fight free-for-all. Share this server's address with friends on your network.", 'online.name': 'Your name', 'online.room': 'Room', 'online.join': 'Enter the Arena', 'back': 'Back', 'done': 'Done', 'close': 'Close',
@@ -18,8 +19,8 @@ const DICT = {
     'hint.chant': 'Hold <b>F</b> / <b>Right-Click</b> and speak · <b>Enter</b> to type', 'hint.noSR': 'Voice recognition needs Chrome or Edge. <b>Enter</b> to type incantations.', 'hint.mic': 'Microphone blocked. <b>Enter</b> to type incantations.', 'hint.net': 'Speech service unreachable (needs internet). <b>Enter</b> to type.',
     'type.ph': 'Type an incantation, e.g. “Summoning the spirit of fire… ultimate fireball!”',
     'loading': 'Weaving the world…', 'you': 'You',
-    'jev.ready': 'Jev ready', 'jev.nokey': 'Jev: no key (local parser)', 'jev.offline': 'Server offline', 'jev.err': 'Jev error → local',
-    'menu.jevok': 'Jev connected', 'menu.nokey': 'Jev key not found: using the local spell parser.', 'menu.noserver': 'Run "node server.js" and open http://localhost:8787 for Jev + online play.',
+    'jev.ready': 'Jev ready', 'jev.nokey': 'Jev: no key', 'jev.offline': 'Server offline', 'jev.err': 'Jev interpretation failed',
+    'menu.jevok': 'Jev connected', 'menu.nokey': 'Jev key not found. Disable Jev in Settings to use keyword parsing.', 'menu.noserver': 'Run "node server.js" and open http://localhost:8787 for Jev + online play.',
     'chant.silence': '…the words did not come…', 'chant.nomagic': '— no magic answers.', 'chant.broken': 'Your chant was broken!', 'chant.interrupted': 'Your casting was interrupted!', 'chant.echo': 'Echoing', 'chant.nomic': '(no microphone: press Enter to type)',
     'feed.cast': '{who} cast {spell}', 'feed.fell': '{who} fell', 'feed.to': ' to {who}', 'feed.starved': 'Mana-starved! The spell is weakened.', 'feed.enter': '{who} entered the arena.', 'feed.left': '{who} left.', 'feed.joined': 'Joined room {room} · {n} other mage(s) here.',
     'rank': 'Rank', 'mana': 'mana', 'weakened': 'mana-starved, weakened', 'damage': 'damage',
@@ -30,6 +31,7 @@ const DICT = {
     'bot.rival': 'Archmage Rhea', 'bot.hard': 'Sage of Ruin', 'bot.easy': 'Apprentice Lio', 'bot.golem': 'Training Golem',
   },
   ja: {
+    'chant.jevwait': 'Jevが詠唱を解釈中…', 'chant.jeverror': 'Jevが詠唱を解釈できませんでした。もう一度お試しください。',
     'title.small': '声で詠唱する魔法決闘', 'title.sub': '唱えよ、世界は応える。Powered by <b>Jev</b>',
     'menu.duel': '⚔ 大魔導師と決闘', 'menu.online': '✦ オンライン対戦', 'menu.practice': '◎ 修練場', 'menu.howto': '❖ 魔導書（遊び方）', 'menu.settings': '⚙ 設定',
     'online.title': 'オンライン対戦', 'online.desc': '同じルームのプレイヤー全員でバトルロイヤル。同じネットワークの友達にこのサーバーのアドレスを共有しよう。', 'online.name': 'プレイヤー名', 'online.room': 'ルーム', 'online.join': '闘技場へ', 'back': '戻る', 'done': '完了', 'close': '閉じる',
@@ -47,8 +49,8 @@ const DICT = {
     'hint.chant': '<b>F</b> / <b>右クリック</b> 長押しで詠唱 · <b>Enter</b> で文字入力', 'hint.noSR': '音声認識はChrome / Edgeが必要です。<b>Enter</b>で文字詠唱できます。', 'hint.mic': 'マイクがブロックされています。<b>Enter</b>で文字詠唱。', 'hint.net': '音声認識サービスに接続できません。<b>Enter</b>で文字詠唱。',
     'type.ph': '詠唱を入力　例：「炎の精霊よ…究極の火球！」',
     'loading': '世界を紡いでいます…', 'you': 'あなた',
-    'jev.ready': 'Jev 準備完了', 'jev.nokey': 'Jev: キーなし（ローカル解析）', 'jev.offline': 'サーバー未接続', 'jev.err': 'Jevエラー → ローカル',
-    'menu.jevok': 'Jev 接続済み', 'menu.nokey': 'Jevキーが見つかりません：ローカル解析を使用します。', 'menu.noserver': '"node server.js" を実行して http://localhost:8787 を開くとJevとオンライン対戦が使えます。',
+    'jev.ready': 'Jev 準備完了', 'jev.nokey': 'Jev: キーなし', 'jev.offline': 'サーバー未接続', 'jev.err': 'Jevの解釈に失敗',
+    'menu.jevok': 'Jev 接続済み', 'menu.nokey': 'Jevキーが見つかりません。キーワード解析を使うには設定でJevを無効にしてください。', 'menu.noserver': '"node server.js" を実行して http://localhost:8787 を開くとJevとオンライン対戦が使えます。',
     'chant.silence': '…言葉が紡がれなかった…', 'chant.nomagic': '— 魔力は応えなかった。', 'chant.broken': '詠唱が途切れた！', 'chant.interrupted': '詠唱を妨害された！', 'chant.echo': '再詠唱', 'chant.nomic': '（マイクなし：Enterで文字詠唱）',
     'feed.cast': '{who}が{spell}を発動', 'feed.fell': '{who}が倒れた', 'feed.to': '（{who}の魔法）', 'feed.starved': 'マナ不足！魔法が弱体化した。', 'feed.enter': '{who}が闘技場に入った。', 'feed.left': '{who}が去った。', 'feed.joined': 'ルーム {room} に参加 · 他に{n}人の魔導師',
     'rank': '位階', 'mana': 'マナ', 'weakened': 'マナ不足で弱体化', 'damage': 'ダメージ',

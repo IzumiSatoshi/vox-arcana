@@ -15,7 +15,7 @@ import { voiceChargeFeedback } from './voice-feedback.js';
 import { Net } from './net.js';
 import { audio } from './audio.js';
 import { t, setLang, getLang } from './i18n.js';
-import { localParse, askJev, buildSpec, weakenSpec, boltSpec, finalizeSpec } from './spellbook.js';
+import { localParse, askJev, buildSpec, buildJevSpec, weakenSpec, boltSpec, finalizeSpec } from './spellbook.js';
 import { ELEMENTS, SHAPES, ELEMENT_KEYS, elName, shapeName, reactName } from './elements.js';
 import { clamp, rand, TAU } from './util.js';
 
@@ -237,6 +237,7 @@ class Game {
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
     if (this.paused || this.mode === 'menu') {
+      this.pendingJevCast = null;
       this.grace = null; this.chanting = false;
       if (this.player) this.player.chanting = false;
       audio.chantStop();
@@ -261,22 +262,19 @@ class Game {
       else if (s === 'mic-denied' || s === 'error:not-allowed' || s === 'error:audio-capture') this.hud.hint('hint.mic');
       else if (s.startsWith('error:network')) { this.hud.hint('hint.net'); this.hintErr = true; }
     };
-    this.voice.onAuto = async (text) => {
-      if (this.mode === 'menu' || this.paused || this.chanting || this.channel || localParse(text).isSpell < 1) return;
-      const player = this.player;
-      const meta = { chantSeconds: text.length / 12, loudness: this.voice.level };
-      const j = this.settings.useJev && this.jevOnline ? await askJev(text, meta) : null;
-      if (this.player !== player || this.mode === 'menu' || this.paused || this.chanting || this.channel) return;
-      this.castIncantation(text, meta, j);
+    this.voice.onAuto = (text) => {
+      if (this.mode === 'menu' || this.paused || this.chanting || this.channel || (!this.settings.useJev && localParse(text).isSpell < 1)) return;
+      void this.castIncantation(text, { chantSeconds: text.length / 12, loudness: this.voice.level }, null);
     };
     await this.voice.init(audio.ctx);
   }
   beginChant() {
     const p = this.player;
     if (!p || !p.canAct() || this.chanting || this.channel || this.paused) return;
+    this.pendingJevCast = null;
     this.grace = null; // a new chant always wins over a pending empty one
     this.chanting = true; this.chantT = 0; p.chanting = true;
-    this.spec = { map: new Map(), latest: null, order: 0, lastText: '', lastSend: 0, inflight: 0 };
+    this.spec = { map: new Map(), pending: new Map(), latest: null, order: 0, lastText: '', lastSend: 0, inflight: 0 };
     this.voice.beginChant();
     this.chantParticles = 0;
     audio.chantStart(this.lastEl);
@@ -285,12 +283,14 @@ class Game {
   // speculative Jev: interpret the chant while it is still being spoken
   speculate(text) {
     const S = this.spec;
-    if (!S || !text || !this.settings.useJev || !this.jevOnline) return;
+    if (!S || !text || !this.settings.useJev) return;
     const now = performance.now();
     if (text === S.lastText || now - S.lastSend < 160 || S.inflight >= 3) return;
     S.lastText = text; S.lastSend = now; S.inflight++;
     const order = ++S.order;
-    askJev(text, { chantSeconds: this.chantT, loudness: this.voice.peak }).then((j) => {
+    const promise = askJev(text, { chantSeconds: this.chantT, loudness: this.voice.peak });
+    S.pending.set(text, promise);
+    promise.then((j) => {
       S.inflight--;
       this.noteJev(j);
       if (!j.ok) return;
@@ -301,14 +301,21 @@ class Game {
   bestJev(text) {
     const S = this.spec; if (!S) return null;
     if (S.map.has(text)) return S.map.get(text);
-    return S.latest ? { ...S.latest.j, partial: true } : null;
+    return null; // Never apply an interpretation of different words.
+  }
+  readyToInterpret(text, win) {
+    if (!text) return false;
+    if (!this.settings.useJev) return localParse(text).isSpell >= 0.65;
+    const parts = win?.chunks?.flat().filter(p => p.text) || [];
+    const j = this.bestJev(text);
+    return (j?.ok && j.params?.isSpell >= 0.65) || (parts.length > 0 && parts.every(p => p.final));
   }
   endChant() {
     if (!this.chanting) return;
     this.chanting = false; this.player.chanting = false; audio.chantStop();
     if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
     const text = this.voice.chantText();
-    const ready = !!text && localParse(text).isSpell >= 0.65;
+    const ready = this.readyToInterpret(text, this.voice.win);
     const res = this.voice.endChant({ waitForWords: !ready });
     if (ready) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
     // Missing or incomplete words: allow delayed spell words (a new press cancels instantly).
@@ -322,15 +329,26 @@ class Game {
     if (g.win?.closed || (ended && !text)) {
       this.voice.finishChant(g.win); this.grace = null;
       this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
-    } else if (text && (localParse(text).isSpell >= 0.65 || ended)) {
+    } else if (text && (this.readyToInterpret(text, g.win) || ended)) {
       this.grace = null; this.voice.finishChant(g.win);
       this.castIncantation(text, g.meta, this.bestJev(text));
     }
   }
-  castIncantation(text, meta, jev) {
+  async castIncantation(text, meta, jev) {
     const p = this.player; if (!p || !p.alive) return;
-    const local = localParse(text);
-    const spec = buildSpec(text, local, jev, meta);
+    let spec;
+    if (this.settings.useJev) {
+      const token = this.pendingJevCast = {}, mode = this.mode;
+      this.previewCost = 0; this.hud.preview(null);
+      this.hud.chant(t('chant.jevwait'), '');
+      const j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, meta));
+      if (this.pendingJevCast !== token || this.player !== p || !p.alive || this.paused || this.mode !== mode || this.mode === 'menu' || !this.settings.useJev) return;
+      this.pendingJevCast = null; this.noteJev(j);
+      spec = buildJevSpec(text, j, meta);
+      if (!spec) {
+        this.voice.finishMetric(meta.win, 'jev-error'); this.hud.chant(t('chant.jeverror'), 'fizzle'); audio.ui('fizzle'); return;
+      }
+    } else spec = buildSpec(text, localParse(text), null, meta);
     this.previewCost = 0;
     if (spec.isSpell < 0.65) { this.voice.finishMetric(meta.win, 'no-magic'); this.hud.chant('“' + text + '” ' + t('chant.nomagic'), 'fizzle'); audio.ui('fizzle'); this.hud.preview(null); return; }
     if (p.canAct()) this.voice.markCast(meta.win);
@@ -361,9 +379,11 @@ class Game {
     const units = /[぀-ヿ一-龯]/.test(text) ? text.length / 3 : text.trim().split(/\s+/).length;
     const dur = Math.min(3.5, 0.3 + units * 0.16);
     const ch = (this.channel = { t: 0, dur, text, typed: true, jev: null });
-    if (this.settings.useJev && this.jevOnline) askJev(text, { chantSeconds: dur, loudness: 0.4 }).then((j) => { this.noteJev(j); if (j.ok) ch.jev = j; });
-    audio.chantStart(localParse(text).element);
-    const pv = finalizeSpec({ ...localParse(text), text }); this.hud.preview(pv); this.previewCost = pv.cost; this.hud.chant('“' + text + '”', '');
+    this.pendingJevCast = null;
+    if (this.settings.useJev) ch.jev = askJev(text, { chantSeconds: dur, loudness: 0.4 });
+    audio.chantStart(this.settings.useJev ? 'arcane' : localParse(text).element);
+    const pv = this.settings.useJev ? null : finalizeSpec({ ...localParse(text), text });
+    this.hud.preview(pv); this.previewCost = pv?.cost || 0; this.hud.chant('“' + text + '”', '');
   }
   fireBolt() {
     const p = this.player;
@@ -657,7 +677,7 @@ class Game {
     bind('set-sens', 'sens', Number);
     bind('set-vol', 'vol', Number, 'value', () => audio.setVolume(s.vol));
     bind('set-music', 'music', Number, 'value', () => audio.setMusic(s.music));
-    bind('set-jev', 'useJev', Boolean, 'checked');
+    bind('set-jev', 'useJev', Boolean, 'checked', () => { this.pendingJevCast = null; this.spec = null; this.previewCost = 0; this.hud.preview(null); });
     bind('set-botjev', 'botJev', Boolean, 'checked');
     bind('set-botvoice', 'botVoice', Boolean, 'checked');
     bind('set-handsfree', 'handsFree', Boolean, 'checked', () => (this.voice.handsFree = s.handsFree));
@@ -774,9 +794,10 @@ class Game {
       if (this.chanting) {
         this.chantT += dt;
         const text = this.voice.chantText();
-        const local = text ? localParse(text) : null;
+        const local = text && !this.settings.useJev ? localParse(text) : null;
         this.speculate(text);
-        const pv = local ? buildSpec(text, local, this.bestJev(text), { chantSeconds: this.chantT, loudness: this.voice.peak }) : null;
+        const meta = { chantSeconds: this.chantT, loudness: this.voice.peak };
+        const pv = this.settings.useJev ? buildJevSpec(text, this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
         this.hud.chant(text || '…', ''); this.hud.preview(pv); this.previewCost = pv?.cost || 0;
         const el = pv?.element || this.lastEl;
         this.hud.setEl(el); this.viewModel.setElement(el); this.viewModel.setTier(pv ? pv.tierInt : 1);

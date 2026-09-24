@@ -126,6 +126,27 @@ export async function askJev(text, meta) {
   }
 }
 
+// Jev-only interpretation: neutral defaults, never keyword-derived values.
+export function buildJevSpec(text, jev, meta = {}) {
+  if (!jev?.ok || !jev.params || jev.partial) return null;
+  const J = jev.params;
+  const number = (key, fallback = 0.5) => Number.isFinite(J[key]) ? clamp(J[key]) : fallback;
+  const loud = clamp(meta.loudness ?? 0.4), chant = meta.chantSeconds || 0;
+  return finalizeSpec({
+    text, element: ELEMENT_KEYS.includes(J.element) ? J.element : 'arcane',
+    element2: ELEMENT_KEYS.includes(J.element2) && J.element2 !== J.element ? J.element2 : null,
+    shape: SHAPE_KEYS.includes(J.shape) ? J.shape : 'orb',
+    ...Object.fromEntries(['speed', 'size', 'temperature', 'weight', 'sharpness', 'count', 'duration', 'chaos', 'homing', 'height', 'width'].map(k => [k, number(k)])),
+    power: clamp(number('power') + (loud - 0.4) * 0.15 + Math.min(chant, 8) * 0.012),
+    tier: clamp(number('tier') + Math.min(chant, 10) * 0.01),
+    density: Number.isFinite(J.density) ? clamp(J.density) : null,
+    luminosity: Number.isFinite(J.luminosity) ? clamp(J.luminosity) : null,
+    ...Object.fromEntries(['trajectory', 'pattern', 'payload', 'morph', 'construct', 'substance'].map(k => [k, J[k]])),
+    isSpell: number('isSpell', 0), loudness: loud, chantSeconds: chant,
+    source: 'jev', latency: jev.latency, rtt: jev.rtt, cached: !!jev.cached, partial: false,
+  });
+}
+
 // Merge local + Jev + voice metrics into the final procedural spec.
 export function buildSpec(text, local, jev, meta = {}) {
   const J = jev && jev.ok ? jev.params : null;
