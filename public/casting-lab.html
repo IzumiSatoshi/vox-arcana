@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Actual game casting test</title>
 <style>body{background:#111827;color:#eee;font:16px system-ui}button{padding:12px}pre{white-space:pre-wrap}iframe{width:800px;height:420px;border:0}</style>
 <h1>Actual game casting test</h1>
-<p>Runs synthetic speech through the game's recognition, key-release handling and spell spawning. No microphone capture. Four casts, released immediately after speech, with 250 ms between resolved casts. Reload before another run.</p>
+<p>Runs synthetic speech through the game's recognition, key-release handling and spell spawning. No microphone capture. This injected-track test does not validate native microphone preparation. Four casts, released immediately after speech, with 250 ms between resolved casts. Reload before another run.</p>
 <label><input type="checkbox" id="warm" checked> Prepare next recognition immediately after casting</label><br>
 <button id="run">Test immediate release in the game</button>
 <pre id="result">Ready</pre><iframe id="game" src="/"></iframe>

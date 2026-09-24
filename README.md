@@ -44,15 +44,17 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
 
 1. **Voice**: each chant owns an isolated Web Speech recognition session with live interim results. Normal browser
    microphone recognition is the default. Previous sessions and delayed corrections cannot reappear in a new chant.
-   Installed offline recognition and preparation through an audio track are experimental opt-ins in Settings.
+   Offline recognition and next-session preparation are separate opt-ins in Settings. Preparation now starts ordinary
+   microphone recognition between casts. Idle words are discarded; pause/menu stops listening. Each completed cast
+   retires its recognizer before preparing a fresh one. No generated audio track is used for microphone gameplay.
    Existing settings migrate once to disable those previously automatic options. The orb, staff glow and charging
    particles respond to microphone volume before any text arrives. A local parser previews element, form, rank and
    mana cost live. Hold the key before speaking; startup and transcription time depend on the browser.
 2. **Speculative Jev**: while you chant, each new transcript is sent to Jev (throttled). A recognized spell casts
    immediately on release without waiting for Jev or speech finalization. If words are missing or still incomplete,
    a grace window of up to 1.8 seconds accepts delayed spell words; pressing again cancels it immediately.
-   Direct microphone sessions call `SpeechRecognition.stop()` on release to request pending words. Experimental
-   audio-track sessions receive silence until pending words arrive. Hands-free mode uses continuous final results.
+   Direct microphone sessions call `SpeechRecognition.stop()` on release to request pending words. Synthetic
+   audio-track test sessions receive silence until pending words arrive. Hands-free mode uses continuous final results.
 3. **Jev** (`/api/spell` → `POST https://api.typesafe.ai/v1/systemone`): one request with typed questions:
    - `choice`: element (10), secondary element, form (14)
    - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos

@@ -160,10 +160,10 @@ test('pause closes prepared audio and prevents restart', async () => {
   old.rec.onend(); v.prepareNext(); assert.equal(v.session, null);
   v.setActive(true); assert.equal(v.session.prepared, true); v.dispose();
 });
-test('audio track failure falls back to direct microphone recognition', async () => {
-  const v = await preparedVoice(); v.beginChant(); v.rec.onerror({ error: 'audio-capture' });
-  assert.equal(v.trackSupported, false); assert.equal(v.rec.input, undefined);
-  v.rec.result([['ice']]); assert.equal(v.endChant().text, 'ice'); v.dispose();
+test('injected track failure reports an error without opening the microphone', async () => {
+  const v = await preparedVoice(); v.beginChant(); const rec = v.rec;
+  rec.onerror({ error: 'audio-capture' });
+  assert.equal(v.want, false); assert.equal(v.rec, rec); assert.ok(rec.input); v.dispose();
 });
 test('timing records separate ready, sound, first text, and release-to-cast latency', async t => {
   let now = 100; t.mock.method(performance, 'now', () => now);
@@ -234,14 +234,11 @@ test('supplied audio track sends silence on release while buffered words finish'
 });
 
 
-test('preparation enabled after microphone initialization probes and starts while idle', async () => {
-  const v = new Voice(); v.SR = TrackRecognition;
-  await v.init(fakeAudio());
-  assert.equal(v.trackProbed, undefined); assert.equal(v.session, null);
+test('preparation enabled after microphone initialization uses normal capture', async () => {
+  const v = new Voice(); v.SR = TrackRecognition; await v.init(fakeAudio());
   v.prewarm = true; v.prepareNext();
-  assert.equal(v.trackSupported, true); assert.equal(v.session.prepared, true);
-  assert.equal(v.session.local, false); assert.equal(v.session.input.gain.gain.value, 0);
-  v.dispose();
+  assert.equal(v.trackProbed, undefined); assert.equal(v.session.prepared, true);
+  assert.equal(v.rec.input, undefined); v.dispose();
 });
 
 test('next browser session prepares after asynchronous teardown without another keypress', async () => {
@@ -261,67 +258,42 @@ test('next browser session prepares after asynchronous teardown without another 
 });
 
 
-test('enabling preparation during teardown defers the probe until end', async () => {
+test('enabling microphone preparation during teardown waits until end', async () => {
   const v = new Voice(); v.SR = class extends TrackRecognition { abort() {} };
   await v.init(fakeAudio()); v.beginChant(); const old = v.rec;
   old.result([['fire']]); v.endChant();
   v.prewarm = true; v.prepareNext();
   assert.equal(v.trackProbed, undefined); assert.equal(v.queuedStart, 'prepared');
   old.onend();
-  assert.equal(v.trackProbed, true); assert.equal(v.session.prepared, true);
+  assert.equal(v.trackProbed, undefined); assert.equal(v.session.prepared, true);
   v.dispose();
 });
 
 
-async function microphonePreparedVoice() {
-  const v = new Voice(); v.SR = TrackRecognition; v.prewarm = true;
-  await v.init(fakeAudio()); return v;
-}
-test('audible microphone with no transcript falls back once and ignores stale track results', async t => {
-  let now = 100; t.mock.method(performance, 'now', () => now);
-  const v = await microphonePreparedVoice(); v.beginChant(); v.update();
-  const old = v.rec;
-  now = 4099; v.update(); assert.equal(v.rec, old);
-  now = 4100; v.update();
-  assert.equal(v.preparationFailure, 'audio-detected-without-transcript');
-  assert.equal(v.rec.input, undefined); assert.notEqual(v.rec, old);
-  old.result([['stale fireball']]); assert.equal(v.chantText(), '');
-  v.rec.result([['ice spear']]); assert.equal(v.endChant().text, 'ice spear');
-  assert.equal(v.session, null); v.beginChant(); assert.equal(v.rec.input, undefined);
-  v.dispose();
+test('prepared microphone is reused without a Web Audio track', async () => {
+  const v = await setup(); v.prewarm = true; v.prepareNext(); const rec = v.rec;
+  rec.onaudiostart(); v.beginChant();
+  assert.equal(v.rec, rec); assert.equal(v.win.metric.readyOnPress, true);
+  rec.result([['fireball']]); v.endChant();
+  assert.equal(v.session.prepared, true); assert.notEqual(v.rec, rec); v.dispose();
 });
-test('short empty track chant falls back for the next press after the grace window', async () => {
-  const v = await microphonePreparedVoice(); v.beginChant(); v.update();
-  const res = v.endChant(); assert.equal(v.preparationFailure, null);
-  v.finishChant(res.win);
-  assert.equal(v.preparationFailure, 'audio-detected-without-transcript');
-  v.beginChant(); assert.equal(v.rec.input, undefined); v.dispose();
+test('idle final results and their indices are excluded from the next chant', async () => {
+  const v = await setup(); v.prewarm = true; v.prepareNext(); const rec = v.rec;
+  rec.result([['background conversation', true]]);
+  v.beginChant(); rec.result([['background conversation', true], ['ice spear']], 1);
+  assert.equal(v.chantText(), 'ice spear'); v.dispose();
 });
-test('a ready silent session and a recognized chant do not trigger no-text fallback', async t => {
-  let now = 100; t.mock.method(performance, 'now', () => now);
-  const v = await microphonePreparedVoice(); now = 10000; v.update();
-  assert.equal(v.preparationFailure, null);
-  v.beginChant(); v.update(); v.rec.result([['ice']]); now += 5000; v.update();
-  assert.equal(v.preparationFailure, null); v.dispose();
+test('unfinished idle speech gets a fresh session so delayed corrections cannot leak', async () => {
+  const v = await setup(); v.prewarm = true; v.prepareNext(); const old = v.rec;
+  old.onspeechstart(); old.result([['old fire']]);
+  v.beginChant(); assert.notEqual(v.rec, old);
+  old.result([['old fireball', true]]); assert.equal(v.chantText(), ''); v.dispose();
 });
-test('missing audio-ready event disables preparation before the next press', async t => {
-  let now = 100; t.mock.method(performance, 'now', () => now);
-  const v = await microphonePreparedVoice(); delete v.session.audioAt;
-  now = 4100; v.update();
-  assert.equal(v.preparationFailure, 'audio-track-not-ready'); assert.equal(v.session, null);
-  v.beginChant(); assert.equal(v.rec.input, undefined); v.dispose();
-});
-test('suspended track context falls back while synthetic input never opens a real microphone', async () => {
-  const v = await microphonePreparedVoice(); v.beginChant(); v.audioCtx.state = 'suspended'; v.update();
-  assert.equal(v.preparationFailure, 'audio-context-not-running'); assert.equal(v.rec.input, undefined); v.dispose();
-  const injected = await preparedVoice(); injected.beginChant(); injected.audioCtx.state = 'suspended'; injected.update();
-  assert.equal(injected.preparationFailure, null); assert.ok(injected.rec.input); injected.dispose();
-});
-
-
-test('empty supplied-track cast also recovers when the microphone meter saw no sound', async () => {
-  const v = await microphonePreparedVoice(); v.beginChant();
-  const res = v.endChant(); v.finishChant(res.win);
-  assert.equal(v.preparationFailure, 'audio-track-no-transcript');
-  v.beginChant(); assert.equal(v.rec.input, undefined); v.dispose();
+test('idle expiry renews ordinary microphone preparation but pause cancels renewal', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const v = await setup(); v.prewarm = true; v.prepareNext(); const old = v.rec;
+  old.onend(); t.mock.timers.tick(250);
+  assert.equal(v.session.prepared, true); assert.notEqual(v.rec, old);
+  v.rec.onend(); v.setActive(false); t.mock.timers.tick(500);
+  assert.equal(v.session, null); v.dispose();
 });

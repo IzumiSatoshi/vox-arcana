@@ -1,5 +1,5 @@
-// Each cast owns its Web Speech results. Supported browsers can prepare a
-// recognizer against a silent Web Audio track, opening it only on keypress.
+// Each cast owns its Web Speech results. Preparation keeps ordinary microphone
+// recognition active between casts; idle results never belong to a chant.
 import { clamp } from './util.js';
 import { smoothVoiceLevel } from './voice-feedback.js';
 
@@ -13,7 +13,6 @@ export class Voice {
     this.onAuto = null; this.onStatus = null; this.onText = null; this.lastResultAt = 0; this.version = 0;
     this.preferLocal = false; this.prewarm = false; this.localAvailability = 'unchecked';
     this.localByLanguage = new Map(); this.localFailed = new Set();
-    this.preparationFailure = null; this.captureError = null;
     this.trackSupported = false; this.history = []; this.nextId = 0;
   }
   get handsFree() { return this._handsFree; }
@@ -22,8 +21,7 @@ export class Voice {
     this._handsFree = value;
     if (this.want && !this.win && !this.pending) { this.retire(); this.prepareNext(); }
   }
-  get canPrepare() { return this.prewarm && !this.preparationFailure; }
-  get useLocal() { return !this.preparationFailure && this.preferLocal && this.localByLanguage.get(this.lang) === 'available' && !this.localFailed.has(this.lang); }
+  get useLocal() { return this.preferLocal && this.localByLanguage.get(this.lang) === 'available' && !this.localFailed.has(this.lang); }
   async checkLocal() {
     const lang = this.lang;
     if (!this.SR || !('processLocally' in new this.SR()) || typeof this.SR.available !== 'function') {
@@ -55,9 +53,9 @@ export class Voice {
         // An ended audio track MUST synchronously throw InvalidStateError when
         // the start(track) overload is implemented. Older engines may ignore it.
         // Probe only while idle, after capture was explicitly enabled.
-        if ((this.canPrepare || this.externalStream) && !this.session && !this.win) this.probeTrackSupport();
+        if (this.externalStream && !this.session && !this.win) this.probeTrackSupport();
       }
-    } catch (error) { this.level = 0; this.captureError = error.name || 'capture-failed'; }
+    } catch { this.level = 0; }
     this.prepareNext();
     return true;
   }
@@ -76,13 +74,11 @@ export class Voice {
   }
   prepareNext() {
     if (!this.want || !this.active || this.win || this.pending || this.session || this.checkingLocal) return;
-    if (this.canPrepare && !this.handsFree && this.draining) { this.queuedStart = 'prepared'; return; }
-    // Settings can enable preparation after init. Probe only while idle and
-    // after the old recognizer has ended; never overlap its shared service.
-    if (this.canPrepare && !this.trackProbed && !this.draining && this.audioCtx?.state === 'running' && this.source) this.probeTrackSupport();
+    if (this.prewarm && !this.handsFree && this.draining) { this.queuedStart = 'prepared'; return; }
     if (this.handsFree) this.start();
-    else if (this.canPrepare && this.trackSupported && this.audioCtx?.state === 'running') this.start(true);
+    else if (this.prewarm && (!this.externalStream || this.trackSupported)) this.start(true);
   }
+
   closeInput(session) {
     if (!session?.input) return;
     const { gain, dest, track } = session.input;
@@ -119,7 +115,7 @@ export class Voice {
     clearTimeout(this.retry);
     const rec = new this.SR(), chunk = [], win = this.win;
     if (win) { win.chunks.push(chunk); win.ended = false; }
-    const session = this.session = { rec, win, chunk, stopping: false, prepared, createdAt: performance.now(), local: this.useLocal, lang: this.lang };
+    const session = this.session = { rec, win, chunk, stopping: false, prepared, resultFloor: 0, idleSpeech: false, local: this.useLocal, lang: this.lang };
     this.rec = rec;
     rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1; rec.lang = this.lang;
     if ('processLocally' in rec) rec.processLocally = session.local;
@@ -135,17 +131,24 @@ export class Voice {
       if (session.win) session.win.metric.audioAt ??= session.audioAt;
       this.onStatus?.(session.prepared ? 'ready' : 'listening');
     };
+    rec.onspeechstart = () => {
+      if (this.session === session && session.prepared) session.idleSpeech = true;
+    };
     rec.onresult = (e) => {
       const win = session.win;
       if (this.session !== session || win?.closed) return;
-      // An idle gated session should hear silence. If an engine emits words,
-      // discard it instead of allowing that result into the next cast.
-      if (session.prepared) { this.retire(); return; }
-      chunk.length = e.results.length;
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i], previous = chunk[i];
-        chunk[i] = { text: r[0].transcript.trim(), final: r.isFinal };
-        if (!win && r.isFinal && !previous?.final && this.handsFree && !this.win && !this.pending && chunk[i].text) this.onAuto?.(chunk[i].text);
+      if (session.prepared) {
+        if (session.input) { this.retire(); return; } // Injected test audio should be silent.
+        // Remember only the consumed indices, never idle conversation text.
+        session.resultFloor = e.results.length;
+        session.idleSpeech = e.results.length > 0 && !e.results[e.results.length - 1].isFinal;
+        return;
+      }
+      chunk.length = Math.max(0, e.results.length - session.resultFloor);
+      for (let i = Math.max(e.resultIndex, session.resultFloor); i < e.results.length; i++) {
+        const r = e.results[i], j = i - session.resultFloor, previous = chunk[j];
+        chunk[j] = { text: r[0].transcript.trim(), final: r.isFinal };
+        if (!win && r.isFinal && !previous?.final && this.handsFree && !this.win && !this.pending && chunk[j].text) this.onAuto?.(chunk[j].text);
       }
       this.lastResultAt = performance.now(); this.version++;
       if (win && this.textOf(win)) win.metric.resultAt ??= this.lastResultAt;
@@ -161,16 +164,18 @@ export class Voice {
       if (win) win.ended = true;
       if (this.want && this.active && !session.stopping && (this.win || this.handsFree)) {
         this.retry = setTimeout(() => this.start(), this.error ? 300 : 0);
-      } else this.onStatus?.('idle'); // Idle warm sessions may expire; do not loop on silence.
+      } else {
+        this.onStatus?.('idle');
+        if (session.prepared && this.want && this.active && this.prewarm) this.retry = setTimeout(() => this.prepareNext(), this.error ? 1000 : 250);
+      }
     };
     rec.onerror = (e) => {
       if (this.session !== session || e.error === 'no-speech' || e.error === 'aborted') return;
       this.error = e.error;
       if (session.win) session.win.metric.error = e.error;
-      // A local service or audio-track failure must not disable the ordinary API.
-      if ((session.local && ['language-not-supported', 'service-not-allowed', 'network'].includes(e.error)) || (session.input && e.error === 'audio-capture')) {
+      // Retry local service errors with the browser-selected engine.
+      if (session.local && ['language-not-supported', 'service-not-allowed', 'network'].includes(e.error)) {
         if (session.local) this.localFailed.add(session.lang);
-        if (e.error === 'audio-capture') this.trackSupported = false;
         this.retire();
         if (this.win || this.handsFree) this.start(); else this.prepareNext();
         return;
@@ -179,20 +184,21 @@ export class Voice {
       if (['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'].includes(e.error)) this.want = false;
     };
     try {
-      if ((this.canPrepare || this.externalStream) && this.trackSupported && this.source && this.audioCtx.state === 'running') {
+      if (this.externalStream && this.trackSupported && this.source && this.audioCtx.state === 'running') {
         const gain = this.audioCtx.createGain(), dest = this.audioCtx.createMediaStreamDestination();
         gain.gain.value = prepared ? 0 : 1;
         this.source.connect(gain); gain.connect(dest);
         session.input = { gain, dest, track: dest.stream.getAudioTracks()[0] };
-        if (win) win.metric.input = 'audio-track';
         rec.start(session.input.track);
-      } else { if (win) win.metric.input = 'microphone'; rec.start(); }
+      } else if (this.externalStream) {
+        throw new DOMException('Audio-track input is unavailable', 'NotSupportedError');
+      } else rec.start();
     } catch (error) {
       const hadInput = !!session.input;
       this.closeInput(session); this.session = null;
       if (hadInput) {
         this.trackSupported = false;
-        if (this.win || this.handsFree) this.retry = setTimeout(() => this.start(), 50);
+        this.want = false; this.error = error.name; this.onStatus?.('error:' + error.name);
       } else if (error.name === 'InvalidStateError' && (win?.metric.attempts || 0) < 4) this.retry = setTimeout(() => this.start(), 50);
       else { this.want = false; this.error = error.name; this.onStatus?.('error:' + error.name); }
     }
@@ -213,14 +219,13 @@ export class Voice {
     this.win = { chunks: [], closed: false, ended: false, t0: now, metric };
     this.peak = 0;
     const s = this.session;
-    if (s?.prepared && s.input && s.lang === this.lang && s.local === this.useLocal && this.audioCtx.state === 'running') {
+    if (s?.prepared && !s.idleSpeech && s.lang === this.lang && s.local === this.useLocal && (!s.input || this.audioCtx.state === 'running')) {
       s.prepared = false; s.win = this.win; this.win.chunks.push(s.chunk);
-      metric.prepared = true; metric.attempts = 1; metric.input = 'audio-track';
-      s.claimedAt = now;
+      metric.prepared = true; metric.attempts = 1;
       metric.readyOnPress = s.audioAt !== undefined;
       if (this.running) metric.startAt = now;
       if (s.audioAt !== undefined) metric.audioAt = now;
-      s.input.gain.gain.value = 1;
+      if (s.input) s.input.gain.gain.value = 1;
       if (s.audioAt !== undefined) this.onStatus?.('listening');
     } else { this.retire(); this.start(); }
   }
@@ -254,46 +259,13 @@ export class Voice {
   }
   diagnostics() {
     const elapsed = (end, start) => end === undefined || start === undefined ? null : Math.round(Math.max(0, end - start));
-    return { preparationFailure: this.preparationFailure, captureError: this.captureError, audioContext: this.audioCtx?.state || null, microphoneLevel: this.level, language: this.lang, localAvailability: this.localAvailability, localFailed: this.localFailed.has(this.lang), audioTrack: this.trackSupported,
+    return { input: this.session?.input ? 'injected-audio-track' : 'browser-microphone', language: this.lang, localAvailability: this.localAvailability, localFailed: this.localFailed.has(this.lang), audioTrack: this.trackSupported,
       engine: this.session ? (this.session.local ? 'local' : 'browser') : (this.useLocal ? 'local' : 'browser'), prepared: !!this.session?.prepared,
-      recent: this.history.map(m => ({ id: m.id, input: m.input || null, fallback: m.fallback || null, engine: m.engine, prepared: m.prepared, readyOnPress: m.readyOnPress, outcome: m.outcome, attempts: m.attempts,
+      recent: this.history.map(m => ({ id: m.id, engine: m.engine, prepared: m.prepared, readyOnPress: m.readyOnPress, outcome: m.outcome, attempts: m.attempts,
         startMs: elapsed(m.startAt, m.pressedAt), audioReadyMs: elapsed(m.audioAt, m.pressedAt), soundMs: elapsed(m.soundAt, m.pressedAt),
         firstTextMs: elapsed(m.resultAt, m.pressedAt), soundToTextMs: elapsed(m.resultAt, m.soundAt), releaseToCastMs: elapsed(m.castAt, m.releasedAt), error: m.error || null })) };
   }
-  failPreparation(reason) {
-    if (this.preparationFailure || this.externalStream) return;
-    this.preparationFailure = reason;
-    if (this.win) this.win.metric.fallback = reason;
-    // Fail closed for this page lifetime; never repeatedly retry a silent path.
-    // Captured audio cannot be replayed into the direct microphone API.
-    this.retire();
-    if (this.win) this.start();
-    this.onStatus?.('fallback:microphone');
-  }
-  checkPreparationHealth() {
-    const s = this.session;
-    if (!s?.input || this.externalStream || this.preparationFailure) return;
-    const now = performance.now();
-    if (this.audioCtx?.state !== 'running') {
-      this.failPreparation('audio-context-not-running'); return;
-    }
-    if (s.audioAt === undefined && now - (s.claimedAt ?? s.createdAt) >= 4000) {
-      this.failPreparation('audio-track-not-ready'); return;
-    }
-    const win = this.win;
-    if (win && win.metric.soundAt !== undefined && now - win.metric.soundAt >= 4000 && !this.textOf(win)) {
-      this.failPreparation('audio-detected-without-transcript');
-    }
-  }
   finishChant(win) {
-    // A short failed chant can end before the active watchdog runs. Disable the
-    // supplied track for the next chant when it produced no words. This is a
-    // conservative fallback, not proof that the browser or microphone failed.
-    if (win && !win.closed && !this.textOf(win) && win.metric.input === 'audio-track' && !this.externalStream) {
-      win.metric.fallback = win.metric.soundAt === undefined ? 'audio-track-no-transcript' : 'audio-detected-without-transcript';
-      this.preparationFailure = win.metric.fallback;
-      this.onStatus?.('fallback:microphone');
-    }
     if (win) { const recognized = !!this.textOf(win); win.closed = true; this.finishMetric(win, recognized ? 'recognized' : 'empty'); }
     if (this.pending === win) this.pending = null;
     if (this.session?.win === win) this.retire();
@@ -311,7 +283,6 @@ export class Voice {
     this.analyser = null; this.level = 0;
   }
   update(dt = 1 / 60) {
-    this.checkPreparationHealth();
     if (!this.analyser) return;
     this.analyser.getFloatTimeDomainData(this.buf);
     let s = 0; for (let i = 0; i < this.buf.length; i++) s += this.buf[i] * this.buf[i];
