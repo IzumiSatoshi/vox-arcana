@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TIME } from './shaders.js';
+import { bindVoiceDownload } from './voice-download.js';
 import { World } from './world.js';
 import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
@@ -231,6 +232,7 @@ class Game {
     this.showScreen('menu');
   }
   showScreen(id) {
+    if (id === 'settings') void this.refreshVoiceDownload?.();
     for (const s of ['menu', 'online', 'settings', 'howto', 'pause']) $(s).classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
@@ -665,6 +667,15 @@ class Game {
     };
     bind('set-localvoice', 'localVoice', Boolean, 'checked', voiceOptions);
     bind('set-warmvoice', 'warmVoice', Boolean, 'checked', voiceOptions);
+    this.refreshVoiceDownload = bindVoiceDownload({
+      button: $('set-downloadvoice'), status: $('voice-download-status'), getLanguage: () => s.lang,
+      onInstalled: async (lang) => {
+        this.voice.localByLanguage.set(lang, 'available'); this.voice.localFailed.delete(lang);
+        if (this.voice.lang === lang) await this.voice.checkLocal();
+      },
+    });
+    for (const id of ['set-lang', 'set-ui']) $(id).addEventListener('change', this.refreshVoiceDownload);
+    document.querySelectorAll('.lang-switch button').forEach(b => b.addEventListener('click', this.refreshVoiceDownload));
     audio.volume = s.vol; audio.musicVolume = s.music;
     this.applyLanguage(s.ui);
   }
