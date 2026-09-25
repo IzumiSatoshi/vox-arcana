@@ -131,6 +131,8 @@ export class BotBrain {
     const dist = tgt.pos && c.pos ? tgt.pos.distanceTo(c.pos) : 20;
     if (hpFrac < 0.35 && c.shield <= 0 && Math.random() < 0.5) { shape = Math.random() < 0.3 ? 'decoy' : Math.random() < 0.3 ? 'drain' : 'ward'; element = pick(['light', 'nature', 'water', 'earth', 'darkness']); }
     else if (tgt.chanting && Math.random() < 0.12) { shape = 'halo'; element = pick(ELEMENT_KEYS); }
+    else if (tgt.chanting && dist < 40 && Math.random() < 0.18) { shape = pick(['prison', 'mark']); element = pick(ELEMENT_KEYS); } // lock down / punish a chanting foe
+    else if (this.royale && this.g.combatants.filter((o) => o.alive && o !== c && o.pos.distanceTo(c.pos) < 25).length >= 2 && Math.random() < 0.2) { shape = pick(['totem', 'halo', 'nova']); element = pick(ELEMENT_KEYS); } // crowded fight
     else if (tgt.chanting && Math.random() < 0.3) { if (Math.random() < 0.65) { shape = 'barrier'; element = pick(['light', 'arcane', 'water', 'lightning']); } else { shape = 'wall'; element = pick(['earth', 'ice', 'fire']); } }
     else {
       element = aura && COUNTER[aura] && Math.random() < 0.75 ? pick(COUNTER[aura]) : pick(ELEMENT_KEYS);
