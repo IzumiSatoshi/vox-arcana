@@ -238,6 +238,17 @@ export class Royale {
       }
     }
     const p = this.g.player, out = p && p.alive && !this.inZone(p.pos);
+    this.boltT = (this.boltT || 0) - dt;
+    if (p && this.boltT <= 0 && Z.r > 3) {
+      this.boltT = rand(0.6, 1.8);
+      const a0 = Math.atan2(p.pos.z - Z.cz, p.pos.x - Z.cx) + rand(-0.6, 0.6), bx = Z.cx + Math.cos(a0) * Z.r, bz = Z.cz + Math.sin(a0) * Z.r;
+      if (Math.hypot(bx - p.pos.x, bz - p.pos.z) < 90) {
+        const gy = this.g.world.heightAt(bx, bz);
+        this.g.fx.bolt(new THREE.Vector3(bx + rand(-3, 3), gy + rand(30, 55), bz + rand(-3, 3)), new THREE.Vector3(bx, gy, bz), new THREE.Color(0xc070ff), { width: 0.25, dur: 0.25, jag: 0.25, branches: 3 });
+        this.g.fx.lights.request(new THREE.Vector3(bx, gy + 5, bz), new THREE.Color(0xb060ff), 600, 40);
+        if (Math.random() < 0.5) this.g.audio.impact('lightning', 0.45, new THREE.Vector3(bx, gy + 3, bz));
+      }
+    }
     if (p) { // the wall howls from its nearest point; loud when you are close to (or inside) it
       const dx = p.pos.x - Z.cx, dz = p.pos.z - Z.cz, d = Math.hypot(dx, dz) || 1, edge = Math.abs(d - Z.r);
       this.howl.set(new THREE.Vector3(Z.cx + dx / d * Z.r, p.pos.y + 2, Z.cz + dz / d * Z.r), clamp(1 - edge / 30) * 0.7 + (out ? 0.3 : 0));

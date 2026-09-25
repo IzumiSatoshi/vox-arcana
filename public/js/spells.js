@@ -171,7 +171,8 @@ class Spell {
   add(o) { this.g.scene.add(o); this.objs.push(o); return o; }
   remove(o) { this.g.scene.remove(o); disposeObj(o); const i = this.objs.indexOf(o); if (i >= 0) this.objs.splice(i, 1); }
   trail(color, core, width, max, intensity) { const t = new Trail(this, color, core, width, max, intensity); this.trails.push(t); return t; }
-  targets() { return this.g.combatants.filter((c) => c.alive && c !== this.caster && !(c.decoy && c.owner === this.caster)); }
+  // a decoy's spells belong to its owner's side: they never touch the owner or the owner's other doubles
+  targets() { const me = this.caster.owner || this.caster; return this.g.combatants.filter((c) => c.alive && c !== this.caster && c !== me && !(c.decoy && c.owner === me)); }
   nearestTarget(from, dir = null, cone = 0.6, range = 80) {
     let best = null, bd = Infinity;
     for (const t of this.targets()) {

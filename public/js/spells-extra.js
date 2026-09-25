@@ -6,6 +6,7 @@ import { energyMaterial, crystalMaterial } from './shaders.js';
 import { kitOf, surfaceMaterial } from './vfxkit.js';
 import { stoneMaterial } from './world.js';
 import { MagicCircle } from './magicCircle.js';
+import { boltSpec } from './spellbook.js';
 import { Spell, registerShape, SPHERE_LO, OCTA, SMOOTH, COMET, TORUS_GEO, BLADE_GEO, coreMesh, escalateImpact } from './spells.js';
 import { rand, clamp, lerp, TAU } from './util.js';
 
@@ -200,6 +201,7 @@ class PrisonSpell extends Spell {
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: this.R * 1.35, intensity: 1.3 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.center).y += 0.12; this.mc.spin = 1.2; this.add(this.mc.group);
     this.trapped = new Set(); this.tick = 0.3; this.closed = false;
+    this.loopSnd = this.g.audio.loop(this.el, this.center.clone().setY(this.center.y + 1.5), 0.22, this.look, { spin: 0.15 });
     this.g.audio.cast(this.el, this.m, this.center, this.look);
   }
   update(dt) {
@@ -243,7 +245,7 @@ class PrisonSpell extends Spell {
     }
     // collapse: the bars snap inward and burst
     if (this.t >= endT && !this.burst) {
-      this.burst = true;
+      this.burst = true; this.loopSnd?.stop(); this.loopSnd = null;
       this.explode(c.clone().setY(c.y + 1), this.R * 1.25, 48, { knock: 9, lift: 7 });
       fx.addShake(0.3 + this.m * 0.2, c);
       if (this.solid) fx.debris?.(c.clone().setY(c.y + 1), this.R, this.el, this.pal, this.look);
@@ -277,7 +279,9 @@ class DecoySpell extends Spell {
       d.yaw = c.yaw; d.heading = c.yaw + Math.PI + (n > 1 ? (i / (n - 1) - 0.5) * 2.6 : 0) + rand(-0.3, 0.3);
       d.turnT = rand(0.8, 2); d.jumpT = rand(1, 3);
       const aimD = new THREE.Vector3(), aimP = new THREE.Vector3();
-      d.getAim = () => ({ origin: d.eye(new THREE.Vector3()), dir: aimD.set(-Math.sin(d.yaw), 0, -Math.cos(d.yaw)), point: aimP.copy(d.pos).addScaledVector(aimD, 10) });
+      d.getAim = () => d.aimAt ? { origin: d.eye(new THREE.Vector3()), dir: aimD.copy(d.aimAt).sub(d.eye(new THREE.Vector3())).normalize(), point: aimP.copy(d.aimAt) }
+        : { origin: d.eye(new THREE.Vector3()), dir: aimD.set(-Math.sin(d.yaw), 0, -Math.cos(d.yaw)), point: aimP.copy(d.pos).addScaledVector(aimD, 10) };
+      d.shootT = rand(0.8, 2);
       if (d.model) { d.model.setElement?.(this.el); d.model.root.position.copy(d.pos); }
       this.decoys.push(d);
       g.fx.explosion(this.el, d.center(), 1.3, 0.3, this.pal, { look: this.look, noDecal: true });
@@ -313,6 +317,17 @@ class DecoySpell extends Spell {
       const jump = d.jumpT <= 0; if (jump) d.jumpT = rand(1.5, 4);
       g.stepBody?.(d, dt, wish, 6.8, jump, false);
       d.chanting = Math.sin(this.t * 1.3 + d.heading) > 0.6;
+      // the act: doubles loose harmless bolts at the nearest foe, like the real caster would
+      d.shootT -= dt;
+      if (d.shootT <= 0) {
+        d.shootT = rand(1.2, 2.6); d.aimAt = null;
+        let foe = null, fd = 32; for (const o of this.targets()) { const dd = o.pos.distanceTo(d.pos); if (dd < fd) { fd = dd; foe = o; } }
+        if (foe) {
+          d.aimAt = foe.center(); d.yaw = Math.atan2(d.pos.x - foe.pos.x, d.pos.z - foe.pos.z);
+          const spec = boltSpec(this.el); spec.dmgMult = 0.03; g.spells.cast(spec, d);
+          if (d.model) d.model.castAnim = 0.6;
+        }
+      }
       if (Math.random() < 0.15) g.fx.element(this.el, d.center(), { count: 1, speed: 0.4, size: 0.18, palette: this.pal, life: 0.5 });
     }
     if (this.decoys.every((d) => d.gone)) this.done = true;
@@ -786,6 +801,7 @@ class TotemSpell extends Spell {
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: 2.2 * this.S, intensity: 1.2 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.at).y += 0.08; this.mc.spin = 0.5; this.add(this.mc.group);
     this.cd = 0.8; this.pulse = 0;
+    this.loopSnd = this.g.audio.loop(this.el, this.at.clone().setY(this.at.y + 2.4), 0.1, this.look);
     this.g.audio.impact('earth', 0.35, this.at, this.look); this.g.audio.cast(this.el, this.m * 0.8, this.at, this.look);
     this.g.fx.explosion('earth', this.at.clone().setY(this.at.y + 0.3), 1.4, 0.2, null, { noDecal: true });
   }
@@ -839,7 +855,7 @@ class TotemSpell extends Spell {
         if (best) { this.cd = this.interval; this.fire(best, from); } else this.cd = 0.25;
       }
     }
-    if (this.t >= this.life && !this.burst) { this.burst = true; fx.explosion(this.el, this.cry.position, 1.8, 0.4, this.pal, { look: this.look, noDecal: true, debris: true }); this.g.audio.shatter?.(this.cry.position, 0.5); }
+    if (this.t >= this.life && !this.burst) { this.burst = true; this.loopSnd?.stop(); this.loopSnd = null; fx.explosion(this.el, this.cry.position, 1.8, 0.4, this.pal, { look: this.look, noDecal: true, debris: true }); this.g.audio.shatter?.(this.cry.position, 0.5); }
     if (this.t > this.life + 0.55) this.done = true;
     this.updateCommon(dt);
     return !this.finished() || this.mc.opacity > 0.02;

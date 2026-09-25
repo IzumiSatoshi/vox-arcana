@@ -95,7 +95,7 @@ export class Hud {
     for (const th of this.g.spells.threatsFor(p)) if (th.area) { g.strokeStyle = 'rgba(255,90,90,0.9)'; g.lineWidth = 2; g.beginPath(); g.arc((th.pos.x - p.pos.x) * scale, (th.pos.z - p.pos.z) * scale, th.radius * scale, 0, TAU); g.stroke(); }
     this.g.royale?.drawMinimap(g, p, scale);
     for (const c of this.g.combatants) {
-      if (c === p || !c.alive) continue;
+      if (c === p || !c.alive || this.hiddenFoe(c, p)) continue;
       const x = (c.pos.x - p.pos.x) * scale, y = (c.pos.z - p.pos.z) * scale;
       g.save(); g.translate(x, y); g.rotate(-p.yaw + Math.PI / 4); g.fillStyle = c.owner === p ? '#7fd0ff' : c.chanting ? '#ff9ae0' : '#ff4a4a'; g.shadowColor = c.owner === p ? '#08f' : '#f00'; g.shadowBlur = 6; g.fillRect(-4, -4, 8, 8); g.restore();
     }
@@ -104,13 +104,15 @@ export class Hud {
     g.beginPath(); g.moveTo(W / 2, W / 2 - 8); g.lineTo(W / 2 + 6, W / 2 + 6); g.lineTo(W / 2, W / 2 + 2); g.lineTo(W / 2 - 6, W / 2 + 6); g.closePath(); g.fill();
     g.shadowBlur = 0;
   }
+  // battle royale radar: foes show within 40 m, or within 80 m while they chant (your voice gives you away)
+  hiddenFoe(c, p) { return !!this.g.royale && c.owner !== p && c.pos.distanceTo(p.pos) > (c.chanting ? 80 : 40); }
   updateCompass(p) {
     const W = this.compassWidth;
     const heading = ((-p.yaw * 180) / Math.PI % 360 + 360) % 360;
     $('compass-strip').style.transform = `translateX(${W / 2 - heading * this.ppd}px)`;
     let h = '';
     for (const c of this.g.combatants) {
-      if (c === p || !c.alive) continue;
+      if (c === p || !c.alive || this.hiddenFoe(c, p)) continue;
       const b = (Math.atan2(c.pos.x - p.pos.x, -(c.pos.z - p.pos.z)) * 180) / Math.PI;
       let rel = ((b - heading + 540) % 360) - 180;
       if (Math.abs(rel) < 80) h += `<i style="left:${W / 2 + rel * this.ppd}px"></i>`;
