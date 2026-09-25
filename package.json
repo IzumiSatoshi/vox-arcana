@@ -4,9 +4,19 @@
   "description": "Voice-cast FPS magic duel. Speak incantations; Jev turns them into procedurally generated spells.",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "test:local": "node scripts/check-local-model.js",
+    "build": "node scripts/build.js",
+    "deploy:preview": "npx vercel deploy",
+    "deploy:production": "npx vercel deploy --prod",
+    "vercel:build": "node scripts/vercel-build.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": "24.x"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "@vercel/oidc": "^3.8.9"
   }
 }

@@ -39,7 +39,7 @@ export const ELEMENTS = {
     particle: { shape: 0, rise: 1.2, drag: 1.5, smoke: 1.4, spark: 0.5, grav: -0.5, darkSmoke: 1 },
   },
   light: {
-    name: 'Light', nameJa: '光', adjJa: ['輝', '聖', '天界', '熾天', '暁', '神聖'], glyph: '光', color: 0xffe28a, core: 0xffffff, dark: 0xa87a1a, aura: true,
+    name: 'Light', nameJa: '光', adjJa: ['輝', '聖', '天界', '熾天', '暁', '神聖'], glyph: '光', color: 0xffc444, core: 0xfff6d0, dark: 0xa06a12, aura: true,
     adj: ['Radiant', 'Holy', 'Celestial', 'Seraphic', 'Dawn', 'Divine'], noun: 'Radiance',
     particle: { shape: 1, rise: 1.5, drag: 1.2, smoke: 0, spark: 1.2, grav: -1 },
   },
@@ -70,7 +70,8 @@ export const SHAPES = {
   meteor: { name: 'Meteor', nameJa: '隕石', nounsJa: ['隕石', '彗星', '流星群'], icon: '☄', nouns: ['Meteor', 'Comet', 'Starfall'] },
   nova: { name: 'Nova', nameJa: '爆裂', nounsJa: ['爆裂', '炸裂', '大爆発'], icon: '✺', nouns: ['Nova', 'Burst', 'Cataclysm'] },
   spikes: { name: 'Spikes', nameJa: '棘', nounsJa: ['棘', '尖塔', '噴出'], icon: '⩘', nouns: ['Spires', 'Spikes', 'Eruption'] },
-  wall: { name: 'Wall', nameJa: '障壁', nounsJa: ['壁', '城壁', '結界'], icon: '▥', nouns: ['Wall', 'Bulwark', 'Rampart'] },
+  barrier: { name: 'Barrier', nameJa: '結界', nounsJa: ['障壁', '結界', '絶対障壁'], icon: '⬡', nouns: ['Barrier', 'Aegis Field', 'Bastion Field'] },
+  wall: { name: 'Wall', nameJa: '壁', nounsJa: ['壁', '城壁', '大城塞'], icon: '▥', nouns: ['Wall', 'Bulwark', 'Rampart'] },
   vortex: { name: 'Vortex', nameJa: '渦', nounsJa: ['渦', '特異点', '深淵'], icon: '◉', nouns: ['Vortex', 'Singularity', 'Abyss'] },
   chain: { name: 'Chain', nameJa: '連鎖', nounsJa: ['撃', '連鎖', '裁き'], icon: 'ϟ', nouns: ['Strike', 'Chain', 'Judgment'] },
   storm: { name: 'Storm', nameJa: '嵐', nounsJa: ['雨', '嵐', '大嵐'], icon: '☁', nouns: ['Rain', 'Storm', 'Tempest'] },
@@ -125,17 +126,24 @@ export function paletteFor(el, temperature = 0.5) {
   return { color, core, dark };
 }
 
+// Look words for names: substance replaces the element adjective, extreme proportions add a prefix.
+const SUB_EN = { magma: 'Magma', flame: 'Blazing', plasma: 'Plasma', smoke: 'Smouldering', crystal: 'Crystal', liquid: 'Liquid', mist: 'Mist', spectral: 'Spectral', radiant: 'Radiant', corrupted: 'Cursed' };
+const SUB_JA = { magma: '溶岩', flame: '烈火', plasma: '蒼炎', smoke: '黒煙', crystal: '水晶', liquid: '流体', mist: '霧', spectral: '幽玄', radiant: '聖光', corrupted: '呪詛' };
+const subOf = (spec) => (spec.substance && spec.substance !== 'native' ? spec.substance : null);
+const formEn = (spec) => ((spec.height ?? 0.5) > 0.78 ? 'Towering ' : (spec.height ?? 0.5) < 0.22 ? 'Earthbound ' : (spec.width ?? 0.5) > 0.78 ? 'Sprawling ' : '');
+const formJa = (spec) => ((spec.height ?? 0.5) > 0.78 ? '天衝く' : (spec.height ?? 0.5) < 0.22 ? '地を這う' : (spec.width ?? 0.5) > 0.78 ? '大いなる' : '');
 // Human-readable spell name from its parameters.
 function spellNameJa(spec) {
   const E = ELEMENTS[spec.element], S = SHAPES[spec.shape];
   const pre = TIER_PREFIX_JA[spec.tierInt];
   const noun = spec.shape === 'construct' ? { platform: '足場', stairs: '階段', box: '方塊', pillar: '尖塔', rampart: '城壁' }[spec.construct] || '足場' : S.nounsJa[Math.min(S.nounsJa.length - 1, Math.floor(spec.power * S.nounsJa.length))];
   let core;
-  if (spec.shape === 'orb' && spec.element === 'fire') core = '火球';
-  else if (spec.shape === 'chain' && spec.element === 'lightning') core = '連鎖雷撃';
-  else { const adj = E.adjJa[Math.min(E.adjJa.length - 1, Math.floor((spec.power * 0.6 + spec.tier * 0.4) * E.adjJa.length))]; core = adj + 'の' + noun; }
-  if (spec.element2) core = ELEMENTS[spec.element2].nameJa + '・' + core;
-  return (pre ? pre + (pre.endsWith('の') ? '' : '・') : '') + core;
+  const sub = subOf(spec);
+  if (spec.shape === 'orb' && spec.element === 'fire') core = (sub ? SUB_JA[sub] + 'の' : '') + '火球';
+  else if (spec.shape === 'chain' && spec.element === 'lightning') core = (sub ? SUB_JA[sub] + 'の' : '') + '連鎖雷撃';
+  else { const adj = sub ? SUB_JA[sub] : E.adjJa[Math.min(E.adjJa.length - 1, Math.floor((spec.power * 0.6 + spec.tier * 0.4) * E.adjJa.length))]; core = adj + 'の' + noun; }
+  if (spec.element2 && !(sub === 'magma' && spec.element2 === 'earth')) core = ELEMENTS[spec.element2].nameJa + '・' + core;
+  return (pre ? pre + (pre.endsWith('の') ? '' : '・') : '') + formJa(spec) + core;
 }
 const MORPH_EN = { lance: 'Lance', shard: 'Shard', disc: 'Chakram', star: 'Star', blade: 'Blade', skull: 'Skull', bubble: 'Bubble', cube: 'Monolith' };
 const BEAST = { fire: 'Phoenix', water: 'Leviathan', ice: 'Wyrm', lightning: 'Raiju', wind: 'Griffin', earth: 'Behemoth', darkness: 'Wraith Serpent', light: 'Seraph', nature: 'Hydra', poison: 'Basilisk', arcane: 'Astral Dragon' };
@@ -151,14 +159,14 @@ function missileName(spec, ja) {
   const adjIdx = Math.min(5, Math.floor((spec.power * 0.6 + spec.tier * 0.4) * 6));
   if (ja) {
     const pre = TIER_PREFIX_JA[t];
-    const body = (TRAJ_JA[spec.trajectory] || '') + E.adjJa[adjIdx] + 'の' + (spec.morph === 'orb' && spec.element === 'fire' ? '火球' : MORPH_JA[spec.morph] || '球') + (PAT_JA[spec.pattern] ? '・' + PAT_JA[spec.pattern] : '') + (PAY_JA[spec.payload] || '');
+    const body = formJa(spec) + (TRAJ_JA[spec.trajectory] || '') + (subOf(spec) ? SUB_JA[subOf(spec)] : E.adjJa[adjIdx]) + 'の' + (spec.morph === 'orb' && spec.element === 'fire' ? '火球' : MORPH_JA[spec.morph] || '球') + (PAT_JA[spec.pattern] ? '・' + PAT_JA[spec.pattern] : '') + (PAY_JA[spec.payload] || '');
     return (pre ? pre + (pre.endsWith('の') ? '' : '・') : '') + (spec.element2 ? ELEMENTS[spec.element2].nameJa + '・' : '') + body;
   }
   const pre = TIER_PREFIX[t];
   let noun = spec.morph === 'dragon' ? BEAST[spec.element] : MORPH_EN[spec.morph] || (spec.element === 'fire' ? 'Fireball' : 'Orb');
   if (many && !noun.endsWith('s')) noun += noun.endsWith('x') ? 'es' : 's';
-  const adj = spec.morph === 'orb' && spec.element === 'fire' ? '' : E.adj[adjIdx] + ' ';
-  const body = (PAT_EN[spec.pattern] || '') + (many ? '' : TRAJ_EN[spec.trajectory] || '') + adj + noun + (PAY_EN[spec.payload] || '');
+  const adj = subOf(spec) ? SUB_EN[subOf(spec)] + ' ' : spec.morph === 'orb' && spec.element === 'fire' ? '' : E.adj[adjIdx] + ' ';
+  const body = (PAT_EN[spec.pattern] || '') + (many ? '' : TRAJ_EN[spec.trajectory] || '') + formEn(spec) + adj + noun + (PAY_EN[spec.payload] || '');
   return `${pre ? (pre === 'Arch' ? 'Arch-' : pre + ' ') : ''}${spec.element2 ? ELEMENTS[spec.element2].adj[0] + '-' : ''}${body}`.replace('Arch- ', 'Arch-');
 }
 export function spellName(spec) {
@@ -169,15 +177,16 @@ export function spellName(spec) {
   const pre = TIER_PREFIX[t];
   const noun = spec.shape === 'construct' ? { platform: 'Platform', stairs: 'Stairway', box: 'Monolith', pillar: 'Spire', rampart: 'Rampart' }[spec.construct] || 'Platform' : S.nouns[Math.min(S.nouns.length - 1, Math.floor(spec.power * S.nouns.length))];
   let core;
-  if (spec.shape === 'orb' && spec.element === 'fire') core = 'Fireball';
-  else if (spec.shape === 'chain' && spec.element === 'lightning') core = 'Chain Lightning';
-  else if (spec.shape === 'meteor' && spec.element === 'fire') core = 'Meteor';
+  const sub = subOf(spec), sw = sub ? SUB_EN[sub] + ' ' : '';
+  if (spec.shape === 'orb' && spec.element === 'fire') core = sw + 'Fireball';
+  else if (spec.shape === 'chain' && spec.element === 'lightning') core = sw + 'Chain Lightning';
+  else if (spec.shape === 'meteor' && spec.element === 'fire') core = sw + 'Meteor';
   else {
-    const adj = E.adj[Math.min(E.adj.length - 1, Math.floor((spec.power * 0.6 + spec.tier * 0.4) * E.adj.length))];
+    const adj = sub ? SUB_EN[sub] : E.adj[Math.min(E.adj.length - 1, Math.floor((spec.power * 0.6 + spec.tier * 0.4) * E.adj.length))];
     core = `${adj} ${noun}`;
   }
-  if (spec.element2) core = `${ELEMENTS[spec.element2].adj[0]}-${core}`;
-  return `${pre ? (pre === 'Arch' ? 'Arch-' : pre + ' ') : ''}${core}`.replace('Arch- ', 'Arch-');
+  if (spec.element2 && !(sub === 'magma' && spec.element2 === 'earth')) core = `${ELEMENTS[spec.element2].adj[0]}-${core}`;
+  return `${pre ? (pre === 'Arch' ? 'Arch-' : pre + ' ') : ''}${formEn(spec)}${core}`.replace('Arch- ', 'Arch-');
 }
 
 // ------------------------------------------------------------ reactions

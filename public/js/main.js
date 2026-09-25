@@ -1,3 +1,4 @@
+import './style.js'; // global art direction: must patch shader chunks before anything compiles
 import * as THREE from 'three';
 import { TIME } from './shaders.js';
 import { bindVoiceDownload } from './voice-download.js';
@@ -12,19 +13,19 @@ import { BotBrain } from './bot.js';
 import { Hud, elChip } from './hud.js';
 import { Voice } from './voice.js';
 import { voiceChargeFeedback } from './voice-feedback.js';
-import { Net } from './net.js';
 import { audio } from './audio.js';
 import { t, setLang, getLang } from './i18n.js';
-import { localParse, askJev, buildSpec, buildJevSpec, weakenSpec, boltSpec, finalizeSpec } from './spellbook.js';
+import { localParse, askJev, buildSpec, buildJevSpec, boltSpec, finalizeSpec } from './spellbook.js';
 import { ELEMENTS, SHAPES, ELEMENT_KEYS, elName, shapeName, reactName } from './elements.js';
 import { clamp, rand, TAU } from './util.js';
+import { warmSpellShaders } from './warmup.js';
 
 const $ = (id) => document.getElementById(id);
 const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, vol: 0.8, music: 0.35, useJev: true, instantCast: true, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2, name: '' };
+const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
@@ -60,12 +61,15 @@ const REACTIONS = [
   ['Plaguebringer', '#d6ff4a', 'Combo: Poison → Wind → Fire.', 'コンボ：毒→風→炎。'],
 ];
 
+const DUST = new THREE.Color(0xcdbb96);
 class Game {
   constructor() {
     this.settings = loadSettings();
     setLang(this.settings.ui);
+    this.settings.chantSize = Math.max(20, Math.min(80, Number(this.settings.chantSize) || 26));
+    document.documentElement.style.setProperty('--chant-text-size', `${this.settings.chantSize}px`);
     this.mode = 'menu';
-    this.combatants = []; this.bots = []; this.remotes = new Map();
+    this.combatants = []; this.bots = [];
     this.keys = {}; this.mouse = { dx: 0, dy: 0, lmb: false };
     this.chanting = false; this.chantT = 0; this.chantProgress = 0;
     this.timeScale = 1; this.slowmo = 0; this.jevOnline = false; this.jevFails = 0;
@@ -81,7 +85,6 @@ class Game {
     this.hud = new Hud(this);
     this.hud.buildMinimapBg(this.world);
     this.voice = new Voice();
-    this.net = new Net();
     initViewEnv(this.renderer);
     this.viewModel = new ViewModel(this.camera);
     this.viewModel.group.visible = false;
@@ -91,15 +94,25 @@ class Game {
     this.clock = new THREE.Clock();
     $('loading').classList.add('hidden');
     this.loop();
+    this.shaderWarmup = warmSpellShaders(this); // compiles every spell shader in the background while the menu is up
   }
 
   // ------------------------------------------------------------ rendering
   initRenderer() {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: false, powerPreference: 'high-performance' }));
-    r.setPixelRatio(Math.min(devicePixelRatio, this.settings.quality > 0 ? 1.25 : 1));
+    r.setPixelRatio(Math.min(devicePixelRatio, this.settings.quality > 1 ? 1.5 : this.settings.quality > 0 ? 1.25 : 1));
     r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
-    r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.05;
+    r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 1.0; // hue-preserving: keeps the anime palette clean where ACES skews and greys saturated colours
     r.outputColorSpace = THREE.SRGBColorSpace;
+    // Spells build fresh materials per cast and dispose them at the end; when the last user of a shader program is
+    // disposed, three.js deletes the program and the next cast recompiles it (a 100-500 ms hitch). Leave the first
+    // material of each program undisposed so the compiled program stays cached: one small material per shader.
+    const pinned = new Set(), dispose = THREE.Material.prototype.dispose;
+    THREE.Material.prototype.dispose = function () {
+      const key = r.properties.get(this).currentProgram?.cacheKey;
+      if (key && !pinned.has(key)) { pinned.add(key); return; }
+      dispose.call(this);
+    };
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.03, 4000);
     this.camera.rotation.order = 'YXZ';
@@ -107,8 +120,10 @@ class Game {
     addEventListener('resize', () => this.onResize());
   }
   onResize() {
-    this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix();
-    this.renderer.setSize(innerWidth, innerHeight); this.post?.setSize(innerWidth, innerHeight);
+    // a hidden/minimised tab reports 0×0: keep a sane size instead of zero-size (incomplete) render targets
+    const w = innerWidth || this.lastW || 1280, h = innerHeight || this.lastH || 720; this.lastW = w; this.lastH = h;
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, !!innerWidth); this.post?.setSize(w, h); this.stillKey = null;
     const v = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.fx.setScale(v.y, this.camera.fov);
   }
@@ -118,18 +133,54 @@ class Game {
   async checkJev() {
     try {
       const s = await (await fetch('/api/status')).json();
-      this.jevOnline = !!s.jev.keyLoaded; this.jevModel = s.jev.model;
+      this.localStatus = s.local || { phase: 'outdated', error: t('local.restart') };
+      this.capabilities = s.capabilities || { localModel: true };
+      document.querySelector('#set-provider option[value=local]').disabled = !this.capabilities.localModel;
+      $('set-loadmodel').disabled = !this.capabilities.localModel;
+      if (!this.capabilities.localModel && this.settings.spellProvider === 'local') {
+        this.settings.spellProvider = 'jev'; $('set-provider').value = 'jev'; saveSettings(this.settings);
+      }
+      this.jevOnline = this.settings.spellProvider === 'local' ? s.local?.phase === 'ready' : !!s.jev.keyLoaded; this.jevModel = this.settings.spellProvider === 'local' ? 'Local MiniLM' : s.jev.model;
       this.serverUp = true;
     } catch { this.jevOnline = false; this.serverUp = false; }
     this.refreshJevLabels();
   }
   refreshJevLabels() {
+    if (this.capabilities?.localModel === false) $('local-model-status').textContent = t('local.disabled');
+    if (this.settings.spellProvider === 'local') {
+      const status = this.serverUp === false ? 'offline' : this.localStatus?.phase || 'unloaded';
+      const label = `Local MiniLM · ${status}`;
+      this.hud.jev(this.jevOnline ? 'on' : 'off', label);
+      $('menu-status').textContent = label;
+      $('local-model-status').textContent = this.serverUp === false ? t('jev.offline') : this.localStatus?.error || t(`local.${status}`);
+      return;
+    }
     this.hud.jev(this.jevOnline ? 'on' : 'off', t(this.serverUp === false ? 'jev.offline' : this.jevOnline ? 'jev.ready' : 'jev.nokey'));
     $('menu-status').innerHTML = this.serverUp === false ? t('menu.noserver') : this.jevOnline ? `${t('menu.jevok')} · <span style="opacity:.7">${this.jevModel}</span>` : t('menu.nokey');
   }
+  async loadLocalModel() {
+    const button = $('set-loadmodel');
+    if (button.disabled) return;
+    button.disabled = true;
+    $('local-model-status').textContent = t('local.loading');
+    let error = null;
+    try {
+      const response = await fetch('/api/local/load', { method: 'POST' });
+      if (response.status === 404) throw new Error(t('local.restart'));
+      if (!response.headers.get('content-type')?.includes('application/json')) throw new Error(t('local.restart'));
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    } catch (e) { error = e.message; }
+    finally {
+      await this.checkJev();
+      button.disabled = false;
+      // Status refresh must not erase the error that explains a failed load.
+      $('local-model-status').textContent = error || this.localStatus?.error || t(`local.${this.localStatus?.phase || 'unloaded'}`);
+    }
+  }
   noteJev(j) {
     if (!j) return;
-    if (j.ok) { this.jevFails = 0; this.jevOnline = true; this.hud.jev('on', `Jev · ${j.cached ? 'cached' : j.latency + 'ms'}`); }
+    if (j.ok) { this.jevFails = 0; this.jevOnline = true; this.hud.jev('on', `${j.provider === 'local' ? 'MiniLM' : 'Jev'} · ${j.cached ? 'cached' : j.latency + 'ms'}`); }
     else { this.jevFails++; this.hud.jev('off', t('jev.err')); if (this.jevFails >= 3) this.jevOnline = false; console.warn('Jev:', j.error); }
   }
 
@@ -152,7 +203,7 @@ class Game {
     audio.chantStop();
     this.spells.clear();
     for (const c of [...this.combatants]) this.removeCombatant(c);
-    this.bots = []; this.remotes.clear(); this.player = null;
+    this.bots = []; this.player = null;
     speechSynthesis?.cancel();
   }
   spawnAt(c, angle, r = 26) {
@@ -163,7 +214,7 @@ class Game {
     if (c.model) c.model.root.visible = true;
   }
   createPlayer() {
-    const p = (this.player = this.makeCombatant({ id: 'me', name: this.settings.name || t('you'), isPlayer: true }));
+    const p = (this.player = this.makeCombatant({ id: 'me', name: t('you'), isPlayer: true }));
     p.castOrigin = () => this.viewModel.tipWorld(p._ho || (p._ho = new THREE.Vector3()));
     this.playerAim = { origin: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, -1), point: new THREE.Vector3() };
     p.getAim = () => this.playerAim;
@@ -198,9 +249,10 @@ class Game {
     this.hud.show(false);
   }
   startMode(mode) {
-    audio.init(); this.initVoice();
+    audio.init();
     this.clearArena();
     this.mode = mode;
+    this.hud.clearSpellInfo?.();
     const p = this.createPlayer();
     this.spawnAt(p, Math.PI * 0.5);
     this.score = { me: 0, foe: 0 }; this.roundOver = false;
@@ -215,25 +267,25 @@ class Game {
       this.spawnAt(d, Math.PI * 1.5, 14);
       this.hud.round(t('round.train'));
       this.hud.banner(t('ban.train'), t('ban.train2'), 2.5);
-    } else if (mode === 'online') {
-      this.hud.round(t('round.online', { room: this.netRoom }));
-      this.spawnAt(p, rand(0, TAU), rand(10, 40));
     }
     this.hud.show(true); this.hud.setEl('arcane'); this.viewModel.setElement('arcane');
-    this.hud.scoreboard(mode === 'online' ? [] : null);
     this.hud.hint('hint.chant'); this.hud.chant('', ''); this.hud.preview(null);
     this.showScreen(null);
+    // Match entry is a user gesture, so request microphone access here for both modes.
+    void this.enableVoice();
     this.lock();
   }
   endToMenu() {
-    if (this.mode === 'online') this.net.close();
     document.exitPointerLock?.();
     this.startAttract();
+    this.keys = {}; this.mouse.lmb = false; this.typing = false; this.backTo = null;
+    $('type-box').classList.add('hidden');
     this.showScreen('menu');
+    document.querySelector('#menu .mode-card')?.focus();
   }
   showScreen(id) {
-    if (id === 'settings') void this.refreshVoiceDownload?.();
-    for (const s of ['menu', 'online', 'settings', 'howto', 'pause']) $(s).classList.toggle('hidden', s !== id);
+    if (id === 'menu') void this.refreshVoiceDownload?.();
+    for (const s of ['menu', 'settings', 'howto', 'pause', 'duel-setup']) $(s).classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
     if (this.paused || this.mode === 'menu') {
@@ -257,6 +309,7 @@ class Game {
       if (this.grace) this.resolveVoiceGrace();
     };
     this.voice.onStatus = (s) => {
+      if (s === 'mic-denied' || s.startsWith('error:')) $('menu-mic-message').textContent = t('menu.mic.failed');
       this.hud.micState(s === 'listening' || s === 'ready');
       if (s === 'listening' && this.hintErr) { this.hintErr = false; this.hud.hint('hint.chant'); }
       if (s === 'unsupported') this.hud.hint('hint.noSR');
@@ -267,7 +320,31 @@ class Game {
       if (this.mode === 'menu' || this.paused || this.chanting || this.channel || (!this.settings.useJev && localParse(text).isSpell < 1)) return;
       void this.castIncantation(text, { chantSeconds: text.length / 12, loudness: this.voice.level }, null);
     };
+    this.voice.setActive(this.mode !== 'menu' && !this.paused);
     await this.voice.init(audio.ctx);
+  }
+  enableVoice() {
+    if (this.voiceEnablePromise) return this.voiceEnablePromise;
+    const button = $('menu-enable-voice');
+    button.disabled = true;
+    this.voiceEnablePromise = (async () => {
+      let ready = false;
+      try {
+        audio.init();
+        await this.initVoice();
+        ready = !!this.voice.supported && !!this.voice.stream?.getAudioTracks().some(track => track.readyState === 'live');
+      } catch { /* Permission denial and unavailable devices use the typed casting fallback. */ }
+      if (!ready) {
+        this.voice.dispose(); this.voiceInit = false;
+        if (this.mode !== 'menu') this.hud.hint(this.voice.supported ? 'hint.mic' : 'hint.noSR');
+      }
+      button.hidden = ready; $('menu-disable-voice').hidden = !ready;
+      $('menu-mic-badge').textContent = ready ? 'ON' : 'OFF';
+      $('menu-mic-badge').classList.toggle('ready', ready);
+      $('menu-mic-message').textContent = t(ready ? 'menu.mic.ready' : 'menu.mic.failed');
+      return ready;
+    })().finally(() => { button.disabled = false; this.voiceEnablePromise = null; });
+    return this.voiceEnablePromise;
   }
   beginChant() {
     const p = this.player;
@@ -290,7 +367,7 @@ class Game {
     if (!this.settings.instantCast && (now - S.lastSend < 160 || S.inflight >= 3)) return;
     S.lastText = text; S.lastSend = now; S.inflight++;
     const order = ++S.order;
-    const promise = askJev(text, { chantSeconds: this.chantT, loudness: this.voice.peak });
+    const promise = askJev(text, { provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang, chantSeconds: this.chantT, loudness: this.voice.peak });
     S.pending.set(text, promise);
     promise.then((j) => {
       S.inflight--;
@@ -298,6 +375,10 @@ class Game {
       this.noteJev(j);
       if (!j.ok) return;
       S.map.set(text, j);
+      if (j.raw && (!S.displayOrder || order > S.displayOrder)) {
+        S.displayOrder = order;
+        this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
+      }
       if (!S.latest || order > S.latest.order) S.latest = { order, text, j };
       if (j.params?.isSpell >= 0.65 && (!S.latestMagic || order > S.latestMagic.order)) S.latestMagic = { order, text, j };
       if (this.grace && this.settings.instantCast) this.resolveVoiceGrace();
@@ -358,9 +439,10 @@ class Game {
       const token = this.pendingJevCast = {}, mode = this.mode;
       this.previewCost = 0; this.hud.preview(null);
       this.hud.chant(t('chant.jevwait'), '');
-      const j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, meta));
+      const j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, { ...meta, provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang }));
       if (this.pendingJevCast !== token || this.player !== p || !p.alive || this.paused || this.mode !== mode || this.mode === 'menu' || !this.settings.useJev) return;
       this.pendingJevCast = null; this.noteJev(j);
+      if (j.raw) this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
       spec = buildJevSpec(text, j, meta);
       if (!spec) {
         this.voice.finishMetric(meta.win, 'jev-error'); this.hud.chant(t('chant.jeverror'), 'fizzle'); audio.ui('fizzle'); return;
@@ -377,9 +459,9 @@ class Game {
     if (!p.canAct()) { this.hud.chant(t('chant.interrupted'), 'fizzle'); audio.ui('fizzle'); return; }
     spec = { ...spec, cost: Math.round(spec.cost * p.costMult()) };
     if (p.mana < spec.cost) {
-      const f = Math.max(0.25, p.mana / spec.cost);
-      spec = weakenSpec(spec, f); p.mana = 0;
-      this.hud.feed(`<span style="color:#ff9a8a">${t('feed.starved')}</span>`);
+      this.previewCost = 0; this.hud.preview(null);
+      this.hud.chant(t('feed.starved'), 'fizzle'); audio.ui('fizzle');
+      return;
     } else p.mana -= spec.cost;
     this.previewCost = 0;
     this.lastEl = spec.element; this.viewModel.setElement(spec.element); this.hud.setEl(spec.element);
@@ -389,15 +471,14 @@ class Game {
     this.hud.preview(null);
     this.hud.spellCard(spec);
     this.onCast(p, spec);
-    if (spec.tierInt >= 8 && this.mode !== 'online') { this.slowmo = 0.35; this.screenFlash(hex(ELEMENTS[spec.element].color), 0.12); }
-    if (this.mode === 'online') { const a = this.playerAim; this.net.send({ t: 'cast', spec: { ...spec, jevError: undefined }, d: a.dir.toArray(), p: a.point.toArray() }); }
+    if (spec.tierInt >= 8) { this.slowmo = 0.35; this.screenFlash(hex(ELEMENTS[spec.element].color), 0.12); }
   }
   typedCast(text) {
     const units = /[぀-ヿ一-龯]/.test(text) ? text.length / 3 : text.trim().split(/\s+/).length;
     const dur = Math.min(3.5, 0.3 + units * 0.16);
     const ch = (this.channel = { t: 0, dur, text, typed: true, jev: null });
     this.pendingJevCast = null;
-    if (this.settings.useJev) ch.jev = askJev(text, { chantSeconds: dur, loudness: 0.4 });
+    if (this.settings.useJev) ch.jev = askJev(text, { provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang, chantSeconds: dur, loudness: 0.4 });
     audio.chantStart(this.settings.useJev ? 'arcane' : localParse(text).element);
     const pv = this.settings.useJev ? null : finalizeSpec({ ...localParse(text), text });
     this.hud.preview(pv); this.previewCost = pv?.cost || 0; this.hud.chant('“' + text + '”', '');
@@ -410,7 +491,6 @@ class Game {
     this.spells.cast(spec, p);
     this.viewModel.flick = 1;
     audio.cast(this.lastEl, 0.1, null);
-    if (this.mode === 'online') this.net.send({ t: 'cast', spec, d: this.playerAim.dir.toArray(), p: this.playerAim.point.toArray() });
   }
 
   // ------------------------------------------------------------ combat hooks
@@ -426,7 +506,6 @@ class Game {
     if (target === this.player) {
       this.hud.hurt = Math.min(0.8, this.hud.hurt + res.dmg / 150); audio.hurt(); this.fx.addShake(Math.min(0.5, res.dmg / 200));
       if (this.chanting && res.dmg > 60 && p0EarthFree(target) && Math.random() < 0.5) { this.voice.cancelChant(); this.chanting = false; this.player.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
-      if (this.mode === 'online' && hit.src && hit.src.remoteId) this.net.send({ t: 'dmg', by: hit.src.remoteId, amount: res.dmg, el, rx: res.reaction ? { name: res.reaction.name, color: res.reaction.color } : null, pt: pos.toArray() });
     }
     if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); }
     if (target.brain?.chant && res.dmg > 70 && Math.random() < 0.4) target.brain.cancelChant();
@@ -437,7 +516,8 @@ class Game {
     W.skyU.uDomCol.value.copy(pal.color);
     const sky = new MagicCircle({ seed: 99, tier: 9, color: pal.color, radius: 42, intensity: 1.4 });
     sky.group.rotation.x = Math.PI / 2; sky.group.position.set(pos.x, pos.y + 45, pos.z); sky.spin = 0.25; this.scene.add(sky.group);
-    const fog0 = new THREE.Color(0xb4cde6), sun0 = 3.1, hemi0 = 1.15;
+    const base = (W.base ||= { fog: this.scene.fog.color.clone(), sun: W.sun.intensity, hemi: W.hemi.intensity }); // first call, so overlapping domains can't bake in a tint
+    const fog0 = base.fog, sun0 = base.sun, hemi0 = base.hemi;
     let t = 0; const life = 3.2;
     this.domainT = life;
     fx.add((dt) => {
@@ -488,7 +568,7 @@ class Game {
   onVisualHit(target, hit) { if (hit.src === this.player) this.hud.hitm = 0.6; }
   onHeal(c, n) { if (n > 1) this.hud.popup(c.center().add(new THREE.Vector3(0, 1, 0)), '+' + Math.round(n), 'heal', '#9dff9a'); }
   onShield(c) { this.hud.popup(c.center().add(new THREE.Vector3(0, 1.2, 0)), t('st.shield'), 'react', '#ffd46a'); }
-  onBotChant(c, text) {
+  onBotChant(c, text, onFinish) {
     if (this.mode === 'menu' || !this.settings.botVoice || !window.speechSynthesis) return;
     const ja = getLang() === 'ja';
     const u = new SpeechSynthesisUtterance(text);
@@ -496,9 +576,17 @@ class Game {
     const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith(ja ? 'ja' : 'en'));
     const pref = ja ? vs.find((v) => /Google|Ichiro|Keita/i.test(v.name)) || vs[0] : vs.find((v) => /Google UK English Male|Daniel|David|Mark/i.test(v.name)) || vs[0];
     if (pref) u.voice = pref;
-    speechSynthesis.cancel(); speechSynthesis.speak(u);
+    // Keep the bot charging until playback ends, including time in the speech queue.
+    u.onend = u.onerror = () => { onFinish?.(); };
+    try {
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+      return true;
+    } catch {
+      onFinish?.();
+      return false;
+    }
   }
-  onBotChantCancel() { if (this.mode !== 'menu') speechSynthesis?.cancel(); }
+  onBotChantCancel() { if (this.mode !== 'menu') window.speechSynthesis?.cancel(); }
   onDeath(target, killer) {
     if (!target.alive) return;
     target.alive = false; target.deaths++; if (killer && killer !== target) killer.kills++;
@@ -528,78 +616,9 @@ class Game {
       setTimeout(() => { if (this.mode === 'practice' && this.combatants.includes(target)) this.spawnAt(target, rand(0, TAU), 14); }, 2000);
     } else if (this.mode === 'practice' && target === this.player) {
       setTimeout(() => this.player && this.spawnAt(this.player, Math.PI * 0.5), 2500);
-    } else if (this.mode === 'online' && target === this.player) {
-      this.net.send({ t: 'dead', by: killer?.remoteId ?? null });
-      setTimeout(() => { if (this.mode === 'online' && this.player) this.spawnAt(this.player, rand(0, TAU), rand(10, 45)); }, 3000);
     } else if (this.mode === 'menu') {
       setTimeout(() => { if (this.mode === 'menu' && this.combatants.includes(target)) this.spawnAt(target, rand(0, TAU), 16); }, 2500);
     }
-  }
-
-  // ------------------------------------------------------------ online
-  async joinOnline(name, room) {
-    this.netRoom = room; this.settings.name = name;
-    $('net-msg').textContent = '…';
-    const n = this.net;
-    n.on('join', (m) => { this.addRemote(m.from, m.name); this.hud.feed(t('feed.enter', { who: `<b>${m.name}</b>` })); });
-    n.on('leave', (m) => { const r = this.remotes.get(m.from); if (r) { this.hud.feed(t('feed.left', { who: `<b>${r.name}</b>` })); this.removeCombatant(r); this.remotes.delete(m.from); } });
-    n.on('state', (m) => { const r = this.remotes.get(m.from) || this.addRemote(m.from, m.name || 'Mage'); this.applyRemoteState(r, m); });
-    n.on('cast', (m) => {
-      const r = this.remotes.get(m.from); if (!r || !r.alive) return;
-      r.aimDir.fromArray(m.d); r.aimPoint.fromArray(m.p); r.aimHold = 0.6;
-      r.model?.setElement(m.spec.element);
-      this.spells.cast(m.spec, r); if (!m.spec.basic) this.onCast(r, m.spec);
-      if (r.model) r.model.castAnim = 1;
-    });
-    n.on('dmg', (m) => {
-      const victim = this.remotes.get(m.from); if (!victim) return;
-      this.hud.damage(new THREE.Vector3().fromArray(m.pt), m.amount, m.el, m.rx);
-      if (m.by === n.id) { this.hud.hitm = 1; audio.hitmarker(); }
-    });
-    n.on('dead', (m) => {
-      const v = this.remotes.get(m.from); if (!v) return;
-      v.alive = false; v.deaths++; if (v.model) v.model.root.visible = false;
-      const killer = m.by === n.id ? this.player : this.remotes.get(m.by);
-      if (killer) killer.kills++;
-      this.fx.explosion('arcane', v.center(), 3, 1);
-      this.hud.feed(`<span style="color:#ff9a8a">${t('feed.fell', { who: v.name })}${killer ? t('feed.to', { who: killer === this.player ? t('you') : killer.name }) : ''}</span>`);
-      if (killer === this.player) audio.ui('victory');
-    });
-    n.on('close', () => { if (this.mode === 'online') { this.hud.banner(t('ban.dc'), '', 3); setTimeout(() => this.endToMenu(), 2000); } });
-    try {
-      const w = await n.connect(room, name);
-      this.startMode('online');
-      for (const p of w.peers) this.addRemote(p.id, p.name);
-      this.hud.feed(t('feed.joined', { room: `<b>${room}</b>`, n: w.peers.length }));
-    } catch (e) { $('net-msg').textContent = '✕ ' + e.message; }
-  }
-  addRemote(id, name) {
-    if (this.remotes.has(id)) return this.remotes.get(id);
-    const hue = (id * 0.23) % 1;
-    const r = this.makeCombatant({ id: 'r' + id, name, authoritative: false }, { robe: new THREE.Color().setHSL(hue, 0.5, 0.22).getHex(), trim: 0xe0b95a, accent: new THREE.Color().setHSL(hue, 0.9, 0.6).getHex(), hat: new THREE.Color().setHSL(hue, 0.4, 0.12).getHex() });
-    r.remoteId = id; r.target = new THREE.Vector3(); r.aimDir = new THREE.Vector3(0, 0, -1); r.aimPoint = new THREE.Vector3(); r.aimHold = 0;
-    r.getAim = () => ({ origin: r.eye(new THREE.Vector3()), dir: r.aimDir, point: r.aimPoint });
-    r.alive = false; if (r.model) r.model.root.visible = false;
-    this.remotes.set(id, r);
-    return r;
-  }
-  applyRemoteState(r, m) {
-    r.name = m.name || r.name;
-    r.target.fromArray(m.p); r.vel.fromArray(m.v);
-    if (!r.alive && m.alive) { r.pos.copy(r.target); if (r.model) r.model.root.visible = true; }
-    r.alive = m.alive; r.yaw = m.yaw; r.pitch = m.pitch; r.hp = m.hp; r.shield = m.sh; r.frozen = m.fr; r.chanting = m.ch; r.chantText = m.ct || '';
-    r.aura = m.au ? { el: m.au, t: 1 } : null; r.kills = m.k; r.deaths = m.dd;
-    if (r.aimHold <= 0) {
-      r.aimDir.set(-Math.sin(r.yaw) * Math.cos(r.pitch), Math.sin(r.pitch), -Math.cos(r.yaw) * Math.cos(r.pitch));
-      r.aimPoint.copy(this.world.raycast(r.eye(new THREE.Vector3()), r.aimDir, 80, 1).point);
-    }
-  }
-  sendState(dt) {
-    this.netT = (this.netT || 0) - dt;
-    if (this.netT > 0 || !this.player) return;
-    this.netT = 1 / 20;
-    const p = this.player;
-    this.net.send({ t: 'state', name: p.name, p: p.pos.toArray(), v: p.vel.toArray(), yaw: p.yaw, pitch: p.pitch, hp: Math.round(p.hp), sh: Math.round(p.shield), fr: p.frozen, ch: this.chanting, ct: this.chanting ? this.voice.chantText().slice(-120) : '', au: p.aura?.el || null, alive: p.alive, k: p.kills, dd: p.deaths });
   }
 
   // ------------------------------------------------------------ input
@@ -617,6 +636,7 @@ class Game {
       if (e.code === 'KeyF' || e.code === 'KeyV') this.beginChant();
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
       if (e.code === 'KeyE') this.dashPlayer();
+      if (e.code === 'KeyJ') this.hud.toggleJevView();
       if (e.code === 'Tab') e.preventDefault();
     });
     addEventListener('keyup', (e) => {
@@ -631,6 +651,7 @@ class Game {
     });
     addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.lmb = false; if (e.button === 2) this.endChant(); });
     addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('wheel', (e) => { if (this.mode !== 'menu' && this.hud.scrollJev(e.deltaY * (e.deltaMode === 1 ? 18 : 1))) e.preventDefault(); }, { passive: false });
     addEventListener('mousemove', (e) => { if (document.pointerLockElement === canvas) { this.mouse.dx += e.movementX; this.mouse.dy += e.movementY; } });
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== canvas && this.mode !== 'menu' && !this.typing && !this.paused) {
@@ -657,6 +678,7 @@ class Game {
     document.querySelectorAll('.lang-switch button').forEach((b) => b.classList.toggle('on', b.dataset.lang === ui));
     $('set-ui').value = ui;
     this.refreshJevLabels();
+    if (this.voiceInit) $('menu-mic-message').textContent = t('menu.mic.ready');
     $('howto-elements').innerHTML = ELEMENT_KEYS.map((k) => `<span class="chip">${elChip(k)} ${elName(k)}</span>`).join('');
     $('howto-shapes').innerHTML = Object.keys(SHAPES).map((k) => `<span class="chip">${SHAPES[k].icon} ${shapeName(k)}</span>`).join('');
     const ja = ui === 'ja';
@@ -665,12 +687,20 @@ class Game {
   }
   bindMenus() {
     const s = this.settings;
+    $('menu-enable-voice').addEventListener('click', () => { void this.enableVoice(); });
+    $('menu-disable-voice').addEventListener('click', () => {
+      this.voice.dispose(); this.voiceInit = false;
+      $('menu-enable-voice').hidden = false; $('menu-disable-voice').hidden = true;
+      $('menu-mic-badge').textContent = 'OFF'; $('menu-mic-badge').classList.remove('ready');
+      $('menu-meter-fill').style.width = '0%';
+      $('menu-mic-message').textContent = t('menu.mic.permission');
+    });
     document.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => {
       audio.init(); audio.ui('click');
       const a = b.dataset.action;
-      if (a === 'duel') this.startMode('duel');
+      if (a === 'duel') { this.backTo = 'menu'; this.showScreen('duel-setup'); }
+      else if (a === 'begin-duel') this.startMode('duel');
       else if (a === 'practice') this.startMode('practice');
-      else if (a === 'online') { $('net-name').value = s.name || 'Mage' + Math.floor(Math.random() * 900 + 100); this.showScreen('online'); }
       else if (a === 'howto') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('howto'); }
       else if (a === 'settings') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('settings'); }
       else if (a === 'resume') { this.showScreen(null); this.lock(); }
@@ -681,19 +711,28 @@ class Game {
       const ui = b.dataset.lang; this.applyLanguage(ui);
       s.lang = ui === 'ja' ? 'ja-JP' : 'en-US'; $('set-lang').value = s.lang; this.voice.setLang(s.lang); saveSettings(s);
     }));
-    $('net-join').addEventListener('click', () => { s.name = $('net-name').value.trim() || 'Mage'; saveSettings(s); this.joinOnline(s.name, $('net-room').value.trim() || 'arena'); });
     const bind = (id, key, conv = (v) => v, prop = 'value', after) => {
       const el = $(id); el[prop] = s[key];
       el.addEventListener('change', () => { s[key] = conv(el[prop]); saveSettings(s); after?.(); });
       el.addEventListener('input', () => { s[key] = conv(el[prop]); after?.(); });
     };
-    bind('set-ui', 'ui', String, 'value', () => { this.applyLanguage(s.ui); s.lang = s.ui === 'ja' ? 'ja-JP' : 'en-US'; $('set-lang').value = s.lang; this.voice.setLang(s.lang); saveSettings(s); });
+    bind('set-ui', 'ui', String, 'value', () => this.applyLanguage(s.ui));
     bind('set-lang', 'lang', String, 'value', () => this.voice.setLang(s.lang));
     bind('set-diff', 'diff');
-    bind('set-quality', 'quality', Number, 'value', () => { $('menu-status').textContent = '↻ reload'; });
+    bind('set-quality', 'quality', Number, 'value', () => { $('settings-reload').textContent = t('set.reload'); });
+    bind('set-chantsize', 'chantSize', Number, 'value', () => {
+      document.documentElement.style.setProperty('--chant-text-size', `${s.chantSize}px`);
+      $('set-chantsize-value').textContent = `${s.chantSize} px`;
+    });
+    $('set-chantsize-value').textContent = `${s.chantSize} px`;
     bind('set-sens', 'sens', Number);
     bind('set-vol', 'vol', Number, 'value', () => audio.setVolume(s.vol));
     bind('set-music', 'music', Number, 'value', () => audio.setMusic(s.music));
+    bind('set-provider', 'spellProvider', String, 'value', () => {
+      this.pendingJevCast = null; this.spec = null; this.channel = null; this.previewCost = 0; this.hud.preview(null);
+      this.checkJev();
+    });
+    $('set-loadmodel').addEventListener('click', () => this.loadLocalModel());
     bind('set-jev', 'useJev', Boolean, 'checked', () => { this.pendingJevCast = null; this.spec = null; this.previewCost = 0; this.hud.preview(null); });
     bind('set-instantcast', 'instantCast', Boolean, 'checked');
     bind('set-botjev', 'botJev', Boolean, 'checked');
@@ -731,11 +770,28 @@ class Game {
       if (glide && c.vel.y < -2.2) c.vel.y = -2.2;
       if (jump && c.grounded && c.canAct()) { c.vel.y = 8.5; c.grounded = false; }
     }
-    const prevY = c.pos.y;
+    const prevY = c.pos.y, prevX = c.pos.x, prevZ = c.pos.z;
     c.pos.addScaledVector(c.vel, dt);
+    // cliffs: terrain more than a step above the feet blocks the move; slide along the face on whichever axis stays free
+    if (!fly) {
+      // blocked if the ground ahead is a tall step, or a cliff-steep rise the feet would end up inside (a jump that
+      // clears the lip still lands on top)
+      const H = (x, z) => this.world.heightAt(x, z), h0 = H(prevX, prevZ), top = Math.max(prevY, c.pos.y) + 0.7;
+      const bad = (x, z) => { const h = H(x, z); return h > top || (h - h0 > Math.hypot(x - prevX, z - prevZ) * 1.25 + 0.01 && h > c.pos.y - 0.05); };
+      if (bad(c.pos.x, c.pos.z)) {
+        if (!bad(c.pos.x, prevZ)) { c.pos.z = prevZ; c.vel.z = 0; }
+        else if (!bad(prevX, c.pos.z)) { c.pos.x = prevX; c.vel.x = 0; }
+        else { c.pos.x = prevX; c.pos.z = prevZ; c.vel.x = c.vel.z = 0; }
+      }
+    }
     const gy = this.world.groundAt(c.pos.x, c.pos.z, Math.max(prevY, c.pos.y));
     if (c.pos.y <= gy) { c.pos.y = gy; if (c.vel.y < 0) c.vel.y = 0; c.grounded = true; }
     else c.grounded = c.pos.y - gy < 0.08 && c.vel.y <= 0;
+    // cliff faces can't be stood on (or jumped up in hops): slide off them
+    if (c.grounded && !fly && c.pos.y - this.world.heightAt(c.pos.x, c.pos.z) < 0.1) {
+      const n = this.world.normalAt(c.pos.x, c.pos.z);
+      if (n.y < 0.66) { c.vel.x += n.x * 60 * dt; c.vel.z += n.z * 60 * dt; c.grounded = false; }
+    }
     // bump the head on the underside of a construct
     for (const b of this.world.boxes) if (c.vel.y > 0 && this.world.inBox(b, { x: c.pos.x, y: c.pos.y + 1.8, z: c.pos.z }, 0.2) && prevY + 1.8 <= b.y - b.hy + 0.05) { c.pos.y = b.y - b.hy - 1.81; c.vel.y = 0; }
     this.world.collideBody(c.pos);
@@ -747,22 +803,36 @@ class Game {
     requestAnimationFrame(() => this.loop());
     const raw = Math.min(this.clock.getDelta(), 0.05);
     if (this.slowmo > 0) { this.slowmo -= raw; this.timeScale = 0.25; } else this.timeScale += (1 - this.timeScale) * Math.min(1, raw * 6);
-    const dt = this.paused && this.mode !== 'online' ? 0 : raw * this.timeScale;
+    const dt = this.paused ? 0 : raw * this.timeScale;
     TIME.value += dt;
-    this.voice.update(raw); // Sample before animating; speech feedback uses real time, including slow motion.
+    this.voice.update(raw);
+    if (this.mode !== 'menu' && !this.paused) {
+      const listening = this.chanting || (this.voice.handsFree && this.voice.running);
+      this.hud.drawWave(raw, listening ? 'listen' : this.voice.analyser ? 'idle' : 'off');
+    }
+    $('menu-meter-fill').style.width = `${Math.round(this.voice.level * 100)}%`; // Sample before animating; speech feedback uses real time, including slow motion.
     if (this.mode === 'menu') this.updateMenuCam(raw);
     if (dt > 0) this.tick(dt, raw);
     audio.updateListener(this.camera);
     const u = this.post.uniforms, p = this.player;
-    u.uCA.value = 0.25 + this.fx.shake * 3 + this.hud.hurt * 2 + (p?.frozen > 0 ? 1 : 0);
+    u.uCA.value = this.fx.shake * 3 + this.hud.hurt * 2 + (p?.frozen > 0 ? 1 : 0);
     this.domainT = Math.max(0, (this.domainT || 0) - raw);
     if (p?.frozen > 0) u.uTint.value.set(0.85, 0.95, 1.15); else if (p && !p.alive) u.uTint.value.set(0.7, 0.7, 0.75); else if (this.domainT <= 0) u.uTint.value.set(1, 1, 1);
-    u.uSat.value = p && !p.alive ? 0.3 : 1.12;
-    this.post.render(TIME.value);
+    u.uSat.value = p && !p.alive ? 0.3 : 1.04;
+    // a paused world is a still image: redraw it only when the post grade or the canvas size changes
+    const still = dt === 0 && this.mode !== 'menu' && !this.debugCam && `${u.uCA.value}|${u.uSat.value}|${u.uTint.value.toArray()}`;
+    if (still && still === this.stillKey) return;
+    this.stillKey = still;
+    if (this.debugCam) { // observer view for rendering only; aim and cast origin keep using the player's camera
+      const cam = this.camera, pos = cam.position.clone(), q = cam.quaternion.clone(), vm = this.viewModel.group.visible;
+      cam.position.set(...this.debugCam.pos); cam.lookAt(...this.debugCam.target); this.viewModel.group.visible = false;
+      this.post.render(TIME.value);
+      cam.position.copy(pos); cam.quaternion.copy(q); cam.updateMatrixWorld(); this.viewModel.group.visible = vm;
+    } else this.post.render(TIME.value);
   }
   updateMenuCam() {
     const tt = (performance.now() / 1000) * 0.05;
-    this.camera.position.set(Math.cos(tt) * 34, 7 + Math.sin(tt * 2) * 1.5, Math.sin(tt) * 34);
+    this.camera.position.set(Math.cos(tt) * 27, 6.5 + Math.sin(tt * 2) * 1.2, Math.sin(tt) * 27); // inside the column ring (r 32-36), outside the arches (r 22)
     this.camera.lookAt(0, 3, 0);
   }
   tick(dt, raw) {
@@ -808,7 +878,7 @@ class Game {
       }
       this.playerAim.origin.copy(this.camera.position); this.playerAim.dir.copy(dir);
       this.playerAim.point.copy(this.camera.position).addScaledVector(dir, dist);
-      // chant: live transcript, local preview, speculative Jev, charging orb between the gauntlets
+        // The chant stays open until release; elapsed time only raises the wand's visual and audio energy.
       if (this.chanting) {
         this.chantT += dt;
         const text = this.voice.chantText();
@@ -845,7 +915,6 @@ class Game {
       this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded, voiceLevel: this.chanting ? this.voice.level : 0 });
       this.viewModel.group.visible = p.alive;
       if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(); } }
-      if (this.mode === 'online') this.sendState(raw);
     }
     for (const b of this.bots) {
       const out = b.brain.update(dt);
@@ -853,23 +922,26 @@ class Game {
       if (b.alive) this.stepBody(b, dt, out.wish, out.speed || 6, out.jump, false);
       b.updateStatus(dt, this);
     }
-    for (const r of this.remotes.values()) {
-      if (r.aimHold > 0) r.aimHold -= dt;
-      if (r.target) { r.target.addScaledVector(r.vel, dt); r.pos.lerp(r.target, Math.min(1, dt * 12)); }
-      r.updateStatus(dt, this);
-    }
     for (const c of this.combatants) {
       if (!c.model) continue;
       c.model.root.position.copy(c.pos);
       c.model.root.rotation.y = c.yaw;
-      c.model.update(dt, { speed: Math.hypot(c.vel.x, c.vel.z), chanting: c.chanting, pitch: c.pitch, frozen: c.frozen > 0, shield: c.shield, aura: c.aura?.el });
+      if (c.hitFlash > 0) c.hitFlash = Math.max(0, c.hitFlash - dt * 5);
+      c.model.update(dt, { hit: c.hitFlash || 0, speed: Math.hypot(c.vel.x, c.vel.z), chanting: c.chanting, pitch: c.pitch, frozen: c.frozen > 0, shield: c.shield, shieldEl: c.shieldEl, aura: c.aura?.el });
+      // afflictions burn brightest; enhancements glow softer
+      const stEl = c.dots[0]?.el || Object.keys(c.enh)[0] || null;
+      c.model.status(stEl, c.dots.length ? 0.9 : 0.45, dt);
       if (c.chanting && Math.random() < 0.6) this.fx.element(c.brain?.favEl || 'arcane', c.model.handWorld(new THREE.Vector3()), { count: 1, speed: 0.5, size: 0.12, life: 0.5 });
+      // footfall dust when running on the ground (earthy on paths, pale on grass)
+      const run = Math.hypot(c.vel.x, c.vel.z);
+      if (c.grounded && run > 4 && Math.random() < dt * run * 0.9) {
+        this.fx.smoke.emit({ x: c.pos.x + rand(-0.2, 0.2), y: c.pos.y + 0.08, z: c.pos.z + rand(-0.2, 0.2), vx: -c.vel.x * 0.08 + rand(-0.3, 0.3), vy: rand(0.3, 0.7), vz: -c.vel.z * 0.08 + rand(-0.3, 0.3), life: 0.8, size: 0.3, size1: 0.9, color: DUST, alpha: 0.35, drag: 2, frame: 0 });
+      }
     }
     this.spells.update(dt);
     this.fx.update(dt);
-    this.world.update(dt, this.fx, this.camera);
+    this.world.update(dt, this.fx, this.camera, this.combatants);
     this.hud.update(raw, this.camera);
-    if (this.mode === 'online' && p) this.hud.scoreboard([p, ...this.remotes.values()].map((c) => ({ name: c === p ? p.name : c.name, kills: c.kills, deaths: c.deaths })));
   }
 }
 
@@ -880,8 +952,75 @@ window.VA = {
   finalizeSpec, localParse, buildSpec,
   test(shape, element = 'fire', o = {}) {
     const g = window.game, p = g.player; if (!p) return;
-    const spec = finalizeSpec({ text: `${element} ${shape}`, element, element2: o.element2 || null, shape, power: 0.6, tier: 0.5, speed: 0.5, size: 0.5, temperature: 0.6, weight: 0.4, sharpness: 0.5, count: 0.4, duration: 0.5, chaos: 0.3, homing: 0.2, isSpell: 1, source: 'local', ...o });
+    const spec = finalizeSpec({ text: `${element} ${shape}`, element, element2: o.element2 || null, shape, power: 0.6, tier: 0.5, speed: 0.5, size: 0.5, temperature: localParse(element).temperature, weight: 0.4, sharpness: 0.5, count: 0.4, duration: 0.5, chaos: 0.3, homing: 0.2, isSpell: 1, source: 'local', ...o });
     p.mana = p.maxMana; g.performCast(spec, false); return spec.name;
   },
+  // cast an incantation through the local parser (optionally overriding spec fields): VA.chant('大地の地熱トルネード')
+  chant(text, o = {}) {
+    const g = window.game, p = g.player; if (!p) return;
+    const spec = finalizeSpec({ ...buildSpec(text, localParse(text), null, { loudness: 0.6, chantSeconds: 2 }), ...o });
+    p.mana = p.maxMana; g.performCast(spec, false); return spec;
+  },
+  // observer camera that tracks the newest active spell: VA.follow([dx, dy, dz, lookUp])
+  follow(off = [0, 4, 13, 1.5]) {
+    const g = window.game; cancelAnimationFrame(this._follow); let last = null;
+    const f = () => { const s = g.spells.active.at(-1), c = s?.pos || s?.center; if (c) last = c.clone(); if (last) g.debugCam = { pos: [last.x + off[0], last.y + off[1], last.z + off[2]], target: [last.x, last.y + off[3], last.z] }; this._follow = requestAnimationFrame(f); };
+    f();
+  },
+  // deterministic stepping (works even when the tab is hidden and rAF is paused): VA.step(0.5)
+  step(sec, dt = 1 / 60) { const g = window.game; g.paused = true; for (let t = 0; t < sec - 1e-6; t += dt) { TIME.value += dt; g.tick(dt, dt); } g.post.render(TIME.value); },
+  // VFX gallery: stage an empty field, cast, step to a representative moment, frame the spell. VA.gallery('天高く立ち昇る炎のトルネード')
+  // or VA.gallery({ shape: 'wave', element: 'water' }, { at: 0.9, view: 'side' }). Returns the spec for inspection.
+  gallery(what, { at = null, view = null, zoom = 1 } = {}) {
+    const g = window.game, p = g.player; if (!p) return 'start practice first';
+    g.paused = false; g.spells.clear(); g.fx.clear(); g.debugCam = null; g.slowmo = 0; g.timeScale = 1;
+    for (const b of g.bots) { b.pos.set(0, g.world.heightAt(0, -12), -12); b.vel.set(0, 0, 0); b.hp = b.maxHp; if (b.brain) b.brain.dummy = true; }
+    const sh0 = typeof what === 'string' ? localParse(what).shape : what.shape;
+    p.pos.set(0, g.world.heightAt(0, 12) + 0.05, 12); p.vel.set(0, 0, 0); p.yaw = 0; p.pitch = ['orb', 'barrage', 'crescent', 'funnels', 'beam', 'chain'].includes(sh0) ? 0.01 : -0.12; p.mana = p.maxMana;
+    for (const id of ['hud', 'spell-card']) { const e = document.getElementById(id); if (e) e.style.visibility = 'hidden'; }
+    this.step(0.2);
+    const spec = typeof what === 'string' ? this.chant(what) : this.test(what.shape, what.element, what) && null;
+    const S = spec || g.spells.active.at(-1)?.spec, sh = S?.shape;
+    const T = at ?? ({ orb: 0.3, barrage: 0.45, crescent: 0.28, funnels: 1.2, beam: 0.7, tornado: 1.3, meteor: 1.5, nova: 0.25, spikes: 0.55, wall: 0.8, barrier: 0.8, vortex: 1.2, chain: 0.12, storm: 1.8, ward: 0.6, field: 1.2, wave: 0.9, enhance: 0.8, hand: 1.0 }[sh] ?? 0.6);
+    this.step(T);
+    // frame: the newest spell's focus point (moving volumes, projectiles or the caster for self forms)
+    const sp = g.spells.active.at(-1);
+    const pts = sp ? [...(sp.missiles || []).filter((m) => m.launched).map((m) => m.pos), ...(sp.projectiles || []).map((q) => q.pos), ...(sp.blades || []).map((b) => b.pos)] : [];
+    const f = pts.length ? pts.reduce((a, b) => a.add(b), new THREE.Vector3()).divideScalar(pts.length) : (sp?.pos || sp?.center || p.pos).clone();
+    const size = Math.max(2, (sp?.H || 0) * 0.75, (sp?.R || 0) * 1.6, (sp?.W || 0) * 0.8, sp?.len ? sp.len * 0.35 : 0, sp?.w ? sp.w * 6 : 0) * zoom;
+    const v = view ?? (['orb', 'barrage', 'crescent', 'beam', 'chain', 'spikes', 'funnels'].includes(sh) ? 'side' : 'front');
+    const up = sh === 'tornado' || sh === 'wall' || sh === 'barrier' || sh === 'wave' ? size * 0.45 : sh === 'storm' ? size * 0.9 : 1;
+    const d = size * 1.25 + 4;
+    const off = v === 'side' ? [d * 1.1, d * 0.2 + 1, -1] : v === 'top' ? [0.01, d * 1.6, d * 0.3] : [d * 0.55, d * 0.22 + 0.5, -d];
+    if (sh === 'beam' || sh === 'chain') { f.set(0, 1.6, 0); off.splice(0, 3, 17, 3, 2); }
+    this.cam([f.x + off[0], f.y + off[1], f.z + off[2]], [f.x, f.y + up, f.z]);
+    g.post.render(TIME.value);
+    return S && { name: S.name, shape: S.shape, element: S.element, substance: S.substance, h: +S.height.toFixed(2), w: +S.width.toFixed(2) };
+  },
+  // contact sheet: one form across every element in a labelled 4×3 grid (VA.sheet('wave')); VA.sheet() removes it
+  sheet(shape, opts = {}) {
+    document.getElementById('va-sheet')?.remove();
+    if (!shape) return;
+    const g = window.game, src = g.renderer.domElement, cv = document.createElement('canvas');
+    cv.id = 'va-sheet'; cv.width = 1280; cv.height = 720; Object.assign(cv.style, { position: 'fixed', inset: '0', width: '100vw', height: '100vh', zIndex: 99999, background: '#000' });
+    const c = cv.getContext('2d'), W = 320, H = 240, errs = [];
+    ELEMENT_KEYS.forEach((el, i) => {
+      const oe = console.error; console.error = (e) => errs.push(el + ': ' + String(e?.message || e));
+      try { this.gallery({ shape, element: el, ...(opts.o || {}) }, opts); } catch (e) { errs.push(el + ': ' + e.message); }
+      console.error = oe;
+      const cam = g.camera, keep = [cam.position.clone(), cam.quaternion.clone()];
+      if (g.debugCam) { cam.position.set(...g.debugCam.pos); cam.lookAt(...g.debugCam.target); g.viewModel.group.visible = false; }
+      g.post.render(TIME.value);
+      const x = (i % 4) * W, y = Math.floor(i / 4) * H, sw = src.width, sh = src.height, ch = sw * H / W;
+      c.drawImage(src, 0, (sh - ch) / 2, sw, ch, x, y, W, H);
+      cam.position.copy(keep[0]); cam.quaternion.copy(keep[1]); cam.updateMatrixWorld();
+      c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(x, y, W, 22); c.fillStyle = '#fff'; c.font = '15px sans-serif'; c.fillText(shape + ' · ' + el, x + 6, y + 16);
+    });
+    if (errs.length) { c.fillStyle = '#f66'; c.font = '14px monospace'; errs.slice(0, 6).forEach((e, k) => c.fillText(e.slice(0, 80), 970, 500 + k * 18)); }
+    document.body.appendChild(cv);
+    return errs;
+  },
+  // debug observer camera: VA.cam([x,y,z],[tx,ty,tz]) · VA.cam() restores the player view
+  cam(pos, target = [0, 2, 0]) { cancelAnimationFrame(this._follow); const g = window.game; g.debugCam = pos ? { pos, target } : null; g.viewModel.group.visible = !pos && !!g.player; },
   face(target) { const g = window.game, p = g.player, tt = target || g.bots[0]; p.yaw = Math.atan2(p.pos.x - tt.pos.x, p.pos.z - tt.pos.z); p.pitch = 0; },
 };

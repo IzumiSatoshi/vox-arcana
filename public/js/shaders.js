@@ -180,22 +180,25 @@ export function barrierMaterial({ color, intensity = 1.6 } = {}) {
 }
 
 // Camera-facing ribbon (trails, lightning bolts).
-export function ribbonMaterial({ color, core = 0xffffff, intensity = 3, opacity = 1, wisp = 1 } = {}) {
+// fade: alpha ramps in along the ribbon (trails); off for bolts. normal: alpha-blended instead of additive (daylight contrast)
+export function ribbonMaterial({ color, core = 0xffffff, intensity = 3, opacity = 1, wisp = 1, fade = true, normal = false } = {}) {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: col(color) }, uCore: { value: col(core) }, uI: { value: intensity }, uAlpha: { value: opacity }, uTime: TIME, uSeed: { value: Math.random() * 40 }, uWisp: { value: wisp } },
+    uniforms: { uColor: { value: col(color) }, uCore: { value: col(core) }, uI: { value: intensity }, uAlpha: { value: opacity }, uTime: TIME, uSeed: { value: Math.random() * 40 }, uWisp: { value: wisp }, uFadeT: { value: fade ? 1 : 0 }, uNormal: { value: normal ? 1 : 0 } },
     vertexShader: `attribute float aT; attribute float aSide; varying float vT; varying float vS; void main(){ vT=aT; vS=aSide; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
     fragmentShader: NOISE + /* glsl */ `
-      uniform vec3 uColor,uCore; uniform float uI,uAlpha,uTime,uSeed,uWisp; varying float vT; varying float vS;
+      uniform vec3 uColor,uCore; uniform float uI,uAlpha,uTime,uSeed,uWisp,uFadeT,uNormal; varying float vT; varying float vS;
       void main(){
         float across=1.0-abs(vS);
         float core=smoothstep(0.55,1.0,across);
         float n=snoise(vec3(vT*5.0-uTime*5.0,vS*1.2,uSeed));
         float wisp=mix(1.0,smoothstep(-0.25,0.15,n+vT*0.9-0.35),uWisp);
-        float a=smoothstep(0.0,0.6,across)*vT*uAlpha*wisp;
-        vec3 c=mix(uColor,uCore,core*vT);
+        float ft=mix(1.0,vT,uFadeT);
+        float a=smoothstep(0.0,0.6,across)*ft*uAlpha*wisp;
+        vec3 c=mix(uColor,uCore,core*ft);
+        if(uNormal>0.5){ gl_FragColor=vec4(c*uI,smoothstep(0.0,0.35,across)*ft*uAlpha*wisp); return; }
         gl_FragColor=vec4(c*uI*a,a);
       }`,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    transparent: true, depthWrite: false, blending: normal ? THREE.NormalBlending : THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
 }
 
@@ -210,9 +213,9 @@ export function blastMaterial({ hot, mid, cool, smoke, seed = Math.random() * 50
     vertexShader: NOISE + /* glsl */ `
       uniform float uProg,uSeed,uTime; varying vec3 vObj; varying vec3 vN; varying vec3 vV; varying float vDisp;
       void main(){
-        float d=fbm3(normal*1.6+vec3(uSeed,uSeed*0.7,uProg*1.2));
+        float d=fbm3(normal*1.05+vec3(uSeed,uSeed*0.7,uProg*1.2));
         vDisp=d;
-        vec3 p=position+normal*d*(0.35+uProg*0.25);
+        vec3 p=position+normal*d*(0.5+uProg*0.35);                      // big soft billows, not cauliflower
         vObj=p;
         vec4 mv=modelViewMatrix*vec4(p,1.0);
         vN=normalize(normalMatrix*normal); vV=normalize(-mv.xyz);
@@ -222,12 +225,12 @@ export function blastMaterial({ hot, mid, cool, smoke, seed = Math.random() * 50
       uniform float uProg,uSeed,uEm; uniform vec3 uHot,uMid,uCool,uSmoke;
       varying vec3 vObj; varying vec3 vN; varying vec3 vV; varying float vDisp;
       void main(){
-        float n=fbm3(vObj*2.2+vec3(uSeed*1.3,-uProg*1.5,uSeed))*0.5+0.5;
+        float n=fbm3(vObj*1.4+vec3(uSeed*1.3,-uProg*1.5,uSeed))*0.5+0.5;
         float ero=smoothstep(0.55,1.0,uProg);
         if(n<ero*1.05-0.02) discard;
         vec3 N=normalize(vN);
         float face=max(dot(N,normalize(vV)),0.0);
-        float heat=clamp(1.15-uProg*1.7+(n-0.5)*0.9+face*0.35+vDisp*0.4,0.0,1.0);
+        float heat=clamp(1.0-uProg*2.6+(n-0.5)*0.9+face*0.3+vDisp*0.4,0.0,1.0); // white-hot only in the first instant
         heat=floor(heat*5.0+0.5)/5.0;
         vec3 L=normalize(vec3(-0.4,0.8,0.3));
         float lit=step(0.1,dot(N,L)+(n-0.5)*0.5)*0.45+0.55;
@@ -295,6 +298,7 @@ export function addOutline(mesh, thickness = 0.02, color = 0x1a1420) {
   if (!_outlineCache.has(key)) _outlineCache.set(key, outlineMaterial(thickness, color));
   const o = new THREE.Mesh(mesh.geometry, _outlineCache.get(key));
   o.raycast = () => {};
+  o.userData.noAO = true; // AO's override material drops the hull extrusion, so it would only redraw the parent's depth/normals
   mesh.add(o);
   return o;
 }
@@ -310,4 +314,45 @@ export function addRim(material, color = 0xfff2d8, strength = 0.6, power = 3.0) 
   };
   material.customProgramCacheKey = () => 'rim' + strength + power;
   return material;
+}
+
+// Alpha-blended "matter" flow for volumes (tornados, columns, waves). Reads in daylight where additive glow washes out.
+// Continuous inputs from the look: uHeat (luminous temperature) bands the body into toon flame (core → colour → deep edge),
+// uCrust (density) turns it into dark lit matter with glowing veins, uEdge (sharpness) hardens the silhouette.
+export function matterFlowMaterial({ color, core, dark, intensity = 2, scroll = 2, twist = 1, stripes = 4, heat = 0.5, crust = 0, edge = 0.5, density = 0.5, opacity = 1 } = {}) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: TIME, uColor: { value: col(color) }, uCore: { value: col(core) }, uDark: { value: col(dark) }, uI: { value: intensity }, uScroll: { value: scroll }, uTwist: { value: twist }, uStripes: { value: stripes }, uHeat: { value: heat }, uCrust: { value: crust }, uEdge: { value: edge }, uDens: { value: density }, uAlpha: { value: opacity } },
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv=uv; vec4 mv=modelViewMatrix*vec4(position,1.0); vN=normalize(normalMatrix*normal); vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;} `,
+    fragmentShader: NOISE + /* glsl */ `
+      uniform vec3 uColor,uCore,uDark; uniform float uTime,uI,uScroll,uTwist,uStripes,uHeat,uCrust,uEdge,uDens,uAlpha;
+      varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){
+        float u=vUv.x+vUv.y*uTwist;
+        // tongues: noise stretched along the flow, stretched more when hot (licking flames), rounder when dense
+        vec3 q=vec3(u*uStripes, vUv.y*(2.0+uCrust*2.0-uHeat)-uTime*uScroll, uTime*0.25);
+        float n=snoise(q)*0.62+snoise(q*2.2+4.0)*0.28+snoise(q*5.0+9.0)*0.1*(1.0-uEdge*0.5);
+        float ends=smoothstep(0.0,0.12,vUv.y)*smoothstep(1.0,0.75,vUv.y);
+        float th=mix(0.05,-0.6,uCrust)+(1.0-ends)*0.6;                           // coverage threshold
+        float ew=mix(0.25,0.02,uEdge);                                           // edge softness
+        float cover=smoothstep(th-ew,th+ew,n);
+        vec3 N=normalize(vN); float facing=abs(dot(N,normalize(vV)));
+        // toon flame ramp: depth inside the tongue picks the band
+        float k=clamp((n-th)/0.55,0.0,1.0);
+        float kb=mix(k,floor(k*3.0+0.35)/3.0,0.6+uEdge*0.4);
+        vec3 flame=kb<0.34? uColor*0.55 : kb<0.67? uColor : mix(uColor,uCore,0.7);
+        flame*=uI*(0.6+0.8*kb);
+        // dense crust: lit dark matter + glowing cracks
+        float vn=abs(snoise(q*1.7+11.0));
+        float vein=smoothstep(0.14,0.0,vn)+smoothstep(0.4,0.0,vn)*0.2;
+        float lit=0.55+0.45*smoothstep(-0.2,0.6,N.y+n*0.4);
+        vec3 crust=uDark*lit*(0.75+0.25*facing);
+        crust=mix(crust,uColor*uI*1.2,vein*(0.4+uHeat*0.6));
+        vec3 c=mix(flame,crust,uCrust);
+        c+=uColor*uI*0.3*pow(1.0-facing,2.0)*uHeat*(1.0-uCrust*0.5);           // hot rim
+        float a=cover*uAlpha*(0.35+0.65*max(uDens,uHeat))*smoothstep(0.0,0.3,facing);
+        if(a<0.02) discard;
+        gl_FragColor=vec4(c,a);
+      }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  });
 }

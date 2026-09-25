@@ -173,6 +173,7 @@ export function applyHit(game, target, hit) {
     if (target.shield <= 0.5) { target.shield = 0; fx.explosion(target.shieldEl || 'earth', target.center(), 1.8, 0.4, null, { noDecal: true }); }
   }
   target.hp -= dmg;
+  if (dmg > 0.5 && !hit.dot) target.hitFlash = Math.min(1, 0.45 + dmg / 60); // model flashes white on a real hit
   if (hit.src && hit.src !== target) {
     if (target.curse > 0 || target.aura?.el === 'darkness') hit.src.heal(dmg * 0.15);
     const dk = hit.src.enhP?.('darkness'); if (dk != null) hit.src.heal(dmg * (0.05 + 0.08 * dk));

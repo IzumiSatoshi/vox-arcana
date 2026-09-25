@@ -45,6 +45,17 @@ test('known spell still dispatches on release with no added wait', async () => {
   const { g, rec } = await game(); rec.result('fireball'); g.endChant();
   assert.deepEqual(g.cast, ['fireball']); assert.equal(g.grace, undefined); g.voice.dispose();
 });
+test('a chant held past the former circle fill still accepts words and casts on release', async () => {
+  const { g, rec, advance } = await game();
+  advance(30000);
+  assert.equal(g.chanting, true);
+  rec.result('summon fireball', true);
+  assert.equal(g.voice.chantText(), 'summon fireball');
+  assert.deepEqual(g.cast, []);
+  g.endChant();
+  assert.deepEqual(g.cast, ['summon fireball']);
+  g.voice.dispose();
+});
 test('silence eventually fizzles and cannot cast from later callbacks', async () => {
   const { g, rec, advance } = await game(); g.endChant(); advance(1801); g.resolveVoiceGrace();
   assert.equal(g.message, 'chant.silence'); assert.equal(g.grace, null);
@@ -55,7 +66,7 @@ test('old saved defaults migrate once while later explicit opt-ins persist', () 
   const code = main.slice(main.indexOf('const DEFAULTS ='), main.indexOf('const REACTIONS ='));
   const context = vm.createContext({ navigator: { language: 'ja-JP' }, localStorage: { getItem: () => stored, setItem: (key, value) => { stored = value; } } });
   const settings = vm.runInContext(code + '\nloadSettings();', context);
-  assert.equal(settings.instantCast, true); assert.equal(settings.localVoice, false); assert.equal(settings.warmVoice, false); assert.equal(settings.lang, 'ja-JP');
+  assert.equal(settings.instantCast, false); assert.equal(settings.music, 0.175); assert.equal(settings.localVoice, false); assert.equal(settings.warmVoice, false); assert.equal(settings.lang, 'ja-JP');
   stored = JSON.stringify({ ...settings, localVoice: true });
   assert.equal(vm.runInContext('loadSettings()', context).localVoice, true);
 });

@@ -61,6 +61,20 @@ test('browser restarts preserve the current chant without old-session callbacks'
   v.rec.result([['dragon']]); old.result([['wrong']]);
   assert.equal(v.chantText(), 'summon fire dragon'); v.cancelChant();
 });
+test('browser session ending during a long hold restarts recognition without ending the chant', async () => {
+  const v = await setup(); v.beginChant(); const first = v.rec;
+  v.win.t0 -= 30000;
+  first.result([['summon fire', true]]);
+  first.onend();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.notEqual(v.rec, first);
+  assert.equal(v.win?.closed, false);
+  v.rec.result([['dragon', true]]);
+  const cast = v.endChant();
+  assert.equal(cast.text, 'summon fire dragon');
+  assert.ok(cast.chantSeconds >= 30);
+  v.dispose();
+});
 test('hands-free final results cast once and manual results never auto-cast', async () => {
   const v = await setup(), casts = []; v.onAuto = s => casts.push(s);
   v.handsFree = true; const auto = v.rec;

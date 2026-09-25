@@ -6,6 +6,13 @@ import { t } from './i18n.js';
 const $ = (id) => document.getElementById(id);
 const _html = new WeakMap(); // write innerHTML only when it actually changes
 const setHTML = (el, h) => { if (_html.get(el) !== h) { _html.set(el, h); el.innerHTML = h; } };
+const _styles = new WeakMap();
+const setStyle = (el, key, value) => {
+  let cache = _styles.get(el);
+  if (!cache) { cache = {}; _styles.set(el, cache); }
+  if (cache[key] !== value) { cache[key] = value; el.style[key] = value; }
+};
+const setText = (el, value) => { const text = String(value); if (el.textContent !== text) el.textContent = text; };
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // Hand-drawn element emblems (24×24)
@@ -36,10 +43,16 @@ export class Hud {
     this.root = $('hud');
     this.cardTimer = 0; this.flash = 0; this.hurt = 0; this.hitm = 0;
     this.buildCompass();
+    this.compassWidth = 0;
+    this.compassObserver = new ResizeObserver(() => { this.compassWidth = $('compass').clientWidth; });
+    this.compassObserver.observe($('compass'));
     this.mm = $('minimap').getContext('2d');
+    this.wave = { cv: $('voice-wave-cv'), pts: new Float32Array(160), env: 0, t: 0, state: '' };
+    this.jrRaw = false;
+    $('jr-body').addEventListener('scroll', () => this.jrThumb());
   }
   show(v) { this.root.classList.toggle('hidden', !v); }
-  setEl(el) { document.documentElement.style.setProperty('--el', el ? hex(ELEMENTS[el].color) : '#ffffff'); if (el && this._pel !== el) { this._pel = el; $('portrait-icon').innerHTML = elIcon(el, 34); } }
+  setEl(el) { this.elColor = el ? hex(ELEMENTS[el].color) : '#ffffff'; document.documentElement.style.setProperty('--el', this.elColor); if (el && this._pel !== el) { this._pel = el; $('portrait-icon').innerHTML = elIcon(el, 34); } }
 
   // ---------------- compass / minimap
   buildCompass() {
@@ -56,7 +69,7 @@ export class Hud {
   }
   buildMinimapBg(world) {
     const S = 360, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
-    const R = 90, img = g.createImageData(S, S);
+    const R = 135, img = g.createImageData(S, S);
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
       const wx = (x / S) * 2 * R - R, wz = (y / S) * 2 * R - R, h = world.heightAt(wx, wz), o = (y * S + x) * 4;
       let c;
@@ -91,7 +104,7 @@ export class Hud {
     g.shadowBlur = 0;
   }
   updateCompass(p) {
-    const W = $('compass').clientWidth;
+    const W = this.compassWidth;
     const heading = ((-p.yaw * 180) / Math.PI % 360 + 360) % 360;
     $('compass-strip').style.transform = `translateX(${W / 2 - heading * this.ppd}px)`;
     let h = '';
@@ -109,27 +122,24 @@ export class Hud {
     const g = this.g, p = g.player;
     if (!p) return;
     const hpF = clamp(p.hp / p.maxHp);
-    $('self-hp').style.width = hpF * 100 + '%';
-    $('self-lag').style.width = hpF * 100 + '%';
-    $('self-shield').style.width = clamp(p.shield / 300) * 100 + '%';
-    $('self-hp-num').textContent = `${Math.ceil(p.hp)}${p.shield > 0 ? ` +${Math.ceil(p.shield)}` : ''}`;
-    $('self-mana').style.width = clamp(p.mana / p.maxMana) * 100 + '%';
-    $('self-mana-num').textContent = Math.floor(p.mana);
-    $('self-stam').style.width = p.stamina + '%';
+    setStyle($('self-hp'), 'width', hpF * 100 + '%');
+    setStyle($('self-lag'), 'width', hpF * 100 + '%');
+    setStyle($('self-shield'), 'width', clamp(p.shield / 300) * 100 + '%');
+    setText($('self-hp-num'), `${Math.ceil(p.hp)}${p.shield > 0 ? ` +${Math.ceil(p.shield)}` : ''}`);
+    setStyle($('self-mana'), 'width', clamp(p.mana / p.maxMana) * 100 + '%');
+    setText($('self-mana-num'), Math.floor(p.mana));
+    setStyle($('self-stam'), 'width', p.stamina + '%');
     const cost = g.previewCost || 0, costEl = $('self-cost');
     if (cost > 0) { const l = clamp((p.mana - cost) / p.maxMana); costEl.style.left = l * 100 + '%'; costEl.style.width = Math.min(cost / p.maxMana, p.mana / p.maxMana) * 100 + '%'; }
     else costEl.style.width = 0;
     setHTML($('self-auras'), p.aura ? elChip(p.aura.el, 'aura-chip') : '');
     setHTML($('self-status'), this.statusTags(p));
-    $('mic-lvl').style.height = (g.voice?.level || 0) * 100 + '%';
-    const ch = g.chantProgress || 0;
-    $('charge-ring').style.strokeDashoffset = 138.2 * (1 - ch);
-    this.flash = Math.max(0, this.flash - dt * 2.5); $('screen-flash').style.opacity = this.flash;
+    this.flash = Math.max(0, this.flash - dt * 2.5); setStyle($('screen-flash'), 'opacity', this.flash);
     this.hurt = Math.max(0, this.hurt - dt * 1.5);
     const low = hpF < 0.3 && p.alive ? 0.35 + Math.sin(performance.now() / 250) * 0.15 : 0;
-    $('hurt-vignette').style.opacity = Math.max(this.hurt, low);
-    $('frost-overlay').style.opacity = p.frozen > 0 ? 1 : 0;
-    this.hitm = Math.max(0, this.hitm - dt * 5); $('hitmarker').style.opacity = this.hitm;
+    setStyle($('hurt-vignette'), 'opacity', Math.max(this.hurt, low));
+    setStyle($('frost-overlay'), 'opacity', p.frozen > 0 ? 1 : 0);
+    this.hitm = Math.max(0, this.hitm - dt * 5); setStyle($('hitmarker'), 'opacity', this.hitm);
     this.updateCompass(p);
     if ((this._mmT = (this._mmT || 0) + 1) % 2 === 0) this.drawMinimap(p); // 30 Hz is plenty
     this.updatePlates(cam);
@@ -149,6 +159,7 @@ export class Hud {
       o.el.style.opacity = k > 0.7 ? (1 - k) / 0.3 : 1;
     }
     if (this.cardTimer > 0) { this.cardTimer -= dt; if (this.cardTimer <= 0) $('spell-card').classList.add('hidden'); }
+    if (this.replyTimer > 0) { this.replyTimer -= dt; if (this.replyTimer <= 0) $('jev-reply').classList.add('hidden'); }
   }
   updatePlates(cam) {
     const g = this.g, box = $('nameplates'), seen = new Set();
@@ -217,7 +228,103 @@ export class Hud {
     setHTML(pv, `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${spec.cost} ${t('mana')}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`);
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
-  micState(on) { document.querySelector('.mic').classList.toggle('off', !on); }
+  micState(on) { this.micOn = on; }
+
+  // ---------------- voice waveform: the one indicator for mic level + chant state
+  // state: 'off' (no mic), 'idle' (mic open, not chanting: faint live line), 'listen' (chanting: bright, labelled)
+  drawWave(dt, state) {
+    const W = this.wave, box = $('voice-wave'), cv = W.cv, v = this.g.voice;
+    if (W.state !== state) { W.state = state; box.className = state; setText($('voice-wave-state'), t(state === 'listen' ? 'wave.listen' : state === 'idle' ? 'wave.ready' : 'wave.off')); }
+    const dpr = Math.min(devicePixelRatio || 1, 2), cw = Math.round(cv.clientWidth * dpr), ch = Math.round(cv.clientHeight * dpr);
+    if (!cw || !ch) return;
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    W.t += dt;
+    const buf = v?.analyser ? v.buf : null, n = W.pts.length, lv = v?.level || 0;
+    const target = state === 'listen' ? 1 : state === 'idle' ? 0.45 : 0.12;
+    W.env += (target - W.env) * Math.min(1, dt * 8);
+    const k = Math.min(1, dt * 28);
+    for (let i = 0; i < n; i++) {
+      const x = i / (n - 1);
+      let y = 0;
+      if (buf && state !== 'off') { const j = Math.floor(x * (buf.length - 2)); y = (buf[j] + buf[j + 1]) * 2.4; } // raw time-domain: a real zig-zag, not a fake sine
+      y += Math.sin(x * 26 - W.t * 5.5) * (0.035 + lv * 0.12) * (state === 'listen' ? 1 : 0.4); // a live carrier so a silent listen still breathes
+      y = Math.max(-1, Math.min(1, y));
+      W.pts[i] += (y - W.pts[i]) * k;
+    }
+    const c = cv.getContext('2d'), mid = ch / 2, amp = ch * 0.44 * (0.35 + 0.65 * W.env);
+    c.clearRect(0, 0, cw, ch);
+    const col = state === 'off' ? '#8a8f9c' : this.elColor || '#ffffff';
+    const path = () => {
+      c.beginPath();
+      for (let i = 0; i < n; i++) {
+        const x = i / (n - 1), taper = Math.pow(Math.sin(Math.PI * x), 1.4);
+        const px = x * cw, py = mid + W.pts[i] * amp * taper;
+        i ? c.lineTo(px, py) : c.moveTo(px, py);
+      }
+    };
+    c.lineJoin = 'round'; c.lineCap = 'round';
+    path(); c.strokeStyle = col; c.globalAlpha = 0.18 * W.env + 0.05; c.lineWidth = 7 * dpr; c.shadowColor = col; c.shadowBlur = 18 * dpr; c.stroke();
+    path(); c.globalAlpha = 0.55 + 0.45 * W.env; c.lineWidth = 2.4 * dpr; c.shadowBlur = 8 * dpr; c.stroke();
+    path(); c.strokeStyle = '#ffffff'; c.globalAlpha = 0.35 + 0.5 * W.env; c.lineWidth = 1 * dpr; c.shadowBlur = 0; c.stroke();
+    c.globalAlpha = 1;
+    if (state === 'listen') setText($('voice-wave-db'), v?.analyser && Number.isFinite(v.dbfs) ? `${Math.max(-99, Math.round(v.dbfs))} dBFS` : '');
+  }
+  clearSpellInfo() {
+    this.cardTimer = 0; this.replyTimer = 0;
+    $('spell-card').classList.add('hidden');
+    $('jev-reply').classList.add('hidden');
+  }
+  jevReply(raw, chant, persistent = false) {
+    if (!raw) return;
+    $('jr-chant').textContent = `“${chant}”`;
+    $('jr-model').textContent = raw.model || '';
+    $('jr-json').textContent = JSON.stringify(raw, null, 2);
+    $('jr-readout').innerHTML = this.jevReadout(raw);
+    $('jev-reply').classList.remove('hidden');
+    this.jrView(this.jrRaw);
+    this.replyTimer = persistent ? Infinity : 6;
+  }
+  // every Jev answer as one row: key, pick, confidence, and its top alternatives as a stacked probability strip
+  jevReadout(raw) {
+    const esc = (x) => String(x).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+    const answers = raw.answers && typeof raw.answers === 'object' ? raw.answers : {};
+    const rows = Object.entries(answers).map(([key, a]) => {
+      if (!a || typeof a !== 'object') return `<div class="jr-row"><span class="jr-k">${esc(key)}</span><span class="jr-v">${esc(JSON.stringify(a))}</span></div>`;
+      const probs = a.probabilities && typeof a.probabilities === 'object'
+        ? Object.entries(a.probabilities).filter(([, p]) => typeof p === 'number').sort((x, y) => y[1] - x[1]) : [];
+      let pick = a.choice ?? a.value ?? a.score ?? a.noul ?? probs[0]?.[0] ?? '—';
+      if (typeof pick === 'number') pick = Math.round(pick * 100) / 100;
+      const conf = typeof a.confidence === 'number' ? a.confidence : probs[0]?.[1];
+      const top = probs.slice(0, 3), rest = Math.max(0, 1 - top.reduce((s2, [, p]) => s2 + p, 0));
+      const strip = top.map(([, p], i) => `<i class="t${i}" style="flex:${Math.max(0.001, p)}"></i>`).join('') + `<i style="flex:${rest}"></i>`;
+      const alts = top.map(([k2, p]) => `<span>${esc(k2)} <b>${Math.round(p * 100)}</b></span>`).join('');
+      return `<div class="jr-row"><span class="jr-k">${esc(key)}</span><span class="jr-v">${esc(pick)}</span>`
+        + `<span class="jr-c">${conf != null ? Math.round(conf * 100) + '%' : ''}</span>`
+        + (top.length ? `<div class="jr-strip">${strip}</div><div class="jr-alts">${alts}</div>` : '')
+        + `</div>`;
+    });
+    return rows.join('') || '<div class="jr-row"><span class="jr-k">—</span></div>';
+  }
+  jrView(raw) {
+    this.jrRaw = raw;
+    $('jr-json').classList.toggle('hidden', !raw); $('jr-readout').classList.toggle('hidden', raw);
+    $('jr-mode').textContent = t(raw ? 'jr.raw' : 'jr.readout');
+    $('jr-body').scrollTop = 0; this.jrThumb();
+  }
+  toggleJevView() { if (!$('jev-reply').classList.contains('hidden')) this.jrView(!this.jrRaw); }
+  // pointer lock sends the wheel to the canvas, so the game forwards it here while the panel is up
+  scrollJev(dy) {
+    if ($('jev-reply').classList.contains('hidden')) return false;
+    $('jr-body').scrollBy({ top: dy, behavior: 'smooth' });
+    if (this.replyTimer !== Infinity) this.replyTimer = Math.max(this.replyTimer, 8); // being read: don't yank it away
+    return true;
+  }
+  jrThumb() {
+    const b = $('jr-body'), th = $('jr-thumb'), f = Math.min(1, b.clientHeight / Math.max(1, b.scrollHeight)), h = Math.max(8, f * 100);
+    th.parentElement.style.opacity = f >= 0.999 ? 0 : 1;
+    th.style.height = h + '%';
+    th.style.top = (b.scrollTop / Math.max(1, b.scrollHeight - b.clientHeight)) * (100 - h) + '%';
+  }
   spellCard(spec, casterName) {
     const card = $('spell-card');
     card.classList.remove('hidden');
@@ -229,17 +336,19 @@ export class Hud {
     $('sc-name').textContent = spec.name;
     $('sc-el').innerHTML = elChip(spec.element);
     $('sc-el2').innerHTML = spec.element2 ? elChip(spec.element2) : '';
-    $('sc-shape').textContent = `${SHAPES[spec.shape].icon} ${shapeName(spec.shape)}`;
+    $('sc-shape').textContent = `${SHAPES[spec.shape].icon} ${shapeName(spec.shape)}${spec.substance && spec.substance !== 'native' ? ' · ' + t('sub.' + spec.substance) : ''}`;
     const src = $('sc-src');
     src.className = 'src' + (spec.source === 'jev' ? '' : ' local');
-    src.textContent = spec.source === 'jev' ? `JEV · ${spec.partial ? 'live' : spec.cached ? 'cached' : (spec.latency ?? '?') + 'ms'}` : 'LOCAL';
+    src.textContent = spec.source === 'jev' ? `JEV · ${spec.partial ? 'live' : spec.cached ? 'cached' : (spec.latency ?? '?') + 'ms'}` : spec.source === 'minilm' ? `MINILM · ${spec.cached ? 'cached' : (spec.latency ?? '?') + 'ms'}` : 'LOCAL';
     $('sc-quote').textContent = `“${spec.text}”${casterName ? ' — ' + casterName : ''}`;
-    const P = [['p.power', spec.power], ['p.rank', spec.tier], ['p.speed', spec.speed], ['p.size', spec.size], ['p.heat', spec.temperature], ['p.weight', spec.weight], ['p.edge', spec.sharpness], ['p.count', spec.count], ['p.duration', spec.duration], ['p.chaos', spec.chaos]];
+    const P = [['p.power', spec.power], ['p.rank', spec.tier], ['p.speed', spec.speed], ['p.size', spec.size], ['p.heat', spec.temperature], ['p.weight', spec.weight], ['p.edge', spec.sharpness], ['p.count', spec.count], ['p.duration', spec.duration], ['p.chaos', spec.chaos], ['p.height', spec.height ?? 0.5], ['p.width', spec.width ?? 0.5]];
+    if (spec.density != null) P.push(['p.density', spec.density]);
+    if (spec.luminosity != null) P.push(['p.glow', spec.luminosity]);
     const box = $('sc-params');
-    box.innerHTML = P.map(([k]) => `<span>${t(k)}</span><span class="pb"><i style="width:0"></i></span>`).join('');
+    box.innerHTML = P.map(([k, v]) => `<div class="sp"><span class="sp-k">${t(k)}</span><span class="sp-n">${Math.round(v * 100)}</span><span class="pb"><i style="width:0"></i></span></div>`).join('');
     requestAnimationFrame(() => box.querySelectorAll('i').forEach((i, n) => (i.style.width = Math.round(P[n][1] * 100) + '%')));
-    $('sc-cost').textContent = `${spec.cost} ${t('mana')}${spec.weakened ? ' · ' + t('weakened') : ''} · ×${spec.dmgMult.toFixed(2)} ${t('damage')}`;
-    this.cardTimer = 6;
+    $('sc-cost').innerHTML = `<span class="sc-mana"><b>${spec.cost}</b> ${t('mana')}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}`;
+    this.cardTimer = this.g.mode === 'practice' && !casterName ? Infinity : 6;
   }
   banner(a, b, dur = 3) {
     const el = $('banner'); el.classList.remove('hidden');
@@ -249,10 +358,4 @@ export class Hud {
   }
   jev(state, text) { const j = $('jev-status'); j.className = state; j.querySelector('.txt').textContent = text; }
   round(txt) { $('round-info').textContent = txt; }
-  scoreboard(rows) {
-    const el = $('scoreboard');
-    if (!rows) { el.classList.add('hidden'); return; }
-    el.classList.remove('hidden');
-    el.innerHTML = rows.map((r) => `${r.name} — ${r.kills} / ${r.deaths}`).join('<br/>');
-  }
 }

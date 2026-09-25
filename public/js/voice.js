@@ -14,7 +14,7 @@ export class Voice {
     this.supported = !!this.SR;
     this.lang = 'en-US'; this.running = false; this.want = false; this.active = true;
     this.win = null; this.pending = null; this.session = null;
-    this.error = null; this.level = 0; this.peak = 0; this._handsFree = false;
+    this.error = null; this.level = 0; this.peak = 0; this.wave = new Float32Array(19); this._handsFree = false;
     this.onAuto = null; this.onStatus = null; this.onText = null; this.lastResultAt = 0; this.version = 0;
     this.preferLocal = false; this.prewarm = false; this.localAvailability = 'unchecked';
     this.localByLanguage = new Map(); this.localFailed = new Set();
@@ -286,14 +286,22 @@ export class Voice {
     this.active = false; this.want = false; this.cancelChant();
     clearTimeout(this.drainTimer); this.draining = null;
     this.source?.disconnect(); this.stream?.getTracks?.().forEach(track => track.stop());
-    this.analyser = null; this.level = 0;
+    this.analyser = null; this.level = 0; this.wave.fill(0);
   }
   update(dt = 1 / 60) {
     if (!this.analyser) return;
     this.analyser.getFloatTimeDomainData(this.buf);
     let s = 0; for (let i = 0; i < this.buf.length; i++) s += this.buf[i] * this.buf[i];
-    const lv = clamp((Math.sqrt(s / this.buf.length) - 0.01) / 0.22);
+    const rms = Math.sqrt(s / this.buf.length), lv = clamp((rms - 0.01) / 0.22);
+    this.dbfs = rms > 1e-5 ? 20 * Math.log10(rms) : -100;
     this.level = smoothVoiceLevel(this.level, lv, dt);
+    const n = this.wave.length, bin = Math.floor(this.buf.length / n);
+    for (let bar = 0; bar < n; bar++) {
+      let energy = 0;
+      for (let j = 0; j < bin; j++) energy += this.buf[bar * bin + j] ** 2;
+      const next = clamp((Math.sqrt(energy / bin) - 0.01) / 0.18);
+      this.wave[bar] = smoothVoiceLevel(this.wave[bar], next, dt);
+    }
     if (this.win) {
       this.peak = Math.max(this.peak, this.level);
       if (lv > 0.08) this.win.metric.soundAt ??= performance.now();

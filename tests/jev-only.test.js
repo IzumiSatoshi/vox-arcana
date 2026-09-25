@@ -17,7 +17,7 @@ function setup(ask = async () => ({ok: false})) {
   const Game = vm.runInContext(gameClass+'; Game;', context);
   const g = Object.create(Game.prototype);
   g.settings = {useJev: true}; g.mode='practice'; g.player={alive:true,canAct:()=>true}; g.cast=[];
-  g.voice={finishMetric(_,outcome){g.outcome=outcome;},markCast(){},init:async()=>{}};
+  g.voice={finishMetric(_,outcome){g.outcome=outcome;},markCast(){},setActive(){},init:async()=>{}};
   g.hud={preview(){},chant(text){g.message=text;}};g.noteJev=()=>{};g.performCast=s=>g.cast.push(s);
   return {g, build: vm.runInContext('buildJevSpec',context)};
 }

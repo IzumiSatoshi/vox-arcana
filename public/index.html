@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Vox Arcana</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Cinzel:wght@600;700;900&family=Noto+Sans+JP:wght@500;700;900&family=Noto+Serif+JP:wght@700;900&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Barlow+Condensed:wght@500;600;700&family=Cinzel:wght@600;700;900&family=Noto+Sans+JP:wght@500;700;900&family=Noto+Serif+JP:wght@700;900&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/menu.css" />
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
@@ -28,13 +29,11 @@
   <div id="compass"><div id="compass-strip"></div><div id="compass-marks"></div><div class="compass-needle"></div></div>
   <div id="round-info"></div>
   <div id="minimap-wrap"><canvas id="minimap" width="180" height="180"></canvas><div id="jev-status"><span class="dot"></span><span class="txt">Jev</span></div></div>
-  <div id="scoreboard" class="hidden"></div>
 
   <div id="feed"></div>
 
   <div id="crosshair">
     <svg viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="22" class="charge" id="charge-ring"/>
       <path d="M50 40 L53 50 L50 60 L47 50 Z" class="dia"/>
       <g class="ticks"><path d="M50 30 L52 35 L48 35 Z"/><path d="M50 70 L52 65 L48 65 Z"/><path d="M30 50 L35 48 L35 52 Z"/><path d="M70 50 L65 48 L65 52 Z"/></g>
     </svg>
@@ -59,80 +58,45 @@
   <div id="chant-box">
     <div id="chant-preview"></div>
     <div id="chant-text"></div>
-    <div id="chant-hint"><span class="mic"><span class="lvl" id="mic-lvl"></span></span><span id="chant-hint-txt" data-i18n="hint.chant"></span></div>
+    <div id="voice-wave" class="off"><canvas id="voice-wave-cv" aria-hidden="true"></canvas><div id="voice-wave-label"><i class="vw-dot"></i><span id="voice-wave-state"></span><span id="voice-wave-db"></span></div></div>
+    <div id="chant-hint"><span id="chant-hint-txt" data-i18n="hint.chant"></span></div>
   </div>
 
   <div id="type-box" class="hidden"><input id="type-input" maxlength="300" data-i18n-ph="type.ph" autocomplete="off" /></div>
 
   <div id="spell-card" class="hidden">
-    <div class="sc-head"><span class="sc-diamond" id="sc-tier-num">III</span><div><div id="sc-tier-name">Adept</div><div id="sc-stars"></div></div><span class="src" id="sc-src"></span></div>
+    <div class="sc-head"><span class="sc-diamond" id="sc-tier-num">III</span><div class="sc-tier"><div id="sc-tier-name">Adept</div><div id="sc-stars"></div></div><span class="src" id="sc-src"></span></div>
     <div class="sc-name" id="sc-name">Fireball</div>
     <div class="sc-meta"><span id="sc-el"></span><span id="sc-el2"></span><span class="shape-chip" id="sc-shape"></span></div>
     <div class="sc-quote" id="sc-quote"></div>
     <div class="sc-params" id="sc-params"></div>
     <div class="sc-cost" id="sc-cost"></div>
   </div>
+  <section id="jev-reply" class="hidden" aria-label="Jev full response">
+    <div class="jr-head"><span class="jr-title" data-i18n="jr.title"></span><span class="jr-model" id="jr-model"></span><span class="jr-mode" id="jr-mode"></span></div>
+    <div id="jr-chant"></div>
+    <div class="jr-scroll-wrap"><div id="jr-body"><div id="jr-readout"></div><pre id="jr-json" class="hidden"></pre></div><div class="jr-rail"><i id="jr-thumb"></i></div></div>
+    <div class="jr-foot" data-i18n="jr.help"></div>
+  </section>
 
   <div id="bubble" class="hidden"></div>
   <div id="banner" class="hidden"><div class="b1"></div><div class="b2"></div></div>
 </div>
 
 <!-- ===================== MENUS ===================== -->
-<div id="menu" class="screen">
-  <div class="lang-switch"><button data-lang="en">EN</button><button data-lang="ja">日本語</button></div>
-  <div class="title-wrap">
-    <div class="title-small" data-i18n="title.small"></div>
-    <h1>VOX ARCANA</h1>
-    <div class="title-sub" data-i18n="title.sub"></div>
-  </div>
-  <div class="menu-buttons">
-    <button class="btn primary" data-action="duel" data-i18n="menu.duel"></button>
-    <button class="btn" data-action="online" data-i18n="menu.online"></button>
-    <button class="btn" data-action="practice" data-i18n="menu.practice"></button>
-    <button class="btn" data-action="howto" data-i18n="menu.howto"></button>
-    <button class="btn" data-action="settings" data-i18n="menu.settings"></button>
-  </div>
-  <div id="menu-status"></div>
-</div>
-
-<div id="online" class="screen hidden">
-  <div class="panel">
-    <h2 data-i18n="online.title"></h2>
-    <p class="muted" data-i18n="online.desc"></p>
-    <label><span data-i18n="online.name"></span> <input id="net-name" maxlength="20" /></label>
-    <label><span data-i18n="online.room"></span> <input id="net-room" maxlength="24" value="arena" /></label>
-    <div class="row"><button class="btn primary" id="net-join" data-i18n="online.join"></button><button class="btn" data-back data-i18n="back"></button></div>
-    <div id="net-msg" class="muted"></div>
-  </div>
-</div>
-
-<div id="settings" class="screen hidden">
-  <div class="panel">
-    <h2 data-i18n="set.title"></h2>
-    <div class="grid">
-      <label><span data-i18n="set.ui"></span>
-        <select id="set-ui"><option value="en">English</option><option value="ja">日本語</option></select></label>
-      <label><span data-i18n="set.voice"></span>
-        <select id="set-lang"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option></select></label>
-      <label><span data-i18n="set.diff"></span>
-        <select id="set-diff"><option value="easy" data-i18n="diff.easy"></option><option value="normal" data-i18n="diff.normal"></option><option value="hard" data-i18n="diff.hard"></option></select></label>
-      <label><span data-i18n="set.gfx"></span>
-        <select id="set-quality"><option value="1" data-i18n="gfx.high"></option><option value="0" data-i18n="gfx.perf"></option></select></label>
-      <label><span data-i18n="set.sens"></span> <input type="range" id="set-sens" min="0.3" max="3" step="0.05" value="1" /></label>
-      <label><span data-i18n="set.vol"></span> <input type="range" id="set-vol" min="0" max="1" step="0.01" value="0.8" /></label>
-      <label><span data-i18n="set.music"></span> <input type="range" id="set-music" min="0" max="1" step="0.01" value="0.35" /></label>
-      <label class="check"><input type="checkbox" id="set-jev" checked /> <span data-i18n="set.jev"></span></label>
-      <label class="check"><input type="checkbox" id="set-instantcast" checked /> <span data-i18n="set.instantcast"></span></label>
-      <label class="check"><input type="checkbox" id="set-botjev" checked /> <span data-i18n="set.botjev"></span></label>
-      <label class="check"><input type="checkbox" id="set-botvoice" checked /> <span data-i18n="set.botvoice"></span></label>
-        <label class="check"><input type="checkbox" id="set-handsfree" /> <span data-i18n="set.handsfree"></span></label>
-        <label class="check"><input type="checkbox" id="set-localvoice" /> <span data-i18n="set.localvoice"></span></label>
-        <div><button class="btn" type="button" id="set-downloadvoice" disabled></button><p id="voice-download-status" role="status" aria-live="polite"></p></div>
-        <label class="check"><input type="checkbox" id="set-warmvoice" /> <span data-i18n="set.warmvoice"></span></label>
-    </div>
-    <div class="row"><button class="btn primary" data-back data-i18n="done"></button></div>
-  </div>
-</div>
+<main id="menu" class="screen">
+<div class="menu-shell"><section class="menu-hero">
+<div class="eyebrow" data-i18n="title.small"></div><h1>Vox<br><em>Arcana</em></h1>
+<p class="menu-deck" data-i18n="menu.deck"></p><p class="menu-story" data-i18n="menu.story"></p>
+<div class="menu-modes"><button class="mode-card" data-action="practice" type="button"><span class="mode-icon" aria-hidden="true">✧</span><span class="mode-copy"><small>01 / <span data-i18n="mode.practice.tag"></span></small><strong data-i18n="mode.practice"></strong><span data-i18n="mode.practice.desc"></span></span><span class="mode-arrow" aria-hidden="true">↗</span></button><button class="mode-card" data-action="duel" type="button"><span class="mode-icon" aria-hidden="true">⚔</span><span class="mode-copy"><small>02 / <span data-i18n="mode.duel.tag"></span></small><strong data-i18n="mode.duel"></strong><span data-i18n="mode.duel.desc"></span></span><span class="mode-arrow" aria-hidden="true">↗</span></button></div><p class="menu-controls" data-i18n="menu.controls"></p><div id="menu-status" role="status"></div>
+</section><aside class="menu-rail"><div class="menu-rail-heading"><span class="eyebrow" data-i18n="menu.prepare"></span><span class="rail-sigil">✦</span></div><label class="menu-field"><span data-i18n="set.ui"></span>
+        <select id="set-ui"><option value="en">English</option><option value="ja">日本語</option></select></label><label class="menu-field menu-recognition-field"><span data-i18n="set.voice"></span>
+        <select id="set-lang"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="ja-JP">日本語</option></select></label><div class="menu-mic"><div class="menu-mic-heading"><span data-i18n="menu.mic"></span><span id="menu-mic-badge">OFF</span></div><p data-i18n="menu.mic.help"></p><div class="menu-meter"><span id="menu-meter-fill"></span></div><button id="menu-enable-voice" class="menu-voice-button" type="button" data-i18n="menu.mic.enable"></button><button id="menu-disable-voice" class="menu-voice-off" type="button" data-i18n="menu.mic.disable" hidden></button><p id="menu-mic-message" role="status" data-i18n="menu.mic.permission"></p>
+<details class="voice-options"><summary data-i18n="menu.mic.options"></summary><label class="check"><input type="checkbox" id="set-handsfree" /> <span data-i18n="set.handsfree"></span></label><label class="check"><input type="checkbox" id="set-localvoice" /> <span data-i18n="set.localvoice"></span></label><label class="check"><input type="checkbox" id="set-warmvoice" /> <span data-i18n="set.warmvoice"></span></label><div><button class="btn" type="button" id="set-downloadvoice" disabled></button><p id="voice-download-status" role="status" aria-live="polite"></p></div></details></div><div class="menu-divider"></div><button class="menu-utility" data-action="howto"><span aria-hidden="true">▤</span><span><strong data-i18n="menu.howto"></strong><small data-i18n="menu.howto.desc"></small></span><b aria-hidden="true">↗</b></button><button class="menu-utility" data-action="settings"><span aria-hidden="true">⚙</span><span><strong data-i18n="menu.settings"></strong><small data-i18n="menu.settings.desc"></small></span><b aria-hidden="true">↗</b></button><div class="menu-rail-foot" data-i18n="menu.footer"></div></aside></div></main>
+<div id="duel-setup" class="screen hidden"><div class="panel settings-compact"><div class="eyebrow" data-i18n="menu.prepare"></div><h2 data-i18n="mode.duel"></h2><label><span data-i18n="set.diff"></span>
+        <select id="set-diff"><option value="easy" data-i18n="diff.easy"></option><option value="normal" data-i18n="diff.normal"></option><option value="hard" data-i18n="diff.hard"></option></select></label><div class="row"><button class="btn" data-back data-i18n="menu.back"></button><button class="btn primary" data-action="begin-duel" data-i18n="menu.begin"></button></div></div></div>
+<div id="settings" class="screen hidden"><div class="panel settings-compact" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div class="eyebrow">VOX ARCANA</div><h2 id="settings-title" data-i18n="set.title"></h2><section class="settings-group"><h3 class="settings-group-title" data-i18n="group.casting"></h3><label class="check"><input type="checkbox" id="set-instantcast" /> <span data-i18n="set.instantcast"></span></label></section><section class="settings-group"><h3 class="settings-group-title" data-i18n="group.visuals"></h3><label><span data-i18n="set.gfx"></span>
+        <select id="set-quality"><option value="2" data-i18n="gfx.ultra"></option><option value="1" data-i18n="gfx.high"></option><option value="0" data-i18n="gfx.perf"></option></select></label><label><span data-i18n="set.chantsize"></span> <output id="set-chantsize-value" for="set-chantsize">26 px</output><input type="range" id="set-chantsize" min="20" max="80" step="2" value="26" /></label><label><span data-i18n="set.sens"></span> <input type="range" id="set-sens" min="0.3" max="3" step="0.05" value="1" /></label><p id="settings-reload" class="settings-status" role="status"></p></section><section class="settings-group"><h3 class="settings-group-title" data-i18n="group.audio"></h3><label><span data-i18n="set.vol"></span> <input type="range" id="set-vol" min="0" max="1" step="0.01" value="0.8" /></label><label><span data-i18n="set.music"></span> <input type="range" id="set-music" min="0" max="1" step="0.005" value="0.175" /></label><label class="check"><input type="checkbox" id="set-botvoice" checked /> <span data-i18n="set.botvoice"></span></label></section><details class="settings-advanced"><summary data-i18n="group.model"></summary><section class="settings-group"><h3 class="settings-group-title" data-i18n="group.model"></h3><label><span data-i18n="set.provider"></span><select id="set-provider"><option value="jev">Jev (API)</option><option value="local" data-i18n="set.localmodel"></option></select></label><label class="check"><input type="checkbox" id="set-jev" checked /> <span data-i18n="set.jev"></span></label><label class="check"><input type="checkbox" id="set-botjev" checked /> <span data-i18n="set.botjev"></span></label></section><button class="btn" id="set-loadmodel" type="button" data-i18n="set.loadmodel"></button><p id="local-model-status" role="status" data-i18n="local.unloaded"></p></details><div class="settings-actions"><button class="btn primary" data-action="quit" data-i18n="menu.back"></button></div></div></div>
 
 <div id="howto" class="screen hidden">
   <div class="panel wide">

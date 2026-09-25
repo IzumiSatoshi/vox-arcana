@@ -1,12 +1,12 @@
 // Incantation -> spell spec.
 // 1) a fast local keyword parser (live preview while chanting + offline fallback)
 // 2) Jev (via /api/spell) decides element / shape / numeric parameters from natural language
-// 3) merged with voice features (loudness, chant length) into a final procedural spec
+// 3) converted into a procedural spec without timing or voice-strength bonuses
 import { clamp, hashStr } from './util.js';
 import { ELEMENT_KEYS, SHAPE_KEYS, spellName } from './elements.js';
 
 const EL_WORDS = {
-  fire: ['fire', 'flame', 'flami', 'blaze', 'blazing', 'burn', 'inferno', 'ember', 'magma', 'lava', 'pyro', 'heat', 'scorch', 'ignite', 'phoenix', 'solar', 'hellfire', 'fireball', '火', '炎', '焔', 'ファイア', 'フレア', 'ほのお', '燃', '焼', '灼', '紅蓮', '業火', 'マグマ', '溶岩', '不死鳥'],
+  fire: ['fire', 'flame', 'flami', 'blaze', 'blazing', 'burn', 'inferno', 'ember', 'magma', 'lava', 'pyro', 'heat', 'geotherm', 'scorch', 'ignite', 'phoenix', 'solar', 'hellfire', 'fireball', '火', '炎', '焔', 'ファイア', 'フレア', 'ほのお', '燃', '焼', '灼', '紅蓮', '業火', 'マグマ', '溶岩', '不死鳥', '地熱', '熱', '烈火'],
   ice: [' ice', ' icy', 'frost', 'freez', 'froze', 'snow', 'glaci', 'cold', 'blizzard', 'cryo', 'hail', ' rime', '氷', '凍', '雪', '吹雪', 'アイス', 'ブリザード', 'こおり', '冷', '霜', '零度', 'フロスト'],
   water: ['water', 'aqua', 'wave', 'tide', 'ocean', 'sea ', 'torrent', 'flood', 'bubble', 'hydro', 'splash', 'river', 'tsunami', '水', '波', 'アクア', 'ウォーター', 'みず', '海', '潮', '泡', '津波', '激流'],
   lightning: ['lightning', 'thunder', 'electr', 'spark', 'volt', 'plasma', 'raijin', 'zap', 'shock', 'bolt', '雷', '電', '稲妻', 'サンダー', 'いかずち', 'ライトニング', '迅雷', '紫電'],
@@ -27,7 +27,8 @@ const SHAPE_WORDS = {
   meteor: ['meteor', 'comet', 'falling star', 'starfall', 'asteroid', 'from the sky', 'from the heavens', 'sky fall', 'hammer of', '隕石', 'メテオ', '流星', '彗星', '天より', '降り注'],
   nova: ['nova', 'explosion', 'explode', 'burst', 'shockwave', 'blast around', 'around me', 'detonate', 'supernova', 'big bang', '爆発', 'ノヴァ', '爆裂', '炸裂', 'バースト', 'エクスプロージョン'],
   spikes: ['spike', 'spire', 'pillar', 'eruption', 'erupt', 'stalagmite', 'rise from', 'geyser', 'fang', '棘', '柱', 'スパイク', '噴出', '隆起', '剣山'],
-  wall: ['wall', 'barrier', 'rampart', 'bulwark', 'fortress', 'curtain', '壁', '結界', 'ウォール', '障壁', 'バリア'],
+  barrier: ['barrier', 'force field', 'forcefield', 'deflect', 'repel', 'magic shield', 'protective field', 'aegis field', '結界', '障壁', 'バリア', '防御膜', '防護膜', 'シールドウォール'],
+  wall: ['wall', 'rampart', 'bulwark', 'fortress', 'curtain', '壁', 'ウォール', '城壁', '防壁', '石垣'],
   vortex: ['vortex', 'black hole', 'singularity', 'gravity', 'whirlpool', 'pull', 'implosion', '渦', 'ブラックホール', '重力', '引き寄せ', '特異点'],
   chain: ['chain', ' arc ', 'smite', 'strike', 'thunderbolt', 'jolt', 'judgment', 'judgement', '連鎖', '落雷', '雷撃', '裁き', 'チェイン'],
   storm: ['storm', 'rain', 'blizzard', 'hail', 'downpour', 'tempest', 'shower', 'monsoon', '嵐', '雨', '吹雪', 'ストーム', 'レイン', '豪雨'],
@@ -53,6 +54,30 @@ const TRAIT_WORDS = {
     star: [' star', 'sparkle', 'twinkle', '星'], blade: ['blade', 'sword', 'saber', 'edge', '剣', '刃'], dragon: ['dragon', 'serpent', 'phoenix', 'wolf', 'beast', 'hydra', 'wyrm', '龍', '竜', '鳳凰', '狼', '獣', '蛇'],
     skull: ['skull', 'ghost', 'wraith', 'phantom', 'souls', '髑髏', '亡霊', '怨霊'], bubble: ['bubble', 'droplet', '泡', '雫'], cube: ['cube', 'block', 'prism', '立方'] },
   construct: { stairs: ['stair', 'steps', '階段'], box: ['box', 'cube', 'block', '箱'], pillar: ['pillar', 'column', 'tower', '柱', '塔'], rampart: ['rampart', 'fortress', 'wall', 'castle', '城', '壁'] },
+};
+// Look words: substance and proportions (Jev decides the same things from natural language).
+// order matters on ties: specific fires (blue flame, black flame) before plain flame
+const SUBSTANCE_WORDS = {
+  magma: ['magma', 'lava', 'molten', 'geotherm', 'volcan', 'earth\'s heat', '地熱', 'マグマ', '溶岩', '火山', '熔', '溶鉱'],
+  plasma: ['plasma', 'solar', 'stellar', 'star core', 'blue flame', 'blue fire', 'white flame', 'white fire', '蒼炎', '青い炎', '白炎', 'プラズマ', '太陽', '恒星', '蒼焔'],
+  smoke: ['smoke', ' ash', 'soot', 'smog', 'cinder', 'smoulder', 'smolder', '煙', '灰', '煤', '燻'],
+  crystal: ['crystal', ' gem', 'diamond', 'glass', 'prism', 'jewel', '結晶', '水晶', '宝石', '硝子', 'ガラス', '晶'],
+  liquid: ['liquid', 'flowing', 'fluid', 'drip', 'quicksilver', '液', '流れる', '滴'],
+  mist: ['mist', ' fog', 'vapor', 'vapour', 'steam', 'haze', '霧', '霞', '蒸気', '靄', '湯気'],
+  spectral: ['ghost', 'spectral', 'phantom', 'wraith', ' soul', 'ethereal', 'apparition', '幽', '亡霊', '幻影', '魂', '怨霊'],
+  radiant: ['holy', 'sacred', 'golden', 'radiant', 'celestial', 'hallowed', '聖', '黄金', '金色', '天上', '光輝'],
+  corrupted: ['cursed', 'corrupt', 'unholy', 'hellfire', 'hell', 'black flame', 'black fire', 'profane', '呪', '邪', '黒炎', '地獄', '冥', '穢'],
+  flame: ['flame', 'blaze', 'blazing', 'inferno', 'raging fire', 'wildfire', 'conflagration', '烈火', '業火', '炎', '焔', '紅蓮', '火炎', '猛火'],
+};
+const SHAPE_HINTS = {
+  up: ['tower', 'soar', 'rising', 'rise to', 'sky-high', 'skyward', 'to the heavens', 'to the sky', 'pierce the sky', 'pillar', 'column', 'spire', 'tall', 'high into', 'ascend', '天高', '高く', '昇', '天を', '天まで', '聳', 'そびえ', '塔', '柱', '衝天', '天突'],
+  down: [' low', 'flat', 'crawl', 'creep', 'ground', 'sweep', 'hugging', 'underground', 'geotherm', 'of the earth', 'surface', '大地', '地を', '地面', '這', '低', '地表', '地熱', '平た', '地底'],
+  wide: ['wide', 'vast', 'broad', 'sprawl', 'spread', 'sweeping', 'expanse', 'boundless', 'engulf', 'everything', '広', '大地', '一面', '果てしな', '覆', '全域', '薙ぎ', '呑み込'],
+  narrow: ['narrow', 'thin', 'slender', 'needle', 'focused', 'pinpoint', 'concentrated', 'precise', '細', '一点', '集束', '収束', '鋭', '針'],
+  dense: ['dense', 'heavy', 'thick', 'solid', 'molten', 'massive', 'crushing', '濃', '重', '厚', '溶岩', 'マグマ', '地熱'],
+  thin: ['ethereal', 'ghost', 'phantom', 'wisp', 'faint', 'gentle', 'mist', 'airy', 'feather', '幽', '幻', '淡', '儚', '霞', '霧'],
+  bright: ['bright', 'blinding', 'radiant', 'brilliant', 'shining', 'dazzling', 'solar', 'white-hot', 'searing', '輝', '眩', '閃', '烈', '煌', '白熱'],
+  dim: ['smoulder', 'smolder', ' dim', 'dark', 'shadow', ' ash', 'soot', 'ember', 'murky', '燻', '暗', '黒', '灰', '煤', '地熱', '熾火'],
 };
 const pickTrait = (t, table, def) => { let best = def, bn = 0; for (const [k, arr] of Object.entries(table)) { const n = countAny(t, arr); if (n > bn) { bn = n; best = k; } } return best; };
 const ORB_WORDS = ['fireball', 'ball', ' orb', 'sphere', 'globe', '球', '玉', 'ボール'];
@@ -101,6 +126,14 @@ export function localParse(text) {
   for (const k of ['trajectory', 'pattern', 'payload', 'morph', 'construct']) p.explicit[k] = Object.values(TRAIT_WORDS[k]).some((arr) => countAny(t, arr) > 0);
   if (p.morph === 'orb' && countAny(t, ORB_WORDS) > 0) p.explicit.morph = true;
   p.construct = pickTrait(t, TRAIT_WORDS.construct, 'platform');
+  // look: substance + proportions. Unmentioned density/luminosity stay null so the substance picks its own.
+  p.substance = pickTrait(t, SUBSTANCE_WORDS, 'native');
+  p.explicit.substance = p.substance !== 'native';
+  const H = (k) => kw(SHAPE_HINTS[k]);
+  p.height = clamp(0.5 + 0.22 * Math.min(2, H('up')) - 0.2 * Math.min(2, H('down')));
+  p.width = clamp(0.5 + 0.2 * Math.min(2, H('wide')) - 0.22 * Math.min(2, H('narrow')) + 0.05 * Math.min(2, kw(['huge', 'giant', '巨大'])));
+  p.density = H('dense') || H('thin') ? clamp(0.5 + 0.2 * H('dense') - 0.22 * H('thin')) : null;
+  p.luminosity = H('bright') || H('dim') ? clamp(0.55 + 0.2 * H('bright') - 0.2 * H('dim')) : null;
   if (/blue flame|blue fire|white flame|white fire|蒼炎|青い炎/.test(t)) p.temperature = 0.97;
   if (/absolute zero|絶対零度/.test(t)) p.temperature = 0.0;
   if (/scorch|searing|molten|灼熱/.test(t)) p.temperature = Math.max(p.temperature, 0.9);
@@ -110,17 +143,17 @@ export function localParse(text) {
 }
 
 // ---------------------------------------------------------------- Jev bridge
-export async function askJev(text, meta) {
+export async function askJev(text, meta = {}) {
   const t0 = performance.now();
   try {
     const r = await fetch('/api/spell', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, chantSeconds: meta.chantSeconds || 0, loudness: meta.loudness ?? 0.5 }),
+      body: JSON.stringify({ text, provider: meta.provider || 'jev', language: meta.language || 'en-US' }),
       signal: AbortSignal.timeout(7000),
     });
     const j = await r.json();
     if (!j.ok) return { ok: false, error: j.error, rtt: performance.now() - t0 };
-    return { ok: true, params: j.params, latency: j.latency, cached: j.cached, model: j.model, rtt: Math.round(performance.now() - t0) };
+    return { ok: true, params: j.params, raw: j.raw, latency: j.latency, cached: j.cached, model: j.model, provider: j.provider || 'jev', rtt: Math.round(performance.now() - t0) };
   } catch (e) {
     return { ok: false, error: String(e.message || e), rtt: performance.now() - t0 };
   }
@@ -137,18 +170,20 @@ export function buildJevSpec(text, jev, meta = {}) {
     element2: ELEMENT_KEYS.includes(J.element2) && J.element2 !== J.element ? J.element2 : null,
     shape: SHAPE_KEYS.includes(J.shape) ? J.shape : 'orb',
     ...Object.fromEntries(['speed', 'size', 'temperature', 'weight', 'sharpness', 'count', 'duration', 'chaos', 'homing', 'height', 'width'].map(k => [k, number(k)])),
-    power: clamp(number('power') + (loud - 0.4) * 0.15 + Math.min(chant, 8) * 0.012),
-    tier: clamp(number('tier') + Math.min(chant, 10) * 0.01),
+    power: number('power'),
+    tier: number('tier'),
     density: Number.isFinite(J.density) ? clamp(J.density) : null,
     luminosity: Number.isFinite(J.luminosity) ? clamp(J.luminosity) : null,
     ...Object.fromEntries(['trajectory', 'pattern', 'payload', 'morph', 'construct', 'substance'].map(k => [k, J[k]])),
     isSpell: number('isSpell', 0), loudness: loud, chantSeconds: chant,
-    source: 'jev', latency: jev.latency, rtt: jev.rtt, cached: !!jev.cached, partial: false,
+    source: jev.provider === 'local' ? 'minilm' : 'jev', latency: jev.latency, rtt: jev.rtt, cached: !!jev.cached, partial: false,
   });
 }
 
-// Merge local + Jev + voice metrics into the final procedural spec.
+// Merge local + Jev results into the final procedural spec; voice metrics are diagnostic only.
 export function buildSpec(text, local, jev, meta = {}) {
+  // Completed model interpretations are authoritative, including rival casts.
+  if (jev?.ok && !jev.partial) return buildJevSpec(text, jev, meta);
   const J = jev && jev.ok ? jev.params : null;
   // a speculative result for an earlier part of the chant is trusted less than one for the full text
   const trust = jev?.partial ? 0.6 : 1;
@@ -156,6 +191,11 @@ export function buildSpec(text, local, jev, meta = {}) {
     const jv = J && typeof J[k] === 'number' ? J[k] : null;
     const ww = w * trust;
     return jv === null ? local[k] : clamp(jv * ww + local[k] * (1 - ww));
+  };
+  // look scores the local parser only knows when words say so: Jev alone, or the words alone
+  const pickOpt = (k, w = 0.65) => {
+    const jv = J && typeof J[k] === 'number' ? J[k] : null, lv = local[k] ?? null;
+    return jv === null ? lv : lv === null ? jv : clamp(jv * w * trust + lv * (1 - w * trust));
   };
   let element = local.element, shape = local.shape, element2 = local.element2;
   if (J) {
@@ -170,20 +210,21 @@ export function buildSpec(text, local, jev, meta = {}) {
   const chant = meta.chantSeconds || 0;
   const spec = {
     text, element, element2, shape,
-    power: clamp(pickNum('power') + (loud - 0.4) * 0.15 + Math.min(chant, 8) * 0.012),
-    tier: clamp(pickNum('tier', 0.7) + Math.min(chant, 10) * 0.01),
+    power: pickNum('power'),
+    tier: pickNum('tier', 0.7),
     speed: pickNum('speed', 0.6), size: pickNum('size', 0.7), temperature: pickNum('temperature', 0.7),
     weight: pickNum('weight', 0.6), sharpness: pickNum('sharpness', 0.6), count: pickNum('count', 0.7),
     duration: pickNum('duration', 0.6), chaos: pickNum('chaos', 0.6), homing: pickNum('homing', 0.7),
+    height: pickNum('height', 0.65), width: pickNum('width', 0.65), density: pickOpt('density'), luminosity: pickOpt('luminosity'),
     isSpell: J && typeof J.isSpell === 'number' ? Math.max(J.isSpell, local.isSpell * 0.5) : local.isSpell,
-    ...Object.fromEntries(['trajectory', 'pattern', 'payload', 'morph', 'construct'].map((k) => {
-      const DEF = { trajectory: 'straight', pattern: 'single', payload: 'explode', morph: 'orb', construct: 'platform' }[k];
+    ...Object.fromEntries(['trajectory', 'pattern', 'payload', 'morph', 'construct', 'substance'].map((k) => {
+      const DEF = { trajectory: 'straight', pattern: 'single', payload: 'explode', morph: 'orb', construct: 'platform', substance: 'native' }[k];
       const jv = J?.[k];
       if (local.explicit?.[k]) return [k, local[k]]; // the caster's own words win
       return [k, jv && !(jv === DEF && local[k] !== DEF) ? jv : local[k] || DEF];
     })),
     loudness: loud, chantSeconds: chant,
-    source: J ? 'jev' : 'local', latency: jev?.latency ?? null, rtt: jev?.rtt ?? null, cached: !!jev?.cached, partial: !!jev?.partial,
+    source: J ? (jev.provider === 'local' ? 'minilm' : 'jev') : 'local', latency: jev?.latency ?? null, rtt: jev?.rtt ?? null, cached: !!jev?.cached, partial: !!jev?.partial,
     jevError: jev && !jev.ok ? jev.error : null,
   };
   return finalizeSpec(spec);
@@ -197,6 +238,7 @@ export function finalizeSpec(spec) {
   spec.dmgMult = (0.35 + 2.2 * Math.pow(spec.mag, 2.2)) * [0.85, 1, 1.12, 1.3][spec.level];
   spec.cost = Math.round(8 + 70 * Math.pow(spec.mag, 1.5));
   spec.seed = spec.seed ?? hashStr(spec.text + ':' + spec.element + spec.shape);
+  spec.substance ||= 'native'; spec.height ??= 0.5; spec.width ??= 0.5;
   spec.trajectory ||= 'straight'; spec.pattern ||= 'single'; spec.payload ||= 'explode'; spec.morph ||= 'orb'; spec.construct ||= 'platform';
   if (spec.homing > 0.6 && spec.trajectory === 'straight') spec.trajectory = 'homing';
   if (['leap', 'flight', 'blink', 'construct', 'enhance', 'hand', 'ward'].includes(spec.shape)) spec.cost = Math.round(spec.cost * 0.7);
@@ -240,7 +282,7 @@ const CORE = {
   funnels: ['{E} familiars, hunt my foe', 'seeking {e} wisps', '{E} funnels'], beam: ['{E} cannon', '{E} ray', 'beam of pure {e}'],
   tornado: ['{E} tornado', 'cyclone of {e}', '{E} maelstrom'], meteor: ['{E} meteor', 'falling star of {e}', 'comet of {e}'],
   nova: ['{E} nova', 'explosion of {e}', '{E} burst'], spikes: ['{E} spikes', 'pillars of {e}, rise', '{E} spire eruption'],
-  wall: ['{E} wall', 'barrier of {e}'], vortex: ['{E} vortex', 'black hole of {e}'], chain: ['{E} strike', 'chain of {e}', 'smite with {e}'],
+  wall: ['{E} wall', 'rampart of {e}'], barrier: ['{E} barrier', 'barrier of {e}, deflect all'], vortex: ['{E} vortex', 'black hole of {e}'], chain: ['{E} strike', 'chain of {e}', 'smite with {e}'],
   storm: ['{E} storm', '{E} rain', 'tempest of {e}'], crescent: ['{E} cutter', 'crescent of {e}', '{E} blade slash'],
   ward: ['{E} ward, protect me', 'blessing of {e}', 'heal me, {e}'],
   field: ['{E} field', 'pool of {e}', '{E} domain'], wave: ['{E} tidal wave', 'wave of {e}'], enhance: ['{E}, infuse my body', 'empower me with {e}'], hand: ['{E} hand, strike for me', 'fist of {e}'],
@@ -264,7 +306,7 @@ const OPEN_JA = {
 const CORE_JA = {
   orb: ['{E}の球', '{E}弾'], barrage: ['{E}の槍、百連', '{E}の矢の雨'], funnels: ['{E}の使い魔よ、敵を狩れ', '追尾する{E}の精霊'],
   beam: ['{E}の光線', '{E}の砲撃'], tornado: ['{E}の竜巻', '{E}の大旋風'], meteor: ['{E}の隕石', '天より降れ、{E}の星'],
-  nova: ['{E}の大爆発', '{E}爆裂'], spikes: ['大地より出でよ、{E}の棘', '{E}の柱'], wall: ['{E}の壁', '{E}の結界'],
+  nova: ['{E}の大爆発', '{E}爆裂'], spikes: ['大地より出でよ、{E}の棘', '{E}の柱'], wall: ['{E}の壁', '{E}の城壁'], barrier: ['{E}の結界', '{E}のバリア'],
   vortex: ['{E}の渦', '{E}のブラックホール'], chain: ['{E}の連鎖撃', '{E}の裁き'], storm: ['{E}の嵐', '{E}の雨'],
   crescent: ['{E}の刃', '{E}の三日月斬り'], ward: ['{E}の加護を我に', '{E}よ、我を癒せ'],
   field: ['{E}の領域', '{E}の沼'], wave: ['{E}の大波', '{E}の津波'], enhance: ['{E}よ、我が身に宿れ', '{E}の強化'], hand: ['{E}の魔手よ、敵を討て', '{E}の拳'],

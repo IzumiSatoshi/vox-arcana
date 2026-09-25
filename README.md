@@ -16,11 +16,41 @@ node server.js
 
 Then open **http://localhost:8787** in **Chrome or Edge**, which have the Web Speech API. Allow the microphone.
 
-- No dependencies. Node 18+ is enough (Three.js loads from a CDN).
+- Node 18+ for Jev/keywords. Run `npm install` to install the optional local-model runtime (Three.js still loads from a CDN).
 - The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the endpoint and model with
   `JEV_URL` / `JEV_MODEL` or a `jev.config.json` (`{ "url": "...", "model": "...", "keyFile": "..." }`).
 - Set `JEV_DEBUG=1` to print Jev's raw answers in the server console.
 - With Jev enabled, player casts use only Jev interpretation. A failed request shows an error; it does not cast via keywords. Disable Jev in Settings to use the local keyword parser. Browser offline speech recognition is a separate voice-to-text setting.
+
+## Local MiniLM option (experimental)
+
+1. Run `npm install`, then `npm start` (restart an already-running server after updating).
+2. In **Settings → Spell interpretation model**, choose **Local MiniLM (CPU, experimental)**.
+3. Click **Download / load local model** and wait for **MiniLM ready**. Keep **Use selected model** enabled.
+   Disabling that checkbox selects the existing keyword parser. The rival's model toggle uses the same selected provider.
+
+Model: [Xenova/paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/Xenova/paraphrase-multilingual-MiniLM-L12-v2),
+a quantized BERT-style multilingual sentence encoder, via Transformers.js on the **Node server's CPU**.
+It supports English/Japanese matching, needs no API key, and has no per-cast API charge.
+The first load downloads about **136 MB** of model/tokenizer files to `.cache/models/`.
+Later loads reuse those files, but rebuilding the reference embeddings takes several seconds after each server restart.
+If the game server is on another machine, inference runs on that machine.
+This option only replaces spell interpretation; browser speech recognition and CDN game assets are separate.
+
+The encoder compares a chant against cached spell descriptions and bilingual examples. It does not generate text
+or follow Jev's question instructions. It selects element/form and uses conservative defaults where trait/score
+similarity is weak. Similarity values are **not calibrated probabilities**. Secondary-element fusion is currently
+omitted. Complex negation, multiple effects, metaphor, and finely graded power can be less reliable than Jev.
+The existing gameplay bonuses still apply after interpretation. No cloud fallback occurs if the local model fails.
+
+A local development smoke run measured **12–23 ms** per warm, uncached chant and about **6.6 seconds** to load
+cached weights and build references. Hardware, chant length and concurrent requests affect latency; this is not
+a general benchmark. Identical chants are cached, duplicate in-flight requests share work, and inference is serialized
+with a bounded queue. Status and load errors appear in Settings. Jev remains the default for existing users.
+
+Validation: `npm test` runs regression tests without downloading a model; `npm run test:local` loads the real model
+(and downloads it if necessary) and checks English/Japanese reference examples plus chatter rejection. Those examples
+are smoke checks, not a held-out accuracy evaluation.
 
 ## Language / 言語
 
@@ -62,8 +92,10 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos
    - `noul`: is this actually a spell? should it home in?
 4. **Player spell parameters** (`public/js/spellbook.js`): Jev alone when enabled, or keywords alone when disabled.
-   Voice loudness and chant length still supply gameplay bonuses; keyword-derived values never override Jev.
+   Casting time and voice loudness never modify spell strength or characteristics and are not sent to Jev.
+   Completed Jev interpretations are authoritative for both player and rival spells; keyword-derived values never override them.
    This gives magnitude, a damage multiplier, mana cost, rank I–IX and a generated name.
+   Insufficient mana blocks the cast instead of weakening the interpreted spell.
 5. **Procedural runtime** (`public/js/spells.js`): 22 forms, each driven by those parameters:
    - Attacks: orb · barrage · homing funnels · beam · tornado · meteor · nova · ground spikes · vortex/black hole · chain strike · storm · crescent · field (lingering pool) · wave (advancing surge)
    - Self: ward (heal/shield) · enhance (elemental buff) · hand (a summoned spectral hand that fights beside you)
@@ -79,6 +111,50 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    *"Superior Ring of Umbral Skulls Collapse"* or 「伝説の・追尾瘴気の龍・雨・分裂」.
    Size, speed, gravity (weight), homing, spread (chaos), projectile count, duration, piercing (sharpness),
    colour temperature (blue-white fire, violet absolute-zero ice), sigil complexity (rank) and dual-element fusion all come from the spec.
+
+## The look genome: why two fireballs never look alike
+
+Element and form decide *what* a spell does. A second layer decides how it *looks* (`public/js/look.js`). There are no
+preset effects to pick from. Every visual is a function of a few continuous, abstract axes (0–1), and each axis has one
+consistent meaning across shape, colour, fluctuation, launch speed and how the effect evolves over time:
+
+| Axis | Drives |
+|---|---|
+| temperature | colour along a blackbody ramp (ember red → orange → white → blue), buoyancy (hot rises, cold sinks), flicker speed, fast bright bloom versus slow lingering |
+| sharpness | soft puffs → flame tongues → shards/stars, low- versus high-frequency surface detail, orbiting rings, crystal debris |
+| density | ethereal glow → opaque matter: a dark crust over glowing veins, smoke, rock/crystal cores, falling embers, opacity |
+| weight | particle gravity, sluggish bursts, debris that falls and bounces, squat explosions |
+| dispersion (chaos) | spread, turbulence, extra ragged shells and funnel layers, longer trails |
+| luminosity | intensity, white-hot cores, light radius (`smouldering` … `blinding`) |
+| height / width | proportions of every volume: tornado funnels, explosions (column versus pancake), beams, walls, waves, spikes, storms, fields |
+
+Jev scores `height`, `width`, `density` and `luminosity` and picks a **substance** (`magma`, `flame`, `plasma`, `smoke`, `crystal`,
+`liquid`, `mist`, `spectral`, `radiant`, `corrupted`, or `native`). A substance never selects an effect. It only *pulls* the axes
+(magma = dense, heavy, dim, deep red; raging flame = thin, hot, bright, rising), so words blend continuously. The local
+parser understands the same words, for example 地熱 · 溶岩 · 烈火 · 蒼炎 · 天高く · 立ち昇る · 大地 · 地を這う.
+
+- 「大地の地熱トルネード」 → *Earthbound Magma Tornado*: a squat, wide whirl of dark lava crust with glowing cracks, carried rocks,
+  heavy soot and lava bombs that fall back down.
+- 「天高く立ち昇る炎のトルネード」 → *Towering Blazing Tornado*: a tall, slender column of banded toon flame licking upward.
+- 「大地の地熱, ファイアーボール」 versus 「烈火の炎, ファイアーボール」: a flattened lava rock with glowing seams, versus a roaring
+  bright fireball wrapped in flame tongues.
+
+Volumes use an alpha-blended "matter flow" shader (toon flame bands ↔ lava crust, driven by heat and density), which stays
+readable in daylight where additive glow washes out. The spell card shows the substance and the Height, Width, Density and Glow bars.
+
+### One matter system for every element × form
+
+Large volumes don't hand-paint each combination. `public/js/vfxkit.js` has one lit, alpha-blended **surface shader** that blends
+fluid (glossy water with foam and backlit crests), flame (banded toon fire with a hot core and torn edges), gas (sun-lit dust or cloud) and
+solid (rock or snow with glowing cracks when hot), plus an energy glow. The weights come continuously from the element and the look axes.
+Tornado funnels, breaking waves, beam torrents, nova shells and shock walls, fire curtains and waterfall walls, geyser spikes, storm
+cloud shelves, vortex accretion disks, pools, crescent blades, comet-shaped projectiles, missile sheaths, familiars, ward shells,
+power-up auras, summoned hands, flight wings and character status auras all use it. So a new element or substance automatically
+works in every form. The particle emitter follows the same rules: liquids throw spray streaks, airy matter draws speed lines,
+charged matter crackles with arcs, living matter sheds leaves and petals, and dense hot matter spits falling embers.
+
+Sounds follow the look too: weight lowers pitch, heat and brightness open the filters, dispersion jitters timing, dense matter adds rumble,
+and sustained spells get LFO-swept beds (a howling double resonance for vortices) with crackle grains for fire, lightning and stone.
 
 ## Power grades: why an ultimate spell looks nothing like a normal one
 
@@ -116,23 +192,24 @@ element reacts with it:
 
 - **Duel the Archmage**: best of three against an AI that chants generated incantations out loud (speech synthesis),
   runs them through Jev, reads your aura to set up reactions, dodges, walls and heals.
-- **Online Duel**: free-for-all through the built-in WebSocket relay. Friends open `http://<your-ip>:8787`
-  (voice needs `localhost` or HTTPS, but typing works everywhere). Each client decides its own damage (the victim is authoritative).
 - **Training Grounds**: a regenerating golem to test spells on.
 
 ## Files
 
 ```
-server.js             static server + Jev bridge + WebSocket relay
+server.js             static server + Jev bridge
 public/js/main.js     game loop, input, modes, casting flow, post-processing
 public/js/spellbook.js  local parser, Jev client, spec merge, AI incantation generator
-public/js/spells.js   14 procedural spell forms
+public/js/spells.js   22 procedural spell forms
+public/js/look.js     look genome: continuous visual axes, substance biases, palette and particle recipes
+public/js/vfxkit.js   element surface kit: one matter shader (fluid · flame · gas · solid · energy) for every spell volume
+public/js/style.js    global art direction: soft cel terminator and rim light for all lit materials, chamfered stone and boulder geometry
 public/js/combat.js   combatants, auras, reactions, shields, DoTs
 public/js/fx.js       erosion-shaded flame/toon-smoke particles, mesh explosions, shockwaves, heat haze, ribbons, lightning, lights, cracks
-public/js/postfx.js   MSAA HDR, bloom, screen distortion, cinematic grade
+public/js/postfx.js   MSAA HDR, ambient occlusion (GTAO, High and Ultra), bloom, screen distortion, cinematic grade
 public/js/i18n.js     English / Japanese UI strings
 public/js/audio.js    fully synthesized, spatialized SFX + generative music
-public/js/world.js    sky, painterly terrain, wind-swept grass, fluffy trees, mountains, cumulus clouds, ruins
+public/js/world.js    sky, painterly terrain, wind-swept grass, fluffy trees, ridged mountain ranges with aerial haze, floating islands, weathered ruins, camera-following shadows
 public/js/characters.js  outlined cel-shaded battlemages + first-person magic staff
 public/js/voice.js    Web Speech API + mic level
 public/js/bot.js      rival AI
@@ -140,6 +217,11 @@ public/js/hud.js      HUD, spell card, damage numbers
 ```
 
 In the browser console, `VA.test('meteor', 'fire', { power: 1, tier: 1 })` casts a hand-made spec (debug).
+`VA.chant('大地の地熱トルネード')` casts an incantation through the local parser, `VA.follow()` attaches an observer camera to the newest
+spell, `VA.cam([x, y, z], [tx, ty, tz])` places it by hand, and `VA.cam()` returns to the player view.
+`VA.gallery({ shape: 'wave', element: 'water' })` stages an empty field, casts, steps the simulation deterministically and frames the
+spell (it works even in a background tab). `VA.sheet('tornado')` renders that form for all 11 elements in one labelled contact
+sheet. `VA.sheet()` closes it, and `VA.step(seconds)` advances time by hand.
 
 ## Voice diagnostics
 
@@ -160,3 +242,8 @@ synthetic English fixtures. It checks recognition, release handling, cast diagno
 injected audio track; it does not validate physical microphone capture. Reload the lab before another run.
 
 Run regression tests with `node --test tests/voice.test.js tests/voice-feedback.test.js tests/casting.test.js`.
+
+
+## Reference-style menu and Vercel deployment
+
+The main screen uses mode cards and a separate language/microphone panel. Duel difficulty is selected before entering. Settings groups casting, visuals, and audio, with interpretation options under an expandable section. See [DEPLOYMENT.md](DEPLOYMENT.md) for the existing `jev-spell` project link, preview/production commands, authentication, and hosted feature limits.

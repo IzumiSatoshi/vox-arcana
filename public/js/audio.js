@@ -1,23 +1,26 @@
-// Fully procedural sound design (WebAudio). Every spell sound is synthesised from
+// Spell sound design (WebAudio). Every spell sound is synthesised from
 // noise + oscillators, shaped by element and magnitude, spatialised with HRTF.
 import { clamp, rand, pick } from './util.js';
 
 const BASE = { poison: 147, fire: 110, ice: 440, water: 196, lightning: 82, wind: 262, earth: 55, darkness: 65, light: 330, nature: 220, arcane: 294 };
 
 export class AudioEngine {
-  constructor() { this.ctx = null; this.enabled = false; this.volume = 0.8; this.musicVolume = 0.35; }
+  constructor() { this.ctx = null; this.enabled = false; this.volume = 0.8; this.musicVolume = 0.175; }
 
   init() {
-    if (this.ctx) { this.ctx.resume(); return; }
+    if (this.ctx) { this.ctx.resume(); this.startMusic(); return; }
     const ctx = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
     this.master = ctx.createGain(); this.master.gain.value = this.volume;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.25;
     this.master.connect(comp); comp.connect(ctx.destination);
     this.sfx = ctx.createGain(); this.sfx.connect(this.master);
-    this.musicBus = ctx.createGain(); this.musicBus.gain.value = this.musicVolume; this.musicBus.connect(this.master);
+    // Keep music outside the spell compressor: a dense impact must not duck it for seconds.
+    this.musicBus = ctx.createGain(); this.musicBus.gain.value = this.musicVolume;
+    this.musicMaster = ctx.createGain(); this.musicMaster.gain.value = this.volume;
+    this.musicBus.connect(this.musicMaster); this.musicMaster.connect(ctx.destination);
     this.reverb = ctx.createConvolver(); this.reverb.buffer = this.impulse(3.2, 2.6);
-    this.reverbIn = ctx.createGain(); this.reverbIn.gain.value = 0.9;
+    this.reverbIn = ctx.createGain(); this.reverbIn.gain.value = 0.35;
     this.reverbIn.connect(this.reverb); this.reverb.connect(this.master);
     const sr = ctx.sampleRate, len = sr * 2;
     this.white = ctx.createBuffer(1, len, sr); this.pink = ctx.createBuffer(1, len, sr); this.brown = ctx.createBuffer(1, len, sr);
@@ -35,6 +38,7 @@ export class AudioEngine {
     this.shaperCurve = curve;
     this.enabled = true;
     this.startAmbience();
+    this.startMusic();
   }
   impulse(sec, decay) {
     const ctx = this.ctx, len = ctx.sampleRate * sec, buf = ctx.createBuffer(2, len, ctx.sampleRate);
@@ -44,7 +48,7 @@ export class AudioEngine {
     }
     return buf;
   }
-  setVolume(v) { this.volume = v; if (this.master) this.master.gain.value = v; }
+  setVolume(v) { this.volume = v; if (this.master) this.master.gain.value = v; if (this.musicMaster) this.musicMaster.gain.value = v; }
   setMusic(v) { this.musicVolume = v; if (this.musicBus) this.musicBus.gain.value = v; }
 
   updateListener(cam) {
@@ -79,22 +83,34 @@ export class AudioEngine {
     param.linearRampToValueAtTime(peak, t + a);
     param.exponentialRampToValueAtTime(Math.max(sustain, 0.0001), t + a + d);
   }
+  // Look → timbre. Every recipe below plays through this: weight lowers pitch, heat/brightness open the filters,
+  // dispersion jitters timing. Set for the duration of one cast/impact recipe, then cleared.
+  withLook(look, fn) {
+    const G = look?.g;
+    this.mod = G ? { p: 1.35 - G.weight * 0.7, b: 0.55 + G.temperature * 0.5 + G.luminosity * 0.45, j: G.dispersion, grit: G.density } : null;
+    try { fn(); } finally { this.mod = null; }
+  }
   noise(dest, { type = 'white', dur = 0.5, a = 0.005, gain = 0.5, f = 'lowpass', f0 = 2000, f1 = null, Q = 1, delay = 0, rate = 1 } = {}) {
+    if (this.mod) { f0 *= this.mod.b; if (f1) f1 *= this.mod.b; delay += Math.random() * this.mod.j * 0.05; rate *= this.mod.p; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const src = ctx.createBufferSource(); src.buffer = this[type]; src.loop = true; src.playbackRate.value = rate;
     const fl = ctx.createBiquadFilter(); fl.type = f; fl.Q.value = Q; fl.frequency.setValueAtTime(f0, t);
     if (f1) fl.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const g = ctx.createGain(); this.env(g.gain, t, a, gain, dur);
     src.connect(fl); fl.connect(g); g.connect(dest);
+    src.onended = () => { src.disconnect(); fl.disconnect(); g.disconnect(); };
     src.start(t, Math.random() * 1.5); src.stop(t + a + dur + 0.05);
     return fl;
   }
   tone(dest, { type = 'sine', f0 = 440, f1 = null, dur = 0.5, a = 0.005, gain = 0.3, delay = 0, detune = 0, curve = 'exp' } = {}) {
+    if (this.mod) { f0 *= this.mod.p; if (f1) f1 *= this.mod.p; detune += (Math.random() - 0.5) * this.mod.j * 60; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const o = ctx.createOscillator(); o.type = type; o.detune.value = detune; o.frequency.setValueAtTime(f0, t);
     if (f1) curve === 'exp' ? o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur) : o.frequency.linearRampToValueAtTime(f1, t + dur);
     const g = ctx.createGain(); this.env(g.gain, t, a, gain, dur);
-    o.connect(g); g.connect(dest); o.start(t); o.stop(t + a + dur + 0.05);
+    o.connect(g); g.connect(dest);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+    o.start(t); o.stop(t + a + dur + 0.05);
     return o;
   }
   distort(dest, amount = 1) {
@@ -103,10 +119,14 @@ export class AudioEngine {
   }
 
   // ---------------------------------------------------------------- spell casts
-  cast(el, m = 0.5, pos = null) {
+  cast(el, m = 0.5, pos = null, look = null) {
     if (!this.enabled) return;
+    if (look && !this.mod) return this.withLook(look, () => this.cast(el, m, pos, look));
     const o = this.out(pos, 0.55 + m * 0.4, 0.25 + m * 0.3);
     const L = 0.3 + m * 0.6;
+    // shared launch layer: a rising filtered whoosh and a transient snap, so every cast leaves the hand with energy
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 450, f1: 2600 + m * 1500, Q: 1.6, dur: 0.26 + m * 0.2, a: 0.12 + m * 0.06, gain: 0.55 + m * 0.3 });
+    this.noise(o, { f: 'highpass', f0: 3200, dur: 0.03, a: 0.001, gain: 0.35 + m * 0.2 });
     switch (el) {
       case 'fire':
         this.noise(o, { type: 'pink', f: 'bandpass', f0: 300, f1: 2400, Q: 0.8, dur: L, a: 0.08, gain: 0.9 });
@@ -148,17 +168,22 @@ export class AudioEngine {
         this.noise(o, { f: 'highpass', f0: 6000, dur: 0.8, a: 0.2, gain: 0.25 });
         break;
       case 'nature':
-        for (let i = 0; i < 4; i++) this.tone(o, { type: 'triangle', f0: pick([294, 330, 392, 440, 587]), dur: 0.35, gain: 0.15, delay: i * 0.06 });
-        this.noise(o, { type: 'pink', f: 'bandpass', f0: 2500, Q: 1.2, dur: L, a: 0.1, gain: 0.5 });
+        for (let i = 0; i < 4; i++) this.tone(o, { type: 'triangle', f0: pick([294, 330, 392, 440, 587]), dur: 0.35, gain: 0.22, delay: i * 0.06 });
+        this.noise(o, { type: 'pink', f: 'bandpass', f0: 2500, Q: 1.2, dur: L, a: 0.1, gain: 0.7 });
+        this.tone(o, { f0: 190, f1: 120, dur: 0.09, a: 0.002, gain: 0.5 });                                               // woody knock
+        for (let i = 0; i < 7; i++) this.noise(o, { f: 'bandpass', f0: rand(2800, 5200), Q: 2, dur: rand(0.03, 0.07), gain: rand(0.25, 0.5), delay: rand(0, L) }); // leaf rustle
         break;
       case 'poison':
-        for (let i = 0; i < 8; i++) this.tone(o, { f0: rand(150, 320), f1: rand(400, 900), dur: 0.09, gain: 0.14, delay: rand(0, 0.35) });
+        for (let i = 0; i < 10; i++) this.tone(o, { f0: rand(150, 320), f1: rand(400, 900), dur: 0.09, gain: 0.24, delay: rand(0, 0.4) }); // bubbling blips
+        this.noise(o, { type: 'brown', f: 'lowpass', f0: 500, f1: 180, dur: L * 1.2, a: 0.05, gain: 0.9 });                // thick gurgle
         this.noise(o, { type: 'pink', f: 'bandpass', f0: 600, f1: 250, Q: 3, dur: L, a: 0.08, gain: 0.9 });
         this.tone(o, { type: 'sawtooth', f0: 90, f1: 70, dur: L, gain: 0.08, detune: 30 });
         break;
       default: // arcane
-        this.tone(o, { f0: 300, f1: 1200 + m * 1200, dur: L, gain: 0.2 });
-        for (let i = 0; i < 6; i++) this.tone(o, { f0: pick([523, 659, 784, 988, 1175]), dur: 0.2, gain: 0.08, delay: i * 0.05 });
+        this.tone(o, { f0: 300, f1: 1200 + m * 1200, dur: L, gain: 0.32 });
+        for (const dt of [0, 7]) this.tone(o, { type: 'triangle', f0: 880, f1: 1320, dur: L * 1.3, a: 0.04, gain: 0.14, detune: dt * 10 }); // beating shimmer
+        for (let i = 0; i < 6; i++) this.tone(o, { f0: pick([523, 659, 784, 988, 1175]), dur: 0.2, gain: 0.14, delay: i * 0.05 });
+        this.noise(o, { f: 'bandpass', f0: 1500, f1: 5200, Q: 5, dur: L, a: 0.05, gain: 0.8 });                             // phasey sweep
     }
     if (m > 0.8) { // big spells: sub drop + choir-ish swell
       this.tone(o, { f0: 90, f1: 30, dur: 1.4, gain: 0.8 });
@@ -166,10 +191,15 @@ export class AudioEngine {
     }
   }
 
-  impact(el, m = 0.5, pos = null) {
+  impact(el, m = 0.5, pos = null, look = null) {
     if (!this.enabled) return;
+    if (look && !this.mod) return this.withLook(look, () => this.impact(el, m, pos, look));
     const o = this.out(pos, 0.6 + m * 0.6, 0.35 + m * 0.4);
     const L = 0.35 + m * 1.2;
+    // punch: a transient crack and a sub thump that drops in pitch (heavier spells hit harder and lower)
+    const heavy = this.mod ? 0.5 + this.mod.grit : 1;
+    this.noise(o, { f: 'highpass', f0: 2200, dur: 0.035, a: 0.001, gain: 0.9 + m * 0.6 });
+    this.tone(o, { f0: 150, f1: 38, dur: 0.22 + m * 0.35, a: 0.002, gain: (0.7 + m * 0.8) * heavy });
     // universal body
     this.noise(o, { type: 'brown', f0: 1200 + m * 1500, f1: 60, dur: L, gain: 0.9 + m });
     this.tone(o, { f0: 110 - m * 40, f1: 28, dur: L * 0.8, gain: 0.5 + m * 0.5 });
@@ -179,7 +209,8 @@ export class AudioEngine {
         for (let i = 0; i < 12 + m * 20; i++) this.noise(o, { f: 'highpass', f0: 2000, dur: 0.015, gain: rand(0.1, 0.3), delay: rand(0.05, L * 1.5) });
         break;
       case 'ice':
-        for (let i = 0; i < 14 + m * 12; i++) {
+        // Short ice grains overlap heavily; cap voices during large impacts.
+        for (let i = 0; i < Math.min(12, 6 + Math.round(m * 5)); i++) {
           this.noise(o, { f: 'highpass', f0: rand(3000, 7000), dur: rand(0.02, 0.08), gain: rand(0.15, 0.4), delay: rand(0, 0.3) });
           this.tone(o, { f0: rand(2000, 5000), dur: 0.2, gain: 0.04, delay: rand(0, 0.4) });
         }
@@ -246,15 +277,40 @@ export class AudioEngine {
   whoosh(m = 0.5) { if (!this.enabled) return; const o = this.out(null, 0.4, 0.1); this.noise(o, { type: 'pink', f: 'bandpass', f0: 500, f1: 2500, Q: 2, dur: 0.25 + m * 0.2, a: 0.03, gain: 1.2 }); }
 
   // ---------------------------------------------------------------- looping sounds (beams, tornados, orbs in flight)
-  loop(el, pos, gain = 0.5) {
+  // Sustained spell sound. opts.spin (0..1) adds a swept resonant howl (vortices), the look adds rumble, brightness
+  // and crackle grains, so a tornado roars and whistles while a lava field grumbles and pops.
+  loop(el, pos, gain = 0.5, look = null, opts = {}) {
     if (!this.enabled) return { set() {}, stop() {} };
-    const ctx = this.ctx, o = this.out(pos, 0, 0.3);
+    const ctx = this.ctx, o = this.out(pos, 0, 0.3), G = look?.g;
+    const bright = G ? 0.55 + G.temperature * 0.5 + G.luminosity * 0.45 : 1, pitch = G ? 1.35 - G.weight * 0.7 : 1;
     const src = ctx.createBufferSource(); src.buffer = el === 'earth' || el === 'darkness' ? this.brown : this.pink; src.loop = true;
     const fl = ctx.createBiquadFilter(); fl.type = 'bandpass'; fl.Q.value = 1.2;
-    fl.frequency.value = { fire: 900, ice: 4000, water: 1200, lightning: 2500, wind: 1500, earth: 300, darkness: 400, light: 3000, nature: 1600, arcane: 2000 }[el] || 1200;
+    const fc = ({ fire: 900, ice: 4000, water: 1200, lightning: 2500, wind: 1500, earth: 300, darkness: 400, light: 3000, nature: 1600, arcane: 2000 }[el] || 1200) * bright;
+    fl.frequency.value = fc;
     src.connect(fl); fl.connect(o); src.start();
-    const osc = ctx.createOscillator(); osc.type = el === 'lightning' ? 'sawtooth' : 'sine'; osc.frequency.value = BASE[el] || 200;
+    // slow filter sweep so the bed breathes (faster for spinning spells)
+    const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 0.25 + (opts.spin || 0) * 1.4; lg.gain.value = fc * 0.45;
+    lfo.connect(lg); lg.connect(fl.frequency); lfo.start();
+    const osc = ctx.createOscillator(); osc.type = el === 'lightning' ? 'sawtooth' : 'sine'; osc.frequency.value = (BASE[el] || 200) * pitch;
     const og = ctx.createGain(); og.gain.value = el === 'lightning' ? 0.05 : 0.12; osc.connect(og); og.connect(o); osc.start();
+    const extra = [lfo, osc];
+    if (opts.spin) { // vortex howl: two resonant bands sweeping against each other
+      for (const [f0, rate] of [[650, 0.7], [1500, 1.13]]) {
+        const s2 = ctx.createBufferSource(); s2.buffer = this.pink; s2.loop = true;
+        const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.Q.value = 9; b.frequency.value = f0 * bright;
+        const l2 = ctx.createOscillator(), g2 = ctx.createGain(); l2.frequency.value = rate * (0.6 + opts.spin); g2.gain.value = f0 * 0.5; l2.connect(g2); g2.connect(b.frequency);
+        const vg = ctx.createGain(); vg.gain.value = 0.9 * opts.spin;
+        s2.connect(b); b.connect(vg); vg.connect(o); s2.start(); l2.start(); extra.push(s2, l2);
+      }
+    }
+    if (G && G.density > 0.55) { // rumble for heavy matter
+      const r = ctx.createBufferSource(); r.buffer = this.brown; r.loop = true; const rl = ctx.createBiquadFilter(); rl.type = 'lowpass'; rl.frequency.value = 140 * pitch;
+      const rg = ctx.createGain(); rg.gain.value = (G.density - 0.4) * 1.6; r.connect(rl); rl.connect(rg); rg.connect(o); r.start(); extra.push(r);
+    }
+    // crackle grains: fire pops, electric snaps, grinding stone
+    const crackle = G ? Math.max(0, (G.temperature - 0.55) * 2) + (el === 'lightning' ? 1 : 0) + (el === 'earth' ? 0.5 : 0) : 0;
+    let timer = null;
+    if (crackle > 0.2) timer = setInterval(() => { if (Math.random() < crackle * 0.35) this.noise(o, { f: 'highpass', f0: el === 'earth' ? 700 : 2400, dur: rand(0.01, 0.04), a: 0.001, gain: rand(0.2, 0.6) * Math.min(1.5, crackle) }); }, 45);
     o.gain.setTargetAtTime(gain, ctx.currentTime, 0.05);
     return {
       set: (p, g) => {
@@ -262,7 +318,7 @@ export class AudioEngine {
         if (pn && p) { const t = ctx.currentTime; if (pn.positionX) { pn.positionX.setTargetAtTime(p.x, t, 0.03); pn.positionY.setTargetAtTime(p.y, t, 0.03); pn.positionZ.setTargetAtTime(p.z, t, 0.03); } else pn.setPosition(p.x, p.y, p.z); }
         if (g !== undefined) o.gain.setTargetAtTime(g, ctx.currentTime, 0.05);
       },
-      stop: () => { const t = ctx.currentTime; o.gain.setTargetAtTime(0, t, 0.08); src.stop(t + 0.5); osc.stop(t + 0.5); },
+      stop: () => { const t = ctx.currentTime; clearInterval(timer); o.gain.setTargetAtTime(0, t, 0.08); src.stop(t + 0.5); for (const x of extra) x.stop(t + 0.5); },
     };
   }
 
@@ -295,7 +351,18 @@ export class AudioEngine {
     c.oscs.forEach((o) => o.stop(t + 0.6)); c.src.stop(t + 0.6);
   }
 
-  // ---------------------------------------------------------------- ambience + generative music
+  // ---------------------------------------------------------------- ambience + background music
+  startMusic() {
+    if (!this.musicTrack) {
+      this.musicTrack = new Audio('/audio/fantasy-spellcasting-boss-theme.mp3');
+      this.musicTrack.loop = true;
+      this.musicSource = this.ctx.createMediaElementSource(this.musicTrack);
+      this.musicSource.connect(this.musicBus);
+    }
+    if (this.musicTrack.paused) {
+      this.musicTrack.play().catch(error => console.warn('Background music could not start:', error));
+    }
+  }
   startAmbience() {
     const ctx = this.ctx;
     const src = ctx.createBufferSource(); src.buffer = this.pink; src.loop = true;
@@ -304,39 +371,7 @@ export class AudioEngine {
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07; const lg = ctx.createGain(); lg.gain.value = 250;
     lfo.connect(lg); lg.connect(fl.frequency); lfo.start();
     src.connect(fl); fl.connect(g); g.connect(this.master); src.start();
-    // generative pentatonic music (gentle, Genshin-ish open-field vibe)
-    const chords = [[57, 64, 69, 72], [53, 60, 65, 69], [55, 62, 67, 71], [52, 59, 64, 67]];
-    const scale = [69, 71, 74, 76, 79, 81, 83, 86];
-    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
-    let bar = 0;
-    const padOut = ctx.createBiquadFilter(); padOut.type = 'lowpass'; padOut.frequency.value = 1400; padOut.connect(this.musicBus);
-    const rs = ctx.createGain(); rs.gain.value = 0.7; padOut.connect(rs); rs.connect(this.reverbIn);
-    const tick = () => {
-      if (!this.enabled) return;
-      const ch = chords[bar % chords.length];
-      const t = ctx.currentTime;
-      ch.forEach((n) => {
-        for (const det of [-6, 6]) {
-          const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(n - 12); o.detune.value = det;
-          const gg = ctx.createGain(); gg.gain.setValueAtTime(0.0001, t); gg.gain.linearRampToValueAtTime(0.018, t + 1.5); gg.gain.linearRampToValueAtTime(0.0001, t + 6.6);
-          o.connect(gg); gg.connect(padOut); o.start(t); o.stop(t + 6.8);
-        }
-      });
-      const bass = ctx.createOscillator(); bass.frequency.value = mtof(ch[0] - 24);
-      const bg = ctx.createGain(); bg.gain.setValueAtTime(0.0001, t); bg.gain.linearRampToValueAtTime(0.06, t + 0.3); bg.gain.exponentialRampToValueAtTime(0.0001, t + 5);
-      bass.connect(bg); bg.connect(this.musicBus); bass.start(t); bass.stop(t + 5.2);
-      for (let i = 0; i < 8; i++) {
-        if (Math.random() < 0.45) continue;
-        const f = mtof(pick(scale) + (Math.random() < 0.2 ? 12 : 0));
-        const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
-        const gg = ctx.createGain(); const st = t + i * 0.75 + rand(0, 0.05);
-        gg.gain.setValueAtTime(0.0001, st); gg.gain.linearRampToValueAtTime(0.05, st + 0.01); gg.gain.exponentialRampToValueAtTime(0.0001, st + 1.6);
-        o.connect(gg); gg.connect(padOut); o.start(st); o.stop(st + 1.7);
-      }
-      bar++;
-      setTimeout(tick, 6000);
-    };
-    tick();
+
   }
 }
 export const audio = new AudioEngine();

@@ -57,7 +57,15 @@ export class BotBrain {
     wish.addScaledVector(to, flatD > pref + 4 ? 1 : flatD < pref - 5 ? -1 : 0);
     wish.addScaledVector(side, this.strafe * (this.chant ? 0.5 : 1));
     // keep inside the arena
-    if (c.pos.length() > 55) wish.addScaledVector(c.pos.clone().setY(0).normalize(), -1.5);
+    if (Math.hypot(c.pos.x, c.pos.z) > 95) wish.addScaledVector(c.pos.clone().setY(0).normalize(), -1.5);
+    // steer along cliff faces instead of grinding into them
+    if (wish.lengthSq() > 0.01) {
+      const w = wish.clone().normalize(), H = (x, z) => g.world.heightAt(x, z), top = c.pos.y + 0.7;
+      if (H(c.pos.x + w.x * 1.6, c.pos.z + w.z * 1.6) > top) {
+        const l = new THREE.Vector3(-w.z, 0, w.x), hl = H(c.pos.x + l.x * 2, c.pos.z + l.z * 2), hr = H(c.pos.x - l.x * 2, c.pos.z - l.z * 2);
+        wish.copy(hl < hr ? l : l.negate()).addScaledVector(w, -0.2);
+      }
+    }
     this.dodgeCd -= dt;
     let dashDir = null;
     if (this.dodgeCd <= 0) {
@@ -100,7 +108,7 @@ export class BotBrain {
     let element, shape;
     const aura = tgt.aura?.el;
     if (hpFrac < 0.35 && c.shield <= 0 && Math.random() < 0.5) { shape = 'ward'; element = pick(['light', 'nature', 'water', 'earth']); }
-    else if (tgt.chanting && Math.random() < 0.3) { shape = 'wall'; element = pick(['earth', 'ice', 'fire']); }
+    else if (tgt.chanting && Math.random() < 0.3) { if (Math.random() < 0.65) { shape = 'barrier'; element = pick(['light', 'arcane', 'water', 'lightning']); } else { shape = 'wall'; element = pick(['earth', 'ice', 'fire']); } }
     else {
       element = aura && COUNTER[aura] && Math.random() < 0.75 ? pick(COUNTER[aura]) : pick(ELEMENT_KEYS);
       shape = tgt.frozen > 0 ? pick(['meteor', 'spikes', 'orb']) : pick(SHAPE_POOL);
@@ -119,13 +127,16 @@ export class BotBrain {
     const units = ja ? text.length / 3.2 : words.length;
     this.chant = { text, t: 0, dur: 0.6 + units * 0.3, words, grand, joiner: ja ? '' : ' ' };
     c.chanting = true; c.chantText = '';
-    this.g.onBotChant?.(c, text);
+    const chant = this.chant;
+    chant.voicePending = true;
+    const voiced = this.g.onBotChant?.(c, text, () => { chant.voicePending = false; });
+    if (!voiced) chant.voicePending = false;
     // ask Jev during the chant so the latency is hidden
     const meta = { chantSeconds: this.chant.dur, loudness: 0.4 + grand * 0.5 };
     this.chant.meta = meta;
     this.chant.local = localParse(text);
     this.useJev = this.g.settings.botJev && this.g.jevOnline && this.g.mode !== 'menu';
-    if (this.useJev) askJev(text, meta).then((j) => { if (this.chant && this.chant.text === text) this.chant.jev = j; });
+    if (this.useJev) askJev(text, { ...meta, provider: this.g.settings.spellProvider, language: this.g.voice?.lang || this.g.settings.lang }).then((j) => { if (this.chant === chant) chant.jev = j; });
   }
   updateChant(dt, tgt) {
     const ch = this.chant, c = this.c;
@@ -133,10 +144,10 @@ export class BotBrain {
     ch.t += dt;
     const shown = Math.min(ch.words.length, Math.floor((ch.t / ch.dur) * ch.words.length) + 1);
     c.chantText = ch.words.slice(0, shown).join(ch.joiner);
-    if (ch.t >= ch.dur && (ch.jev || !this.useJev || ch.t > ch.dur + 1.2)) {
+    if (!ch.voicePending && ch.t >= ch.dur && (ch.jev || !this.useJev || ch.t > ch.dur + 1.2)) {
       const spec = buildSpec(ch.text, ch.local, ch.jev, ch.meta);
       const cost = spec.cost;
-      if (c.mana >= cost * 0.5) {
+      if (c.mana >= cost) {
         c.mana = Math.max(0, c.mana - cost);
         this.g.spells.cast(spec, c);
         this.g.onCast?.(c, spec);

@@ -1,0 +1,12 @@
+node_modules
+.cache
+.git
+.claude
+logs
+tests
+dist
+.env*
+jev.config.json
+server.js
+local-model.js
+public/voice-fixtures
