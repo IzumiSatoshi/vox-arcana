@@ -180,7 +180,7 @@ export class Hud {
       el.style.display = '';
       const sc = clamp(1.3 - d / 70, 0.55, 1.1);
       el.style.transform = `translate(${sp.x}px, ${sp.y}px) translate(-50%,-100%) scale(${sc})`;
-      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span${g.player?.team && c.team === g.player.team ? ' style="color:#7fd0ff"' : ''}>${g.player?.team && c.team === g.player.team ? '◆ ' : ''}${c.name}</span>`);
+      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span${g.player?.team && c.team === g.player.team ? ' style="color:#7fd0ff"' : ''}>${g.player?.team && c.team === g.player.team ? '◆ ' : ''}${g.royale?.leader === c ? '<b style="color:#ffd46a">♛</b> ' : ''}${c.name}</span>`);
       el.children[1].children[0].style.width = clamp(c.hp / c.maxHp) * 100 + '%';
       el.children[1].children[1].style.width = clamp(c.shield / 300) * 100 + '%';
       setHTML(el.children[2], this.statusTags(c) + (c.chanting ? `<span class="status-tag" style="color:#ff8fb0">${t('st.chanting')}</span>` : ''));

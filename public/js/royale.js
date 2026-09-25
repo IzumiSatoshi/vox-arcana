@@ -542,6 +542,7 @@ export class Royale {
   }
   updateHud(force = false) {
     const g = this.g, p = g.player; this.hudT = 0.25;
+    const top = this.alive().sort((x, y) => y.kills - x.kills)[0]; this.leader = top && top.kills >= 2 ? top : null; // the kill leader wears a crown
     if (!p) return;
     const Z = this.zone, P = PHASES[Math.min(Z.phase, PHASES.length - 1)];
     const left = Z.state === 'wait' ? Math.ceil(P.wait - Z.st) : Z.state === 'shrink' ? Math.ceil(P.shrink - Z.st) : 0;
