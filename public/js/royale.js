@@ -246,7 +246,7 @@ export class Royale {
     return it;
   }
   removeItem(it) { const s = this.g.scene; s.remove(it.grp, it.halo, it.beam); it.grp.traverse((m) => m.userData.ownGeo && m.geometry.dispose()); this.items.splice(this.items.indexOf(it), 1); }
-  nearestItem(pos, maxD = 40) { let best = null, bd = maxD; for (const it of this.items) { const d = it.pos.distanceTo(pos); if (d < bd && this.inZone(it.pos, -4)) { bd = d; best = it; } } return best; }
+  nearestItem(pos, maxD = 40, c = null) { let best = null, bd = maxD; for (const it of this.items) { if (c && it.kind.type === 'potion' && c.inv?.[it.kind.id] >= POTION_CAP) continue; const d = it.pos.distanceTo(pos); if (d < bd && this.inZone(it.pos, -4)) { bd = d; best = it; } } return best; }
   itemName(k) { const ja = getLang() === 'ja'; return k.type === 'core' ? (ja ? `${elName(k.el)}の核` : `${ELEMENTS[k.el].name} Core`) : k.type === 'relic' ? PASSIVES[k.id][ja ? 'ja' : 'en'] : POTIONS[k.id][ja ? 'ja' : 'en']; }
   itemDesc(k) {
     const ja = getLang() === 'ja';
@@ -606,7 +606,7 @@ export class Royale {
     const dz = Math.hypot(c.pos.x - Z.nx, c.pos.z - Z.nz);
     if (!this.inZone(c.pos, -6) || (Z.state === 'shrink' && dz > Z.nr - 4)) return new THREE.Vector3(Z.nx, 0, Z.nz);
     if (c.mana < c.maxMana * 0.35 || c.hp < c.maxHp * 0.5) { const sh = this.nearestShrine(c.pos, 60); if (sh) return sh.pos; } // go recover at a shrine
-    const it = this.nearestItem(c.pos, 45); if (it) return it.pos;
+    const it = this.nearestItem(c.pos, 45, c); if (it) return it.pos;
     return new THREE.Vector3(Z.nx, 0, Z.nz);
   }
   // ------------------------------------------------------------ mana shrines: contested circles that restore mana and health
