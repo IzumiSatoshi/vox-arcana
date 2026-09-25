@@ -121,7 +121,8 @@ class WhipSpell extends Spell {
       P[i].copy(P[i - 1]).addScaledVector(d, seg);
       const gy = groundY(this.g, P[i]) + 0.15; if (P[i].y < gy) P[i].y = gy;
     }
-    const r0 = this.r0, rad = (q) => r0 * (1.15 - 0.85 * q) * (0.4 + 0.6 * ext);
+    // thin at the hand (it starts right under the caster's eye), thickest a little way out, tapering to the tip
+    const r0 = this.r0, hand = this.caster.isPlayer ? 0.22 : 0.1, rad = (q) => r0 * (1.15 - 0.85 * q) * (0.4 + 0.6 * ext) * (0.2 + 0.8 * smooth(q / hand));
     this.tube.update(P, rad); this.glow?.update(P, (q) => rad(q) * 0.55);
     const fade = clamp(ext * 1.5);
     this.tube.mesh.material.uniforms.uFade.value = fade; if (this.glow) this.glow.mesh.material.uniforms.uFade.value = fade;
