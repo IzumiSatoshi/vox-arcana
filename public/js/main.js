@@ -154,7 +154,7 @@ class Game {
     const v = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.fx.setScale(v.y, this.camera.fov);
   }
-  screenFlash(color = '#fff', a = 0.5) { $('screen-flash').style.background = color; this.hud.flash = Math.max(this.hud.flash, a); }
+  screenFlash(color = '#fff', a = 0.5) { $('screen-flash').style.background = color; this.hud.flash = Math.max(this.hud.flash, a * (this.settings.calm ? 0.35 : 1)); }
 
   // ------------------------------------------------------------ Jev status
   async checkJev() {
