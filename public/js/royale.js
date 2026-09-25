@@ -304,7 +304,7 @@ export class Royale {
     }
     if (Z.state === 'final') Z.dps += dt * 2.5; // sudden death: the last storm keeps getting hungrier
     this.wall.position.set(Z.cx, -20, Z.cz); this.wall.scale.set(Math.max(0.5, Z.r), 160, Math.max(0.5, Z.r));
-    this.nextRing.visible = Z.state !== 'final';
+    const pl0 = this.g.player; this.nextRing.visible = Z.state !== 'final' && !!(pl0?.onShip || pl0?.dropping); // a flat ring only reads from above; on the ground it floats through hills (the minimap shows it)
     this.nextRing.position.set(Z.nx, this.g.world.heightAt(Z.nx, Z.nz) + 0.4, Z.nz); this.nextRing.scale.setScalar(Math.max(0.5, Z.nr));
     // the storm burns anyone outside it (damage grows every phase)
     this.tick -= dt;
