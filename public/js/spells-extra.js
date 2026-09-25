@@ -421,7 +421,7 @@ class BeastSpell extends Spell {
   constructor(sys, spec, caster, aim, opts = {}) {
     super(sys, spec, caster, aim);
     const s = this.spec, c = this.caster, L = this.look;
-    this.twin = opts.twin ? -1 : 1;
+    this.twin = opts.twin ? -1 : 1; this.dmgK = opts.twin ? 0.6 : 1;
     if (!opts.twin && s.count > 0.65) this.sys.active.push(new BeastSpell(sys, { ...s, count: 0 }, caster, aim, { twin: true }));
     this.kit = kitOf(this.el, L);
     this.r = (0.5 + s.size * 0.4) * (0.65 + this.m * 0.45);
@@ -480,7 +480,7 @@ class BeastSpell extends Spell {
         this.steer(to.normalize().add(side), dt, 3.2 + s.homing * 2);
         if (to.length() < 5) this.bite = Math.min(1, this.bite + dt * 5);
         if (tgt.hits(this.pos, this.r * 1.4 + 0.3)) {
-          this.hit(tgt, 58, this.pos.clone(), { knock: this.vel.clone().setLength(9 + s.weight * 6).setY(5), shatter: this.solid });
+          this.hit(tgt, 58 * this.dmgK, this.pos.clone(), { knock: this.vel.clone().setLength(9 + s.weight * 6).setY(5), shatter: this.solid });
           fx.explosion(this.el, this.pos, 1.8 + this.m, 0.6, this.pal, { look: this.look, noDecal: true });
           fx.addShake(0.2, this.pos); this.g.audio.impact(this.el, 0.7, this.pos, this.look);
           this.hits++; this.bite = 0;
@@ -498,7 +498,7 @@ class BeastSpell extends Spell {
       if (this.pos.y < groundY(this.g, this.pos) + 0.3 || this.stT > 1.6) {
         this.state = 'gone'; this.stT = 0; this.loopSnd?.stop(); this.loopSnd = null;
         const p = this.pos.clone(); p.y = Math.max(p.y, groundY(this.g, p) + 0.4);
-        this.explode(p, 2.5 + this.m * 1.5, 45, { knock: 10, lift: 7 });
+        this.explode(p, 2.5 + this.m * 1.5, 45 * this.dmgK, { knock: 10, lift: 7 });
         fx.shockWall?.(p, 3 + this.m * 2, this.look, this.el, 0.6, 0.9); fx.addShake(0.35, p);
         escalateImpact(this, p, 2 + this.m, null);
       }
