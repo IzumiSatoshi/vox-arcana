@@ -8,6 +8,7 @@ import { ARENA_R, SEA_Y, MESAS } from './world.js';
 import { applyHit } from './combat.js';
 import { t, getLang } from './i18n.js';
 import { MagicCircle } from './magicCircle.js';
+import { MageModel } from './characters.js';
 import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, equip, grant } from './royale-rules.js';
 import { rand, pick, clamp, TAU } from './util.js';
 
@@ -347,6 +348,11 @@ export class Royale {
         }
       }
     }
+    if (this.victory) {
+      const V = this.victory; V.t += dt; const a = V.t * 0.45, r = 6 + Math.min(4, V.t * 0.8), p = g.player;
+      g.debugCam = { pos: [V.at.x + Math.cos(a) * r, V.at.y + 2.2 + V.t * 0.25, V.at.z + Math.sin(a) * r], target: [V.at.x, V.at.y + 1.3, V.at.z] };
+      p.yaw = Math.atan2(p.pos.x - g.debugCam.pos[0], p.pos.z - g.debugCam.pos[2]) + Math.sin(V.t * 2) * 0.3; p.chanting = V.t % 3 < 1.5; // turn toward the lens, staff raised
+    }
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
   alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
@@ -424,8 +430,19 @@ export class Royale {
     g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills, d: Math.round(g.stats?.dmg || 0) }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
     g.audio.ui(won ? 'victory' : 'defeat');
     setTimeout(() => { if (g.royale === this) this.showResults(); }, 2500);
-    if (won) for (let i = 0; i < 6; i++) setTimeout(() => { if (g.player) g.fx.explosion(pick(ELEMENT_KEYS), g.player.center().add(new THREE.Vector3(rand(-6, 6), rand(4, 9), rand(-6, 6))), 2, 0.6); }, i * 350);
-    setTimeout(() => { if (g.royale === this) g.endToMenu(); }, 9000);
+    if (won) {
+      // the champion steps out of first person: a body appears and the camera circles it under fireworks
+      const p = g.player;
+      if (!p.model) { p.model = new MageModel({ robe: 0x1f2f6a, trim: 0xe0b95a, accent: 0x6fd8ff, hat: 0x141a3a }); p.model.setElement?.(g.lastEl || 'arcane'); g.scene.add(p.model.root); }
+      this.victory = { t: 0, at: p.pos.clone() };
+      g.viewModel.group.visible = false;
+      for (let i = 0; i < 14; i++) setTimeout(() => {
+        if (g.royale !== this || !g.player) return;
+        const c = g.player.center().add(new THREE.Vector3(rand(-9, 9), rand(7, 14), rand(-9, 9))), el = pick(ELEMENT_KEYS);
+        g.fx.explosion(el, c, 2.2, 0.7, null, { noDecal: true }); g.fx.starburst(c, new THREE.Color(ELEMENTS[el].color), 5, 10, 0.3); g.audio.impact(el, 0.5, c);
+      }, 300 + i * 420);
+    }
+    setTimeout(() => { if (g.royale === this) g.endToMenu(); }, won ? 11000 : 9000);
   }
   updateHud(force = false) {
     const g = this.g, p = g.player; this.hudT = 0.25;
@@ -476,6 +493,6 @@ export class Royale {
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
-    if (this.g.debugCam && this.deadT !== undefined) this.g.debugCam = null;
+    if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }
