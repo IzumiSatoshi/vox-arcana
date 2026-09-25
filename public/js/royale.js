@@ -16,7 +16,7 @@ import { t, getLang } from './i18n.js';
 import { MagicCircle } from './magicCircle.js';
 import { MageModel } from './characters.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, equip, grant } from './royale-rules.js';
+import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, POTION_CAP, equip, grant } from './royale-rules.js';
 import { rand, pick, clamp, TAU } from './util.js';
 
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
@@ -382,7 +382,7 @@ export class Royale {
       if (Math.random() < 0.06) { const c = it.col || (it.col = new THREE.Color(this.colorOf(it.kind))), a = rand(0, TAU); g.fx.glow.emit({ x: it.pos.x + Math.cos(a) * 0.5, y: it.pos.y + 0.6, z: it.pos.z + Math.sin(a) * 0.5, vy: rand(0.6, 1.4), life: rand(0.8, 1.4), size: 0.12, size1: 0.02, color: c, alpha: 1, drag: 0.3, frame: 1 }); } // motes rising off the relic
       if (it.age < 0.6) continue;
       for (const c of g.combatants) {
-        if (!c.alive || c.decoy || !c.inv || c.dropping) continue;
+        if (!c.alive || c.decoy || !c.inv || c.dropping || (it.kind.type === 'potion' && c.inv[it.kind.id] >= POTION_CAP)) continue; // a full slot leaves the potion for someone else
         if (Math.hypot(c.pos.x - it.pos.x, c.pos.z - it.pos.z) < 1.7 && Math.abs(c.pos.y - it.pos.y) < 2.5) { this.pickup(c, it); break; }
       }
     }
