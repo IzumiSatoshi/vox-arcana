@@ -241,6 +241,12 @@ class PrisonSpell extends Spell {
       }
       if (this.tick <= 0) this.tick = 0.45;
       if (Math.random() < 0.5) { const a = rand(0, TAU); fx.element(this.el, new THREE.Vector3(c.x + Math.cos(a) * this.R, c.y + rand(0.3, this.H * 0.8), c.z + Math.sin(a) * this.R), { count: 1, speed: 0.5, size: 0.3, palette: this.pal, look: this.look }); }
+      // charged cages crackle: arcs jump between neighbouring bars
+      if ((this.kit.energy > 0.5 || this.el === 'lightning') && Math.random() < 0.45) {
+        const i = Math.floor(rand(0, this.n)), b0 = this.bars[i], b1 = this.bars[(i + 1) % this.n], h = rand(0.3, 0.85);
+        const p0 = b0.position.clone().addScaledVector(_v.set(0, 1, 0).applyQuaternion(b0.quaternion), b0.userData.h * h), p1 = b1.position.clone().addScaledVector(_w.set(0, 1, 0).applyQuaternion(b1.quaternion), b1.userData.h * h);
+        fx.bolt(p0, p1, this.pal.core, { look: this.look, width: 0.05, dur: 0.1, jag: 0.35, branches: 0, flicker: false });
+      }
       this.light(c.clone().setY(c.y + this.H * 0.5), 140, this.R * 3);
     }
     // collapse: the bars snap inward and burst
