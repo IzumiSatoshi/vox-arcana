@@ -454,7 +454,7 @@ export class Royale {
     const g = this.g, box = document.getElementById('br-results'); if (!box) return;
     const mages = g.combatants.filter((c) => !c.decoy && c.inv).sort((a, b) => (a.alive ? 0 : a.place || 99) - (b.alive ? 0 : b.place || 99) || b.kills - a.kills);
     const rows = mages.map((c) => '<tr class="' + (c === g.player ? 'me' : '') + (c.alive ? ' alive' : '') + '"><td>' + (c.alive ? (this.over ? '♛' : '•') : '#' + c.place) + '</td><td>' + (c === g.player ? t('you') : c.name) + '</td><td>⚔ ' + c.kills + '</td><td class="by">' + (c.alive ? t(this.over ? 'royale.winner' : 'royale.alive') : c.killedBy ? '← ' + c.killedBy : t('royale.storm')) + '</td></tr>').join('');
-    box.innerHTML = '<div class="brr-head">' + t('royale.standings') + '</div><table>' + rows + '</table><div class="brr-foot">' + (this.over ? t('royale.back') : g.player?.alive ? t('royale.tabHint') : t('royale.spectate')) + '</div>';
+    box.innerHTML = '<div class="brr-head">' + t('royale.standings') + '</div><table>' + rows + '</table><div class="brr-foot">' + (this.over ? t('royale.again') : g.player?.alive ? t('royale.tabHint') : t('royale.spectate')) + '</div>';
     box.classList.remove('hidden');
   }
   nextSpectate() { const a = this.alive(); if (!a.length) return; const i = a.indexOf(this.spec); this.spec = a[(i + 1) % a.length]; }
@@ -478,7 +478,7 @@ export class Royale {
         g.fx.explosion(el, c, 2.2, 0.7, null, { noDecal: true }); g.fx.starburst(c, new THREE.Color(ELEMENTS[el].color), 5, 10, 0.3); g.audio.impact(el, 0.5, c);
       }, 300 + i * 420);
     }
-    setTimeout(() => { if (g.royale === this) g.endToMenu(); }, won ? 11000 : 9000);
+    setTimeout(() => { if (g.royale === this) g.endToMenu(); }, 20000);
   }
   updateHud(force = false) {
     const g = this.g, p = g.player; this.hudT = 0.25;

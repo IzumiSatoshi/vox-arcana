@@ -690,6 +690,7 @@ class Game {
       if (e.repeat) return;
       if (e.code === 'Space' && this.player?.onShip) this.royale?.jump(this.player);
       if (e.code === 'KeyF' || e.code === 'KeyV') this.beginChant();
+      if (e.code === 'Enter' && this.royale?.over) { e.preventDefault(); this.startMode('royale'); return; } // play again
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
       if (e.code === 'KeyE') this.dashPlayer();
       if (e.code === 'KeyJ') this.hud.toggleJevView();
