@@ -744,6 +744,7 @@ class RushSpell extends Spell {
       if (c.grounded && Math.random() < 0.5) fx.puff(c.pos.clone().setY(c.pos.y + 0.1), { color: new THREE.Color(0xcdbb96), size: 0.8, life: 0.9, alpha: 0.5, rise: 0.5 });
       this.tr.push(cc);
       this.light(cc, 200, 10);
+      if (c.isPlayer) this.g.fovKick = 16; // the world stretches past you
     } else if (!this.burst) {
       this.burst = true; c.vel.multiplyScalar(0.25);
       this.explode(cc, 2.4 + this.m * 1.4, 30, { knock: 10, lift: 5 }); fx.shockwave(cc, 6, 1.2, 0.4); fx.addShake(0.3, cc); this.tr.dead = true;
@@ -865,6 +866,8 @@ class MarkSpell extends Spell {
     this.floor = new MagicCircle({ seed: s.seed + 9, tier: s.tierInt, color: this.pal.color, radius: 1.6 + this.m * 0.4, intensity: 1.3 });
     this.floor.group.rotation.x = -Math.PI / 2; this.add(this.floor.group); this.floor.spin = -1.4;
     this.beats = 0; this.stage = 'mark'; this.st = 0;
+    // a gyroscope of rune bands locked around the body, readable from any angle, closing in as the mark ripens
+    this.bands = [0, 1].map((i) => { const b = this.add(new THREE.Mesh(TORUS_GEO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.8, noiseAmp: 0.05, opacity: 0.9 }))); b.userData.tilt = i ? 1.2 : 0.35; return b; });
     this.g.audio.cast('arcane', 0.35, to, L); this.g.audio.tick?.(to, 0);
   }
   where() { return this.target?.alive ? this.target.center() : this.point || this.lastPos; }
@@ -881,6 +884,7 @@ class MarkSpell extends Spell {
     if (this.stage === 'mark') {
       this.sigil.target = this.floor.target = 1;
       this.sigil.group.scale.setScalar(1.3 - u * 0.5); this.floor.group.scale.setScalar(1.25 - u * 0.55);
+      this.bands.forEach((b, i) => { b.position.copy(p); b.rotation.set(b.userData.tilt + Math.sin(this.t * 3 + i) * 0.2, this.t * (4 + u * 10) * (i ? -1 : 1), 0); b.scale.set(0.95 - u * 0.35, 0.95 - u * 0.35, 0.6 + u * 0.8); });
       // accelerating heartbeat before it goes off
       const beatAt = this.delay * (1 - Math.pow(0.55, this.beats + 1));
       if (this.t >= beatAt && this.beats < 6) { this.beats++; this.g.audio.tick?.(p, this.beats); fx.ring(p.clone().setY(gy + 0.15), this.pal.color, 2.4, 0.3); }
@@ -889,6 +893,7 @@ class MarkSpell extends Spell {
       if (this.t >= this.delay) { this.stage = 'boom'; this.st = 0; this.detonate(p, gy); }
     } else {
       this.sigil.target = this.floor.target = 0;
+      for (const b of this.bands) b.visible = false;
       if (this.col) {
         const k = easeOut(this.st / 0.14), f = 1 - clamp((this.st - 0.15) / 0.5);
         this.col.scale.set(this.colR * (1 - this.st * 0.4), this.colH * k, this.colR * (1 - this.st * 0.4));

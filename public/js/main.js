@@ -927,7 +927,8 @@ class Game {
       this.roll = (this.roll || 0) + ((-side * 0.004) - (this.roll || 0)) * Math.min(1, dt * 6);
       const sh = this.fx.shake * this.fx.shake;
       this.camera.rotation.set(p.pitch + (Math.random() - 0.5) * sh * 0.08, p.yaw + (Math.random() - 0.5) * sh * 0.08, this.roll + (Math.random() - 0.5) * sh * 0.05 + (p.alive ? 0 : 0.4));
-      const fovT = 78 + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4;
+      this.fovKick = Math.max(0, (this.fovKick || 0) - dt * 30);
+      const fovT = 78 + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4 + this.fovKick;
       if (Math.abs(this.camera.fov - fovT) > 0.05) { this.camera.fov += (fovT - this.camera.fov) * Math.min(1, dt * 6); this.camera.updateProjectionMatrix(); }
       // aim ray incl. enemies
       const dir = this.camera.getWorldDirection(new THREE.Vector3());
