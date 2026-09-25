@@ -310,6 +310,7 @@ export class Royale {
       this.howl.set(new THREE.Vector3(Z.cx + dx / d * Z.r, p.pos.y + 2, Z.cz + dz / d * Z.r), clamp(1 - edge / 30) * 0.7 + (out ? 0.3 : 0));
     }
     document.body.classList.toggle('storm-out', !!out);
+    this.g.audio.sfxMuffle?.(out ? 0.55 : 0);
     if (out && Math.random() < dt * 2) this.g.fx.bolt(p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 20, rand(-15, 15))), p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 0, rand(-15, 15))), new THREE.Color(0xc070ff), { width: 0.2, dur: 0.2, branches: 2 });
   }
   // ------------------------------------------------------------ per frame
@@ -562,7 +563,7 @@ export class Royale {
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
-    document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
+    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }

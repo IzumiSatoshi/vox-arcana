@@ -17,7 +17,8 @@ export class AudioEngine {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.25;
     this.master.connect(comp); comp.connect(ctx.destination);
-    this.sfx = ctx.createGain(); this.sfx.connect(this.master);
+    this.sfx = ctx.createGain(); this.sfxTone = ctx.createBiquadFilter(); this.sfxTone.type = 'lowpass'; this.sfxTone.frequency.value = 20000; this.sfxTone.Q.value = 0.5;
+    this.sfx.connect(this.sfxTone); this.sfxTone.connect(this.master); // world muffle (inside the storm)
     // Keep music outside the spell compressor: a dense impact must not duck it for seconds.
     this.musicBus = ctx.createGain(); this.musicBus.gain.value = this.musicVolume;
     this.musicMaster = ctx.createGain(); this.musicMaster.gain.value = this.volume;
@@ -62,6 +63,11 @@ export class AudioEngine {
   }
   setVolume(v) { this.volume = v; if (this.master) this.master.gain.value = v; if (this.musicMaster) this.musicMaster.gain.value = v; }
   setMusic(v) { this.musicVolume = v; if (this.musicBus) this.musicBus.gain.value = v; }
+  // muffle the whole world's SFX 0..1 (standing inside the storm)
+  sfxMuffle(k = 0) {
+    if (!this.sfxTone || Math.abs((this._sfxM ?? 0) - k) < 0.01) return;
+    this._sfxM = k; this.sfxTone.frequency.setTargetAtTime(20000 * Math.pow(0.06, k), this.ctx.currentTime, 0.3);
+  }
   // duck 0..1 (1 = full), muffle 0..1 (1 = heavily low-passed); smoothed so state changes never click
   musicMix(duck = 1, muffle = 0) {
     if (!this.musicDuck) return;
