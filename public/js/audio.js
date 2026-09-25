@@ -27,7 +27,7 @@ export class AudioEngine {
     this.musicBus.connect(this.musicDuck); this.musicDuck.connect(this.musicTone); this.musicTone.connect(this.musicMaster); this.musicMaster.connect(ctx.destination);
     this.reverb = ctx.createConvolver(); this.reverb.buffer = this.impulse(3.2, 2.6);
     this.reverbIn = ctx.createGain(); this.reverbIn.gain.value = 0.35;
-    this.reverbIn.connect(this.reverb); this.reverb.connect(this.master);
+    this.reverbIn.connect(this.reverb); this.reverb.connect(this.sfxTone);
     const sr = ctx.sampleRate, len = sr * 2;
     this.white = ctx.createBuffer(1, len, sr); this.pink = ctx.createBuffer(1, len, sr); this.brown = ctx.createBuffer(1, len, sr);
     const w = this.white.getChannelData(0), p = this.pink.getChannelData(0), b = this.brown.getChannelData(0);
