@@ -82,6 +82,7 @@ export class Royale {
     nextRing.rotation.x = -Math.PI / 2; nextRing.renderOrder = 5; game.scene.add(nextRing);
     this.tick = 0; this.hudT = 0; this.placements = [];
     this.howl = game.audio.loop('darkness', new THREE.Vector3(), 0, null, { spin: 0.9 });
+    this.windSnd = game.audio.loop('wind', null, 0, null, { spin: 0.5 });
   }
   // ------------------------------------------------------------ setup
   start() {
@@ -322,6 +323,7 @@ export class Royale {
     const g = this.g;
     this.t += dt;
     this.updateShip(dt);
+    const pl = g.player; this.windSnd?.set(null, pl?.onShip ? 0.25 : pl?.dropping ? clamp(-pl.vel.y / 22) * 0.9 : 0);
     if (!this.over) this.updateZone(dt);
     this.updateFalling(dt);
     // drop phase: slow magical descent with strong air control; a burst on landing
@@ -473,6 +475,7 @@ export class Royale {
     g2.save();
     g2.fillStyle = 'rgba(150,60,255,0.28)'; g2.beginPath(); g2.rect(-400, -400, 800, 800); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU, true); g2.fill();
     g2.strokeStyle = 'rgba(210,140,255,0.95)'; g2.lineWidth = 2; g2.beginPath(); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU); g2.stroke();
+    if (this.ship) { const S = this.ship; g2.strokeStyle = 'rgba(255,212,106,0.9)'; g2.lineWidth = 2; g2.setLineDash([6, 5]); g2.beginPath(); g2.moveTo((S.pos.x - p.pos.x) * scale, (S.pos.z - p.pos.z) * scale); g2.lineTo((S.to.x - p.pos.x) * scale, (S.to.z - p.pos.z) * scale); g2.stroke(); g2.setLineDash([]); g2.fillStyle = '#ffd46a'; g2.beginPath(); g2.arc((S.pos.x - p.pos.x) * scale, (S.pos.z - p.pos.z) * scale, 5, 0, TAU); g2.fill(); g2.strokeStyle = 'rgba(210,140,255,0.95)'; }
     if (Z.state !== 'final') { g2.strokeStyle = 'rgba(255,255,255,0.85)'; g2.setLineDash([4, 4]); g2.beginPath(); g2.arc((Z.nx - p.pos.x) * scale, (Z.nz - p.pos.z) * scale, Z.nr * scale, 0, TAU); g2.stroke(); g2.setLineDash([]); }
     const zx = (Z.nx - p.pos.x) * scale, zy = (Z.nz - p.pos.z) * scale, zl = Math.hypot(zx, zy);
     if (zl > 78) { const ux = zx / zl, uy = zy / zl; g2.save(); g2.translate(ux * 74, uy * 74); g2.rotate(Math.atan2(uy, ux)); g2.fillStyle = '#fff'; g2.shadowColor = '#a040ff'; g2.shadowBlur = 8; g2.beginPath(); g2.moveTo(9, 0); g2.lineTo(-6, -6); g2.lineTo(-3, 0); g2.lineTo(-6, 6); g2.closePath(); g2.fill(); g2.restore(); }
@@ -495,7 +498,7 @@ export class Royale {
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
     for (const c of this.g.combatants) c.onShip = false;
-    this.howl?.stop();
+    this.howl?.stop(); this.windSnd?.stop();
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
