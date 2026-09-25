@@ -88,9 +88,10 @@ export class Royale {
     const names = [...(ja ? NAMES_JA : NAMES)].sort(() => Math.random() - 0.5);
     // the rival difficulty setting shifts the lobby's mix
     const diffs = { easy: ['easy', 'easy', 'easy', 'normal', 'easy', 'normal', 'easy'], normal: ['easy', 'normal', 'normal', 'normal', 'hard', 'normal', 'easy'], hard: ['normal', 'hard', 'hard', 'normal', 'hard', 'hard', 'normal'] }[g.settings.diff] || ['normal', 'normal', 'normal', 'normal', 'normal', 'normal', 'normal'];
-    for (let i = 0; i < 7; i++) {
+    const rivals = Math.max(3, Math.min(11, (g.settings.lobby || 8) - 1));
+    for (let i = 0; i < rivals; i++) {
       const [robe, accent] = ROBES[i % ROBES.length];
-      const b = g.createBot(names[i], diffs[i], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
+      const b = g.createBot(names[i % names.length] + (i >= names.length ? ' II' : ''), diffs[i % diffs.length], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
       b.brain.sight = 55; b.brain.royale = this;
     }
     // everyone drops from the sky over a random spot on the island

@@ -29,7 +29,7 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
+const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
@@ -300,7 +300,7 @@ class Game {
   }
   showScreen(id) {
     if (id === 'menu') void this.refreshVoiceDownload?.();
-    for (const s of ['menu', 'settings', 'howto', 'pause', 'duel-setup']) $(s).classList.toggle('hidden', s !== id);
+    for (const s of ['menu', 'settings', 'howto', 'pause', 'duel-setup', 'royale-setup']) $(s).classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
     audio.ambience?.(!this.paused);
@@ -762,7 +762,8 @@ class Game {
       if (a === 'duel') { this.backTo = 'menu'; this.showScreen('duel-setup'); }
       else if (a === 'begin-duel') this.startMode('duel');
       else if (a === 'practice') this.startMode('practice');
-      else if (a === 'royale') this.startMode('royale');
+      else if (a === 'royale') { this.backTo = 'menu'; this.showScreen('royale-setup'); }
+      else if (a === 'begin-royale') this.startMode('royale');
       else if (a === 'howto') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('howto'); }
       else if (a === 'settings') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('settings'); }
       else if (a === 'resume') { this.showScreen(null); this.lock(); }
@@ -778,7 +779,9 @@ class Game {
       el.addEventListener('change', () => { s[key] = conv(el[prop]); saveSettings(s); after?.(); });
       el.addEventListener('input', () => { s[key] = conv(el[prop]); after?.(); });
     };
-    bind('set-diff', 'diff');
+    bind('set-diff', 'diff', String, 'value', () => { $('set-rdiff').value = s.diff; });
+    bind('set-rdiff', 'diff', String, 'value', () => { $('set-diff').value = s.diff; });
+    bind('set-lobby', 'lobby', Number);
     bind('set-quality', 'quality', Number, 'value', () => { $('settings-reload').textContent = t('set.reload'); });
     bind('set-chantsize', 'chantSize', Number, 'value', () => {
       document.documentElement.style.setProperty('--chant-text-size', `${s.chantSize}px`);
