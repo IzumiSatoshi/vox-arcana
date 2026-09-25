@@ -429,6 +429,16 @@ class DrainSpell extends Spell {
   }
 }
 
+// one feather blade pointing along +y (uv.y root→tip so matter streams outward)
+function featherGeo(len, w = 0.2) {
+  const NU = 10, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= NU; i++) { const t = i / NU, ww = Math.sin(Math.pow(t, 0.7) * Math.PI) * w * (1 - t * 0.3); for (const sx of [-1, 1]) { pos.push(sx * ww + t * t * len * 0.25, t * len, 0); uv.push(sx < 0 ? 0 : 1, t); } }
+  for (let i = 0; i < NU; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const _m4 = new THREE.Matrix4();
+
 // ============================================================ 5. BEAST — a serpent dragon of the element that hunts the foe
 class BeastSpell extends Spell {
   constructor(sys, spec, caster, aim, opts = {}) {
@@ -462,6 +472,15 @@ class BeastSpell extends Spell {
       const wh = new THREE.Mesh(new THREE.ConeGeometry(0.05, 1.2, 4), hornM); wh.userData.ownGeo = true; wh.position.set(0.3 * sx, -0.15, 1.6); wh.rotation.set(-2.0, 0.4 * sx, 0); head.add(wh);
     }
     head.scale.setScalar(this.r * 1.6); this.add(head);
+    // light-bodied serpents (air, flame, lightning, holy light…) spread feathered wings behind the head
+    if (L.g.weight < 0.3 || this.kit.mix.z > 0.4) {
+      const wm = tubeMat(this.kit, { opacity: 0.95, flow: 2.5, streak: 3, topFade: 1 }); this.mats.push(wm);
+      this.wings = [-1, 1].map((side) => {
+        const w = new THREE.Group(); w.userData.side = side; this.add(w);
+        for (let k = 0; k < 6; k++) { const f = new THREE.Mesh(featherGeo(1.2 + k * 0.35, 0.22), wm); f.userData.ownGeo = true; f.renderOrder = 3; f.rotation.z = -side * (0.35 + k * 0.2); f.scale.x = side; w.add(f); }
+        return w;
+      });
+    }
     // dorsal fins riding the spine
     this.fins = [];
     for (let i = 0; i < 9; i++) { const f = new THREE.Mesh(OCTA, hornM); this.add(f); this.fins.push(f); }
@@ -533,6 +552,15 @@ class BeastSpell extends Spell {
     H.visible = this.state !== 'gone' || fade > 0.05; H.position.copy(this.pts[0]);
     H.lookAt(_v.copy(this.pts[0]).add(this.vel)); H.scale.setScalar(this.r * 1.6 * Math.max(0.01, fade));
     this.jaw.rotation.x = 0.1 + this.bite * 0.6 + Math.sin(this.t * 7) * 0.05;
+    if (this.wings) { // wings ride the shoulders (segment 5) and beat slowly
+      const i0 = 5, p = this.pts[i0], t = _v.subVectors(this.pts[i0 - 1], this.pts[i0 + 1]).normalize(); // forward
+      const side = new THREE.Vector3().crossVectors(t, _up).normalize(), upv = new THREE.Vector3().crossVectors(side, t).normalize();
+      for (const w of this.wings) {
+        _m4.makeBasis(side, upv, t); w.quaternion.setFromRotationMatrix(_m4);
+        w.rotateZ(w.userData.side * (Math.sin(this.t * 5) * 0.45 - 0.25)); w.rotateX(0.5); // flap, swept back
+        w.position.copy(p).addScaledVector(upv, this.r * 0.6); w.scale.setScalar(this.r * 2.8 * fade); w.visible = fade > 0.05;
+      }
+    }
     this.fins.forEach((f, i) => {
       const q = 0.1 + i * 0.085, idx = Math.floor(q * (this.N - 1)), p = this.pts[idx], n = this.pts[Math.min(this.N - 1, idx + 1)];
       const t = _w.subVectors(p, n).normalize(); const side = new THREE.Vector3().crossVectors(t, _up).normalize(); const upv = new THREE.Vector3().crossVectors(side, t).normalize();
