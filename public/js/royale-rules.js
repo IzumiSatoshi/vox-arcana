@@ -5,6 +5,7 @@ export const PASSIVES = {
   heart: { en: 'Troll Heart', ja: '巨人の心臓', desc: ['+150 max HP', '最大HP+150'], color: 0xff5a6a, icon: '♥' },
   boots: { en: 'Windstep Boots', ja: '疾風の靴', desc: ['+12% move speed', '移動速度+12%'], color: 0x6affc8, icon: '➶' },
   focus: { en: 'Sage Focus', ja: '賢者の宝珠', desc: ['-12% spell cost', '詠唱コスト-12%'], color: 0xffd46a, icon: '◈' },
+  cloak: { en: 'Storm Cloak', ja: '嵐避けの外套', desc: ['Storm damage halved', '嵐のダメージ半減'], color: 0xb070ff, icon: '☂' },
   echo: { en: 'Echo Charm', ja: '残響の護符', desc: ['25% chance a spell echoes at half power', '25%の確率で魔法が半分の威力で再発動'], color: 0xc9a0ff, icon: '⟲' },
   // rare: mostly found in arcane caches that fall from the sky each storm phase
   crown: { en: 'Archmage Crown', ja: '大魔導の冠', desc: ['+15% damage with every element', '全属性ダメージ+15%'], color: 0xffe066, icon: '♛', rare: true },
@@ -28,7 +29,7 @@ export const POTION_EFFECT = { hp: 220, mana: 90, shield: 160 };
 // a fresh loadout for the drop
 export function equip(c) {
   c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {};
-  c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.allDmg = 1; c.echo = 0;
+  c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.allDmg = 1; c.echo = 0; c.stormRes = 0;
   c.maxHp = 600; c.maxMana = 120; c.hp = 600; c.mana = 120;
 }
 // apply one picked-up item; kinds are { type: 'core', el } | { type: 'relic', id } | { type: 'potion', id }
@@ -42,6 +43,7 @@ export function grant(c, k) {
     if (k.id === 'boots') c.speedMult += 0.12;
     if (k.id === 'focus') c.costBonus *= 0.88;
     if (k.id === 'crown') c.allDmg = (c.allDmg || 1) + 0.15;
+    if (k.id === 'cloak') c.stormRes = Math.min(0.75, (c.stormRes || 0) + 0.5);
     if (k.id === 'echo') c.echo = Math.min(0.6, (c.echo || 0) + 0.25);
   } else c.inv[k.id] = Math.min(POTION_CAP, (c.inv[k.id] || 0) + 1);
 }

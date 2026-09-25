@@ -291,7 +291,7 @@ export class Royale {
       this.tick = 0.5;
       for (const c of this.g.combatants) {
         if (!c.alive || c.decoy || this.inZone(c.pos)) continue;
-        applyHit(this.g, c, { dmg: Z.dps * 0.5, el: null, src: null, point: c.center(), dot: true, dotEl: 'darkness' });
+        applyHit(this.g, c, { dmg: Z.dps * 0.5 * (1 - (c.stormRes || 0)), el: null, src: null, point: c.center(), dot: true, dotEl: 'darkness' });
         this.g.fx.element('darkness', c.center(), { count: 3, speed: 1, size: 0.3 });
       }
     }

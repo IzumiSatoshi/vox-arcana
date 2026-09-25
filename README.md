@@ -236,7 +236,7 @@ element reacts with it:
   - The minimap shows rivals within 40 m, or within 80 m while they chant.
   - **Loot**: glowing relics with light beams are scattered across the map.
     - Element cores give +20% damage for that element and stack.
-    - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed), Sage Focus (cheaper spells) and Echo Charm (spells may echo at half power).
+    - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed), Sage Focus (cheaper spells), Storm Cloak (half storm damage) and Echo Charm (spells may echo at half power).
     - Potions go into slots **1** (heal), **2** (mana) and **3** (shield).
   - **Mana shrines**: four stone circles, one in each quarter, restore mana and health while you stand inside. Rivals fight over them.
   - **Caches**: once per storm phase an arcane cache falls inside the next circle. It always contains a rare relic, either the Archmage Crown (+15% all damage) or the Phoenix Feather (revive once), plus extra loot.
