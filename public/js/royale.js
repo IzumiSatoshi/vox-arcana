@@ -65,6 +65,13 @@ export function royaleGuide(ja) {
   return rows.map(([n, d, c]) => '<li><b style="color:' + hex(c) + '">' + n + '</b> ' + d + '</li>').join('');
 }
 
+// lifetime record (per browser): matches, wins, best placement, eliminations
+export function royaleRecord() { try { return { matches: 0, wins: 0, best: 0, kills: 0, ...JSON.parse(localStorage.getItem('voxarcana-royale') || '{}') }; } catch { return { matches: 0, wins: 0, best: 0, kills: 0 }; } }
+function saveRecord(place, kills, won) {
+  const r = royaleRecord(); r.matches++; r.kills += kills; if (won) r.wins++; if (place && (!r.best || place < r.best)) r.best = place;
+  try { localStorage.setItem('voxarcana-royale', JSON.stringify(r)); } catch { /* private mode */ }
+}
+
 export class Royale {
   constructor(game) {
     this.g = game; this.items = []; this.mats = new Map(); this.t = 0; this.over = false;
@@ -466,7 +473,7 @@ export class Royale {
       g.audio.ui('defeat');
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
     if (teams <= 1) this.finish(this.alive().find((c) => c === g.player) || this.alive().find((c) => c.team && c.team === g.player?.team) || this.alive()[0]);
-    else if (target === g.player) setTimeout(() => { if (g.royale === this && !this.over) this.showResults(); }, 3000);
+    else if (target === g.player) { if (!this.duos) this.record(target.place, false); setTimeout(() => { if (g.royale === this && !this.over) this.showResults(); }, 3000); }
     this.updateHud(true);
   }
   addWisp(c) {
@@ -509,10 +516,12 @@ export class Royale {
     box.classList.remove('hidden');
   }
   nextSpectate() { const a = this.alive(); if (!a.length) return; const i = a.indexOf(this.spec); this.spec = a[(i + 1) % a.length]; }
+  record(place, won) { if (this.recorded || !this.g.player) return; this.recorded = true; saveRecord(place, this.g.player.kills, won); }
   finish(winner) {
     if (this.over) return;
     this.over = true;
     const g = this.g, won = winner === g.player || (!!winner?.team && winner.team === g.player?.team);
+    this.record(won ? 1 : g.player?.place || 2, won);
     g.slowmo = 1.2;
     g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills, d: Math.round(g.stats?.dmg || 0) }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
     g.audio.ui(won ? 'victory' : 'defeat');

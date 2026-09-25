@@ -7,7 +7,7 @@ import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
 import './spells-extra.js';
-import { Royale, royaleGuide } from './royale.js';
+import { Royale, royaleGuide, royaleRecord } from './royale.js';
 import { FORM_GUIDE } from './form-guide.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
@@ -786,7 +786,10 @@ class Game {
       if (a === 'duel') { this.backTo = 'menu'; this.showScreen('duel-setup'); }
       else if (a === 'begin-duel') this.startMode('duel');
       else if (a === 'practice') this.startMode('practice');
-      else if (a === 'royale') { this.backTo = 'menu'; this.showScreen('royale-setup'); }
+      else if (a === 'royale') {
+        this.backTo = 'menu'; this.showScreen('royale-setup');
+        const r = royaleRecord(); $('royale-record').textContent = r.matches ? t('royale.record', { m: r.matches, w: r.wins, b: r.best ? '#' + r.best : '—', k: r.kills }) : t('royale.firstTime');
+      }
       else if (a === 'begin-royale') this.startMode('royale');
       else if (a === 'howto') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('howto'); }
       else if (a === 'settings') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('settings'); }

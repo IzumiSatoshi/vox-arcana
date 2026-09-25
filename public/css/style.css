@@ -273,3 +273,5 @@ body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-
 #ally-panel .ab { display: block; height: 7px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; }
 #ally-panel .ab i { display: block; height: 100%; background: linear-gradient(90deg, #4ad0a0, #9dff9a); }
 #ally-panel .ad { color: #ff9a8a; font-weight: 700; letter-spacing: 1px; }
+
+.royale-record { margin: -4px 0 12px; font-size: 13px; letter-spacing: 1px; color: var(--gold, #f0d592); opacity: .9; }
