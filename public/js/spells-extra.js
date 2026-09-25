@@ -222,7 +222,7 @@ class PrisonSpell extends Spell {
       if (!this.closed) {
         this.closed = true; this.crown.visible = true;
         fx.ring(c.clone().setY(c.y + 0.2), this.pal.color, this.R * 2.4, 0.5); fx.shockwave(c.clone().setY(c.y + 1), this.R * 3, 1, 0.4); fx.addShake(0.2, c);
-        this.g.audio.impact(this.el, 0.5 + this.m * 0.3, c, this.look);
+        this.g.audio.impact(this.el, 0.5 + this.m * 0.3, c, this.look); if (this.solid) this.g.audio.clang?.(c.clone().setY(c.y + this.H * 0.8)); // the bars slam home
         for (const tg of this.targets()) if (Math.hypot(tg.pos.x - c.x, tg.pos.z - c.z) < this.R * 1.1) { this.trapped.add(tg); this.hit(tg, 20, tg.center(), { stun: 0.35 }); if (tg === this.g.player) this.g.hud.banner('', this.g.hud.tr?.('warn.trapped') || 'TRAPPED', 1.6); }
       }
       const ck = easeOut((this.t - 0.18) / 0.2) * (1 - out);
