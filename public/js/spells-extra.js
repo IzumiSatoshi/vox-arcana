@@ -818,6 +818,7 @@ class RushSpell extends Spell {
       this.emit(cc, 3 + this.m * 3, 0.5, 2, this.dir.clone().negate());
       for (let k = 0; k < 3; k++) fx.sparks.emit(cc.x + rand(-0.8, 0.8), cc.y + rand(-0.8, 0.8), cc.z + rand(-0.8, 0.8), -this.dir.x * 30, -this.dir.y * 30, -this.dir.z * 30, 0.2, this.pal.core, 0, 0.1);
       if (c.grounded && Math.random() < 0.5) fx.puff(c.pos.clone().setY(c.pos.y + 0.1), { color: new THREE.Color(0xcdbb96), size: 0.8, life: 0.9, alpha: 0.5, rise: 0.5 });
+      if (c.grounded && c.pos.distanceTo(this.lastMark || _w.set(1e9, 0, 0)) > 1.6) { this.lastMark = c.pos.clone(); fx.decal(c.pos.clone().setY(c.pos.y + 0.05), 0.9 + this.m * 0.3, this.el, this.pal.color); } // a scorched track behind the charge
       this.tr.push(cc);
       this.light(cc, 200, 10);
       if (c.isPlayer) this.g.fovKick = 16; // the world stretches past you
