@@ -1,6 +1,12 @@
-// Battle royale: eight mages drop onto the island, loot relics, and fight inside a shrinking storm of wild magic.
-// Items: element cores (+damage for that element), passive relics (mana regen, max HP/mana, speed, cheaper spells)
-// and potions (1 heal · 2 mana · 3 shield). Bots loot, drink, and run from the storm too.
+// Battle royale: 4–12 mages (solo or duos) ride a sky ferry, jump onto the island, loot relics and fight inside a
+// shrinking storm of wild magic.
+// Match flow: ferry (jump with Space) → drop (landing marker) → loot → five storm phases (caches fall, rain, sudden death)
+// → standings / victory lap.
+// Map: loot everywhere plus relics on every mesa top, four mana shrines, named places.
+// Items (rules in royale-rules.js): element cores (+damage for that element), passive relics, rare relics (crown, phoenix)
+// and potions (1 heal · 2 mana · 3 shield).
+// Duos: a teammate ally, no friendly fire, revive wisps.
+// Bots loot, drink, recover at shrines, revive teammates and rush out of the storm.
 import * as THREE from 'three';
 import { ELEMENTS, ELEMENT_KEYS, elName } from './elements.js';
 import { energyMaterial, crystalMaterial, flowMaterial, TIME, NOISE } from './shaders.js';
