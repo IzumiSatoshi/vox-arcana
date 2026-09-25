@@ -489,7 +489,7 @@ export class Royale {
     this.dropItem(at, this.randomKind(), true);
     if (target === g.player) {
       this.deadT = 0; const mate = g.bots.find((b) => b.ally === target && b.alive); this.spec = mate || (killer?.alive && killer !== target ? killer : null); // watch your ally, else whoever got you
-      g.hud.banner(`#${target.place}`, (killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm')) + ' · ⚔ ' + target.kills + ' · ' + Math.round(g.stats?.dmg || 0) + ' ' + t('damage'), 6);
+      if (mate) g.hud.banner(t('royale.down'), t('royale.waitRevive', { who: mate.name }), 5); else g.hud.banner(`#${target.place}`, (killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm')) + ' · ⚔ ' + target.kills + ' · ' + Math.round(g.stats?.dmg || 0) + ' ' + t('damage'), 6);
       g.audio.ui('defeat');
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
     if (teams <= 1) this.finish(this.alive().find((c) => c === g.player) || this.alive().find((c) => c.team && c.team === g.player?.team) || this.alive()[0]);
