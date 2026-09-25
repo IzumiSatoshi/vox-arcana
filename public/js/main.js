@@ -528,6 +528,7 @@ class Game {
   whoName(c) { return c === this.player ? `<b>${t('you')}</b>` : c.name; }
   onCast(c, spec) {
     const col = hex(ELEMENTS[spec.element].color);
+    if (this.royale && c !== this.player && this.player && c.pos.distanceTo(this.player.pos) > 40) return; // far-off duels stay off the feed
     this.hud.feed(t('feed.cast', { who: this.whoName(c), spell: `<b style="color:${col}">${spec.name}</b>` }) + ` <span style="opacity:.6">(${shapeName(spec.shape)} · ${t('rank')} ${spec.tierInt})</span>`);
     if (c !== this.player && this.hud.cardTimer < 3 && !spec.basic) this.hud.spellCard(spec, c.name);
   }

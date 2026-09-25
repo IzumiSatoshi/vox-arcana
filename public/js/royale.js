@@ -285,8 +285,8 @@ export class Royale {
     const x = Z.nx + Math.cos(a) * d, z = Z.nz + Math.sin(a) * d, gy = g.world.groundAt(x, z, 200);
     const mesh = new THREE.Mesh(GEM, this.mat('cache', () => crystalMaterial({ color: new THREE.Color(0xfff0c0), glow: new THREE.Color(0xffc040), emissive: 2.2, crack: 0.5 })));
     mesh.scale.set(2.2, 3.2, 2.2); mesh.position.set(x, gy + 90, z); g.scene.add(mesh);
-    const beam = new THREE.Mesh(BEAM, this.mat('cachebeam', () => flowMaterial({ color: new THREE.Color(0xffc040), core: 0xffffff, intensity: 1.6, scroll: -3, stripes: 3, opacity: 0.6 })));
-    beam.scale.set(4, 90, 4); beam.position.set(x, gy, z); g.scene.add(beam);
+    const beam = new THREE.Mesh(BEAM, this.mat('cachebeam', () => flowMaterial({ color: new THREE.Color(0xffc040), core: 0xffffff, intensity: 1.1, scroll: -3, stripes: 3, opacity: 0.35 })));
+    beam.scale.set(1.6, 90, 1.6); beam.position.set(x, gy, z); g.scene.add(beam);
     this.falling = this.falling || []; this.falling.push({ mesh, beam, x, z, gy, vy: 18 });
     g.hud.banner('', t('royale.cache'), 2.5); g.hud.feed('<b style="color:#ffd46a">✦ ' + t('royale.cache') + '</b>'); g.audio.swordFall?.(null, 1);
     this.cacheMark = { x, z };

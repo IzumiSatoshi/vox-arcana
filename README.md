@@ -96,11 +96,22 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
    Completed Jev interpretations are authoritative for both player and rival spells; keyword-derived values never override them.
    This gives magnitude, a damage multiplier, mana cost, rank I–IX and a generated name.
    Insufficient mana blocks the cast instead of weakening the interpreted spell.
-5. **Procedural runtime** (`public/js/spells.js`): 22 forms, each driven by those parameters:
+5. **Procedural runtime** (`public/js/spells.js`, `public/js/spells-extra.js`): 33 forms, each driven by those parameters:
    - Attacks: orb · barrage · homing funnels · beam · tornado · meteor · nova · ground spikes · vortex/black hole · chain strike · storm · crescent · field (lingering pool) · wave (advancing surge)
    - Self: ward (heal/shield) · enhance (elemental buff) · hand (a summoned spectral hand that fights beside you)
    - Utility: leap · flight · blink (teleport) · construct (platform / stairs / box / pillar / rampart, which are solid, walkable and block spells)
    - Defense: wall (barrier)
+   - Newer forms (`spells-extra.js`):
+     - **whip** (鞭): a lash of the element's matter that sweeps in front of you and drags whatever it hits toward you. Sharp or solid matter grows thorns, and charged matter crackles along the lash.
+     - **prison** (牢獄): a cage of bars erupts around the target and holds it inside, slowed and ticking damage, until the bars snap inward and burst.
+     - **decoy** (分身): illusory doubles run off in different directions. Rivals target them and they pop when shot, and you blur for a moment.
+     - **drain** (吸収): a curved tether that siphons life from the target back to you. It breaks on range or line of sight.
+     - **beast** (召喚獣): a serpent dragon of the element rises from a sigil, hunts the nearest foe, makes one or more biting passes, then dives in to finish.
+     - **halo** (円環): blades or orbs orbit you. They cut anyone who comes close, and each one can intercept one incoming projectile.
+     - **sword** (大剣): a colossal blade forms in the sky above the target and plunges down, stays embedded for a moment, then shatters.
+     - **rush** (突進): you become a comet of matter and ram through everything in a line.
+     - **totem** (祭壇): a floating crystal obelisk on a stone plinth that fires at foes nearby for a while.
+     - **mark** (刻印): a rune branded on the target that ticks faster and faster and then detonates. Damage the target takes while marked feeds the blast, and a counted mark leaps to the next foe.
 6. **Composable genes**: Jev also picks four independent traits, and the missile engine combines them freely:
    - pattern: single, fan, ring, cascade, crossfire, rain, spiral, swarm
    - trajectory: straight, arc, spiral, zigzag, boomerang, orbit, serpentine, homing
@@ -193,6 +204,15 @@ element reacts with it:
 - **Duel the Archmage**: best of three against an AI that chants generated incantations out loud (speech synthesis),
   runs them through Jev, reads your aura to set up reactions, dodges, walls and heals.
 - **Training Grounds**: a regenerating golem to test spells on.
+- **Battle Royale** (`public/js/royale.js`): eight mages drop onto the island from the sky. Steer the fall with WASD and hold Space to slow it.
+  - **Loot**: glowing relics with light beams are scattered across the map.
+    - Element cores give +20% damage for that element and stack.
+    - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed) and Sage Focus (cheaper spells).
+    - Potions go into slots **1** (heal), **2** (mana) and **3** (shield).
+  - **Caches**: once per storm phase an arcane cache falls inside the next circle. It always contains a rare relic, either the Archmage Crown (+15% all damage) or the Phoenix Feather (revive once), plus extra loot.
+  - **The storm**: a violet storm wall shrinks in five phases, and its damage grows each phase. The final storm keeps getting stronger until one mage is left.
+  - **Bots** loot first, then fight whoever is nearest. They drink potions, run from the storm and drop their loot when eliminated.
+  - **After you fall**, the camera spectates the leader. The last mage standing wins.
 
 ## Files
 
@@ -200,7 +220,9 @@ element reacts with it:
 server.js             static server + Jev bridge
 public/js/main.js     game loop, input, modes, casting flow, post-processing
 public/js/spellbook.js  local parser, Jev client, spec merge, AI incantation generator
-public/js/spells.js   22 procedural spell forms
+public/js/spells.js   23 procedural spell forms (plus the shared helpers)
+public/js/spells-extra.js  10 more forms: whip, prison, decoy, drain, beast, halo, sword, rush, totem, mark
+public/js/royale.js   battle royale: drop, loot, potions, caches, shrinking storm, spectating
 public/js/look.js     look genome: continuous visual axes, substance biases, palette and particle recipes
 public/js/vfxkit.js   element surface kit: one matter shader (fluid · flame · gas · solid · energy) for every spell volume
 public/js/style.js    global art direction: soft cel terminator and rim light for all lit materials, chamfered stone and boulder geometry
@@ -208,7 +230,7 @@ public/js/combat.js   combatants, auras, reactions, shields, DoTs
 public/js/fx.js       erosion-shaded flame/toon-smoke particles, mesh explosions, shockwaves, heat haze, ribbons, lightning, lights, cracks
 public/js/postfx.js   MSAA HDR, ambient occlusion (GTAO, High and Ultra), bloom, screen distortion, cinematic grade
 public/js/i18n.js     English / Japanese UI strings
-public/js/audio.js    fully synthesized, spatialized SFX + generative music
+public/js/audio.js    fully synthesized, spatialized SFX: air absorption and arrival delay by distance, a hall reverb, voice budget, choir chant, form/item/storm sweeteners, surface footsteps, ambience
 public/js/world.js    sky, painterly terrain, wind-swept grass, fluffy trees, ridged mountain ranges with aerial haze, floating islands, weathered ruins, camera-following shadows
 public/js/characters.js  outlined cel-shaded battlemages + first-person magic staff
 public/js/voice.js    Web Speech API + mic level
