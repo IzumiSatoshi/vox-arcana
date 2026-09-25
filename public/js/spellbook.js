@@ -31,7 +31,7 @@ const SHAPE_WORDS = {
   wall: ['wall', 'rampart', 'bulwark', 'fortress', 'curtain', '壁', 'ウォール', '城壁', '防壁', '石垣'],
   vortex: ['vortex', 'black hole', 'singularity', 'gravity', 'whirlpool', 'pull', 'implosion', '渦', 'ブラックホール', '重力', '引き寄せ', '特異点'],
   chain: ['chain', ' arc ', 'smite', 'strike', 'thunderbolt', 'jolt', 'judgment', 'judgement', '連鎖', '落雷', '雷撃', '裁き', 'チェイン'],
-  storm: ['storm', 'rain', 'blizzard', 'hail', 'downpour', 'tempest', 'shower', 'monsoon', '嵐', '雨', '吹雪', 'ストーム', 'レイン', '豪雨'],
+  storm: ['storm', /\brain/, 'blizzard', 'hail', 'downpour', 'tempest', 'shower', 'monsoon', '嵐', '雨', '吹雪', 'ストーム', 'レイン', '豪雨'],
   crescent: ['slash', 'blade', 'crescent', 'cutter', 'scythe', 'sword', 'cleave', 'edge', 'wave of', '刃', '斬', 'カッター', '三日月', 'スラッシュ', '剣'],
   ward: ['heal', ' ward', 'protect', 'bless', 'restore', 'aegis', 'shield', 'regenerat', 'cure', 'sanctuary', '癒', '守', 'ヒール', 'シールド', '回復', '盾', '護'],
   field: ['field', 'pool', 'zone', 'domain', 'ground of', 'swamp', 'mire', 'marsh', 'glyph', 'sigil', 'carpet', 'puddle', '領域', '沼', '陣', '地帯', 'フィールド'],
@@ -46,8 +46,8 @@ const SHAPE_WORDS = {
   decoy: ['decoy', 'clone', 'illusion', 'doppelg', 'mirror image', 'copies of me', 'afterimage', '分身', '幻影', '残像', 'デコイ', 'クローン'],
   drain: ['drain', 'siphon', 'leech', 'absorb', 'steal life', 'life steal', 'vampir', 'suck', '吸収', '吸い取', 'ドレイン', '吸血', '奪え'],
   beast: ['dragon', 'serpent', 'wyrm', 'summon a beast', 'beast', 'leviathan', 'hydra', 'wolf', '龍', '竜', '蛇', '召喚獣', 'ドラゴン', '大蛇'],
-  halo: ['halo', 'circling blades', 'ring of blades', 'blades around me', 'spinning around me', 'orbit me', '円環', '周回', '光輪', 'ヘイロー', '刃の輪'],
-  sword: ['greatsword', 'giant sword', 'holy sword', 'excalibur', 'sword from the sky', 'colossal sword', 'blade from the heavens', '大剣', '聖剣', '巨剣', '神剣', '天の剣', 'エクスカリバー'],
+  halo: ['halo', 'circling blades', 'ring of blades', 'blades around me', 'spinning around me', 'orbit me', '円環', '周回', '光輪', 'ヘイロー', '刃の輪', '周りを巡', '我が周り', '周囲を回'],
+  sword: ['greatsword', 'giant sword', 'holy sword', 'excalibur', 'sword from the sky', 'colossal sword', 'blade from the heavens', 'descend upon', '大剣', '聖剣', '巨剣', '神剣', '天の剣', 'エクスカリバー', '天より来たれ', 'の大剣', 'の聖剣'],
   rush: ['rush', ' charge', ' ram ', 'tackle', 'dash through', 'charge forward', 'comet dash', 'bulldoze', '突進', '突撃', '体当たり', 'タックル', 'ラッシュ'],
   totem: ['totem', 'turret', 'obelisk', 'sentry', 'tower that shoots', 'monolith', 'altar', '祭壇', '砲台', 'トーテム', 'オベリスク', '砲塔'],
   mark: [' mark', 'brand', 'sigil on', 'death mark', ' hex', 'rune on', 'seal on', '刻印', '呪印', 'マーク', '烙印', '印を'],
@@ -299,7 +299,7 @@ const CORE = {
   wall: ['{E} wall', 'rampart of {e}'], barrier: ['{E} barrier', 'barrier of {e}, deflect all'], vortex: ['{E} vortex', 'black hole of {e}'], chain: ['{E} strike', 'chain of {e}', 'smite with {e}'],
   storm: ['{E} storm', '{E} rain', 'tempest of {e}'], crescent: ['{E} cutter', 'crescent of {e}', '{E} blade slash'],
   ward: ['{E} ward, protect me', 'blessing of {e}', 'heal me, {e}'],
-  field: ['{E} field', 'pool of {e}', '{E} domain'], wave: ['{E} tidal wave', 'wave of {e}'], enhance: ['{E}, infuse my body', 'empower me with {e}'], whip: ['{E} whip', 'lash of {e}', '{E} scourge, lash out'], prison: ['{E} prison', 'cage of {e}, imprison my foe'], decoy: ['{E} decoy', 'mirror images of {e}'], drain: ['{E} drain', 'siphon their life with {e}'], beast: ['{E} dragon, devour my foe', 'serpent of {e}'], halo: ['{E} halo, circle me', 'ring of {e} blades around me'], sword: ['{E} greatsword from the sky', 'colossal sword of {e}'], rush: ['{E} rush', 'charge forward wrapped in {e}'], totem: ['{E} totem', 'obelisk of {e}, guard me'], mark: ['{E} mark', 'death mark of {e}'], hand: ['{E} hand, strike for me', 'fist of {e}'],
+  field: ['{E} field', 'pool of {e}', '{E} domain'], wave: ['{E} tidal wave', 'wave of {e}'], enhance: ['{E}, infuse my body', 'empower me with {e}'], whip: ['{E} whip', 'lash of {e}', '{E} scourge, lash out'], prison: ['{E} prison', 'cage of {e}, imprison my foe'], decoy: ['{E} decoy', 'mirror images of {e}'], drain: ['{E} drain', 'siphon their life with {e}'], beast: ['{E} dragon, devour my foe', 'serpent of {e}'], halo: ['{E} halo, circle me', 'ring of {e} blades around me'], sword: ['{E} greatsword from the sky', 'colossal sword of {e}, descend upon them'], rush: ['{E} rush', 'charge forward wrapped in {e}'], totem: ['{E} totem', 'obelisk of {e}, guard me'], mark: ['{E} mark', 'death mark of {e}'], hand: ['{E} hand, strike for me', 'fist of {e}'],
 };
 const WORD = { fire: 'fire', ice: 'ice', water: 'water', lightning: 'thunder', wind: 'wind', earth: 'stone', darkness: 'shadow', light: 'light', nature: 'thorn', poison: 'venom', arcane: 'arcane' };
 const CLOSE = ['Unleash!', 'Now, burn it all!', 'Here I cast the ultimate spell!', 'Obliterate!', 'Let it end!'];
@@ -323,7 +323,7 @@ const CORE_JA = {
   nova: ['{E}の大爆発', '{E}爆裂'], spikes: ['大地より出でよ、{E}の棘', '{E}の柱'], wall: ['{E}の壁', '{E}の城壁'], barrier: ['{E}の結界', '{E}のバリア'],
   vortex: ['{E}の渦', '{E}のブラックホール'], chain: ['{E}の連鎖撃', '{E}の裁き'], storm: ['{E}の嵐', '{E}の雨'],
   crescent: ['{E}の刃', '{E}の三日月斬り'], ward: ['{E}の加護を我に', '{E}よ、我を癒せ'],
-  field: ['{E}の領域', '{E}の沼'], wave: ['{E}の大波', '{E}の津波'], enhance: ['{E}よ、我が身に宿れ', '{E}の強化'], hand: ['{E}の魔手よ、敵を討て', '{E}の拳'], whip: ['{E}の鞭', '{E}の鞭よ、薙ぎ払え'], prison: ['{E}の牢獄', '{E}の檻に閉じ込めよ'], decoy: ['{E}の分身', '{E}の幻影よ、惑わせ'], drain: ['{E}の吸収', '{E}よ、命を吸い取れ'], beast: ['{E}の龍よ、喰らえ', '{E}の大蛇'], halo: ['{E}の円環', '{E}の刃よ、我が周りを巡れ'], sword: ['天より来たれ、{E}の大剣', '{E}の聖剣'], rush: ['{E}の突進', '{E}を纏い突撃せよ'], totem: ['{E}の祭壇', '{E}の砲塔よ、守れ'], mark: ['{E}の刻印', '{E}の呪印を刻め'],
+  field: ['{E}の領域', '{E}の沼'], wave: ['{E}の大波', '{E}の津波'], enhance: ['{E}よ、我が身に宿れ', '{E}の強化'], hand: ['{E}の魔手よ、敵を討て', '{E}の拳'], whip: ['{E}の鞭', '{E}の鞭よ、薙ぎ払え'], prison: ['{E}の牢獄', '{E}の檻に閉じ込めよ'], decoy: ['{E}の分身', '{E}の幻影よ、惑わせ'], drain: ['{E}の吸収', '{E}よ、命を吸い取れ'], beast: ['{E}の龍よ、喰らえ', '{E}の大蛇'], halo: ['{E}の円環', '{E}の刃よ、我が周りを巡れ'], sword: ['天より来たれ、{E}の大剣', '{E}の聖剣'], rush: ['{E}の突進', '{E}の突撃、敵を貫け'], totem: ['{E}の祭壇', '{E}の砲塔よ、守れ'], mark: ['{E}の刻印', '{E}の呪印を刻め'],
 };
 const WORD_JA = { fire: '炎', ice: '氷', water: '水', lightning: '雷', wind: '風', earth: '岩', darkness: '闇', light: '光', nature: '茨', poison: '毒', arcane: '魔' };
 const CLOSE_JA = ['放て！', '全てを焼き尽くせ！', '今ここに究極魔法を放つ！', '消し飛べ！', '終わりだ！'];
