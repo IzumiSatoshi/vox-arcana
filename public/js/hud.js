@@ -86,7 +86,7 @@ export class Hud {
   }
   drawMinimap(p) {
     // px per metre; zoomed out to the whole island while riding the ferry or falling, so you can pick a landing spot
-    const g = this.mm, W = 180, wide = this.g.royale && (p.onShip || p.dropping), scale = this._mmS = (this._mmS ?? 2) + ((wide ? 0.62 : 2) - (this._mmS ?? 2)) * 0.15;
+    const g = this.mm, W = 180, wide = (this.g.royale && (p.onShip || p.dropping)) || this.bigMap, scale = this._mmS = (this._mmS ?? 2) + ((wide ? 0.62 : 2) - (this._mmS ?? 2)) * 0.15;
     g.save(); g.clearRect(0, 0, W, W);
     g.beginPath(); g.arc(W / 2, W / 2, W / 2, 0, TAU); g.clip();
     g.fillStyle = '#28462a'; g.fillRect(0, 0, W, W);

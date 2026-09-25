@@ -706,6 +706,7 @@ class Game {
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
       if (e.code === 'KeyE') this.dashPlayer();
       if (e.code === 'KeyJ') this.hud.toggleJevView();
+      if (e.code === 'KeyM') { this.hud.bigMap = !this.hud.bigMap; $('minimap-wrap').classList.toggle('big', this.hud.bigMap); } // whole-island map
       if (this.royale && this.player && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.royale.drink(this.player, ['hp', 'mana', 'shield'][+e.code.slice(5) - 1]);
       if (e.code === 'Tab') { e.preventDefault(); if (this.royale && !this.royale.over) this.royale.showResults(); }
     });
