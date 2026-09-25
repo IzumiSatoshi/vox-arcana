@@ -386,6 +386,7 @@ class DrainSpell extends Spell {
     let broken = false;
     if (tg && (!tg.alive || !c.alive || tg.center().distanceTo(to) > 42)) broken = true;
     if (tg && !broken) { const dir = from.clone().sub(to), L = dir.length(); const rc = this.g.world.raycast(to, dir.normalize(), L, 0.6); if (rc.hit && rc.dist < L - 1) broken = true; }
+    if (tg && !broken && this.sys.barriers.length) { const bh = this.barrierHit(to, from); if (bh) { broken = true; bh.bar.damage(15, to.clone().lerp(from, bh.t)); } } // a barrier severs the tether
     const end = this.t > this.life || broken;
     const k = clamp(this.t / 0.15) * (end ? 0 : 1);
     const mid = from.clone().lerp(to, 0.5); const span = from.distanceTo(to);
@@ -954,6 +955,7 @@ class MarkSpell extends Spell {
     const origin = this.sys.castOrigin(caster).clone();
     this.target = target !== undefined ? target : this.nearestTarget(caster.eye(new THREE.Vector3()), aim.dir, 0.8, 60);
     this.point = this.target ? null : aim.point.clone();
+    if (this.target && target === undefined) { const bh = this.barrierHit(origin, this.target.center()); if (bh) { bh.bar.damage(20, origin.clone().lerp(this.target.center(), bh.t)); this.point = origin.clone().lerp(this.target.center(), bh.t); this.target = null; } } // a barrier catches the brand
     this.delay = 2.3 - s.speed * 0.9;
     this.startHp = this.target ? this.target.hp : 0;
     const to = this.target ? this.target.center() : this.point;
