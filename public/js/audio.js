@@ -2,6 +2,9 @@
 // noise + oscillators, shaped by element and magnitude, spatialised with HRTF.
 import { clamp, rand, pick } from './util.js';
 
+// loudness trims measured offline (0.4 s window RMS) so every element's cast / impact sits at the same level
+const CAST_TRIM = { wind: 1.64, fire: 1.32, nature: 1.2, water: 1.19, arcane: 1.1, ice: 1.1, earth: 0.93, poison: 0.94, darkness: 0.84, light: 0.86, lightning: 0.88 };
+const IMPACT_TRIM = { lightning: 0.8, poison: 0.95, water: 0.95, nature: 1.06 };
 const BASE = { poison: 147, fire: 110, ice: 440, water: 196, lightning: 82, wind: 262, earth: 55, darkness: 65, light: 330, nature: 220, arcane: 294 };
 
 export class AudioEngine {
@@ -156,7 +159,7 @@ export class AudioEngine {
     if (!this.enabled) return;
     if (!this.vary) return this.varied(() => this.cast(el, m, pos, look));
     if (look && !this.mod) return this.withLook(look, () => this.cast(el, m, pos, look));
-    const o = this.out(pos, 0.55 + m * 0.4, 0.25 + m * 0.3);
+    const o = this.out(pos, (0.55 + m * 0.4) * (CAST_TRIM[el] || 1), 0.25 + m * 0.3);
     const L = 0.3 + m * 0.6;
     // shared launch layer: a rising filtered whoosh and a transient snap, so every cast leaves the hand with energy
     this.noise(o, { type: 'pink', f: 'bandpass', f0: 450, f1: 2600 + m * 1500, Q: 1.6, dur: 0.26 + m * 0.2, a: 0.12 + m * 0.06, gain: 0.55 + m * 0.3 });
@@ -229,7 +232,7 @@ export class AudioEngine {
     if (!this.enabled) return;
     if (!this.vary) return this.varied(() => this.impact(el, m, pos, look));
     if (look && !this.mod) return this.withLook(look, () => this.impact(el, m, pos, look));
-    const o = this.out(pos, 0.6 + m * 0.6, 0.35 + m * 0.4);
+    const o = this.out(pos, (0.6 + m * 0.6) * (IMPACT_TRIM[el] || 1), 0.35 + m * 0.4);
     const L = 0.35 + m * 1.2;
     // punch: a transient crack and a sub thump that drops in pitch (heavier spells hit harder and lower)
     const heavy = this.mod ? 0.5 + this.mod.grit : 1;
