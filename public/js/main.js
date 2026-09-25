@@ -30,7 +30,7 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
+const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, royaleTeams: 1, quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
@@ -806,6 +806,7 @@ class Game {
     bind('set-diff', 'diff', String, 'value', () => { $('set-rdiff').value = s.diff; });
     bind('set-rdiff', 'diff', String, 'value', () => { $('set-diff').value = s.diff; });
     bind('set-lobby', 'lobby', Number);
+    bind('set-teams', 'royaleTeams', Number);
     bind('set-quality', 'quality', Number, 'value', () => { $('settings-reload').textContent = t('set.reload'); });
     bind('set-chantsize', 'chantSize', Number, 'value', () => {
       document.documentElement.style.setProperty('--chant-text-size', `${s.chantSize}px`);

@@ -98,7 +98,7 @@ export class Hud {
     for (const c of this.g.combatants) {
       if (c === p || !c.alive || this.hiddenFoe(c, p)) continue;
       const x = (c.pos.x - p.pos.x) * scale, y = (c.pos.z - p.pos.z) * scale;
-      g.save(); g.translate(x, y); g.rotate(-p.yaw + Math.PI / 4); g.fillStyle = c.owner === p ? '#7fd0ff' : c.chanting ? '#ff9ae0' : '#ff4a4a'; g.shadowColor = c.owner === p ? '#08f' : '#f00'; g.shadowBlur = 6; g.fillRect(-4, -4, 8, 8); g.restore();
+      g.save(); g.translate(x, y); g.rotate(-p.yaw + Math.PI / 4); const mate = c.owner === p || (p.team && c.team === p.team); g.fillStyle = mate ? '#7fd0ff' : c.chanting ? '#ff9ae0' : '#ff4a4a'; g.shadowColor = mate ? '#08f' : '#f00'; g.shadowBlur = 6; g.fillRect(-4, -4, 8, 8); g.restore();
     }
     g.restore();
     g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowBlur = 4;
@@ -106,7 +106,7 @@ export class Hud {
     g.shadowBlur = 0;
   }
   // battle royale radar: foes show within 40 m, or within 80 m while they chant (your voice gives you away)
-  hiddenFoe(c, p) { return !!this.g.royale && c.owner !== p && c.pos.distanceTo(p.pos) > (c.chanting ? 80 : 40); }
+  hiddenFoe(c, p) { return !!this.g.royale && c.owner !== p && !(p.team && c.team === p.team) && c.pos.distanceTo(p.pos) > (c.chanting ? 80 : 40); }
   updateCompass(p) {
     const W = this.compassWidth;
     const heading = ((-p.yaw * 180) / Math.PI % 360 + 360) % 360;
@@ -179,7 +179,7 @@ export class Hud {
       el.style.display = '';
       const sc = clamp(1.3 - d / 70, 0.55, 1.1);
       el.style.transform = `translate(${sp.x}px, ${sp.y}px) translate(-50%,-100%) scale(${sc})`;
-      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span>${c.name}</span>`);
+      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span${g.player?.team && c.team === g.player.team ? ' style="color:#7fd0ff"' : ''}>${g.player?.team && c.team === g.player.team ? '◆ ' : ''}${c.name}</span>`);
       el.children[1].children[0].style.width = clamp(c.hp / c.maxHp) * 100 + '%';
       el.children[1].children[1].style.width = clamp(c.shield / 300) * 100 + '%';
       setHTML(el.children[2], this.statusTags(c) + (c.chanting ? `<span class="status-tag" style="color:#ff8fb0">${t('st.chanting')}</span>` : ''));

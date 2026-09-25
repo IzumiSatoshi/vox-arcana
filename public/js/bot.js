@@ -53,7 +53,8 @@ export class BotBrain {
     const R = this.royale;
     if (c.onShip) return { wish, jump: false };
     if (c.dropping || (!tgt && R)) { // battle royale: steer the drop, loot, keep ahead of the storm
-      const to = R ? R.roamTarget(c).clone().sub(c.pos).setY(0) : new THREE.Vector3();
+      const follow = c.ally?.alive && !c.dropping && c.ally.pos.distanceTo(c.pos) > 10 && R?.inZone(c.ally.pos, -3);
+      const to = follow ? c.ally.pos.clone().sub(c.pos).setY(0) : R ? R.roamTarget(c).clone().sub(c.pos).setY(0) : new THREE.Vector3();
       if (to.lengthSq() > 1) wish.copy(to.normalize());
       if (!c.dropping) { const d = wish.lengthSq() ? wish : this.aimDir; c.yaw = Math.atan2(-d.x, -d.z); c.pitch = 0; }
       this.jumpT -= dt; if (!c.dropping && this.jumpT <= 0) { jump = true; this.jumpT = rand(2.5, 6); }

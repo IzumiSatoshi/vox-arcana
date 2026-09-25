@@ -90,10 +90,14 @@ export class Royale {
     // the rival difficulty setting shifts the lobby's mix
     const diffs = { easy: ['easy', 'easy', 'easy', 'normal', 'easy', 'normal', 'easy'], normal: ['easy', 'normal', 'normal', 'normal', 'hard', 'normal', 'easy'], hard: ['normal', 'hard', 'hard', 'normal', 'hard', 'hard', 'normal'] }[g.settings.diff] || ['normal', 'normal', 'normal', 'normal', 'normal', 'normal', 'normal'];
     const rivals = Math.max(3, Math.min(11, (g.settings.lobby || 8) - 1));
+    this.duos = g.settings.royaleTeams === 2;
+    if (this.duos) p.team = 1;
     for (let i = 0; i < rivals; i++) {
-      const [robe, accent] = ROBES[i % ROBES.length];
+      // duos: the first bot is your ally (team 1, your colours); the rest pair up and share a robe
+      const team = this.duos ? 1 + Math.ceil(i / 2) : 0, [robe, accent] = this.duos && team === 1 ? [0x1f2f6a, 0x6fd8ff] : ROBES[(this.duos ? team : i) % ROBES.length];
       const b = g.createBot(names[i % names.length] + (i >= names.length ? ' II' : ''), diffs[i % diffs.length], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
-      b.brain.sight = 55; b.brain.royale = this;
+      b.brain.sight = 55; b.brain.royale = this; b.team = team;
+      if (team === 1) b.ally = p;
     }
     // everyone boards a floating sky-island that ferries them across the map; each mage picks the moment to jump
     const all = [p, ...g.bots];
@@ -155,7 +159,10 @@ export class Royale {
     c.onShip = false; c.dropping = true; c.grounded = false;
     c.vel.copy(S.dir).multiplyScalar(S.speed * 0.5).setY(4);
     g.fx.ring(c.pos.clone(), new THREE.Color(0xffc444), 3, 0.4); g.fx.shockwave(c.center(), 4, 0.8, 0.3);
-    if (c === g.player) { g.audio.whoosh(1); g.hud.banner('', t('ban.royale2'), 2.5); }
+    if (c === g.player) {
+      g.audio.whoosh(1); g.hud.banner('', t('ban.royale2'), 2.5);
+      for (const b of g.bots) if (b.ally === c && b.onShip) { b.brain.jumpAt = 0; b.brain.dropTo = c.pos.clone().addScaledVector(S.dir, 20).setY(0); } // your ally follows you off
+    }
   }
   updateShip(dt) {
     const S = this.ship; if (!S) return;
@@ -400,6 +407,8 @@ export class Royale {
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
   alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
+  // teams still standing (solo: every mage is its own team)
+  teamsLeft() { return new Set(this.alive().map((c) => c.team || c.id)).size; }
   // an arcane cache: a meteor of crystal that falls inside the next circle and bursts into a rare relic + loot
   dropCache() {
     const g = this.g, Z = this.zone, a = rand(0, TAU), d = Math.sqrt(Math.random()) * Math.max(4, Z.nr * 0.7);
@@ -442,18 +451,18 @@ export class Royale {
   }
   onDeath(target, killer) {
     if (target.decoy || this.over) return;
-    const g = this.g, left = this.alive().length; // target already flagged dead
-    target.place = left + 1; target.killedBy = killer && killer !== target ? killer.name : null;
+    const g = this.g, left = this.alive().length, teams = this.teamsLeft(); // target already flagged dead
+    target.place = (this.duos ? teams : left) + 1; target.killedBy = killer && killer !== target ? killer.name : null;
     // the fallen drop their potions and a relic
     const at = target.pos.clone();
     for (const [id, n] of Object.entries(target.inv || {})) for (let i = 0; i < n; i++) this.dropItem(at, { type: 'potion', id }, true);
     this.dropItem(at, this.randomKind(), true);
     if (target === g.player) {
-      this.deadT = 0; if (killer?.alive && killer !== target) this.spec = killer; // the camera finds whoever got you
+      this.deadT = 0; const mate = g.bots.find((b) => b.ally === target && b.alive); this.spec = mate || (killer?.alive && killer !== target ? killer : null); // watch your ally, else whoever got you
       g.hud.banner(`#${target.place}`, (killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm')) + ' · ⚔ ' + target.kills + ' · ' + Math.round(g.stats?.dmg || 0) + ' ' + t('damage'), 6);
       g.audio.ui('defeat');
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
-    if (left <= 1) this.finish(this.alive()[0]);
+    if (teams <= 1) this.finish(this.alive().find((c) => c === g.player) || this.alive().find((c) => c.team && c.team === g.player?.team) || this.alive()[0]);
     else if (target === g.player) setTimeout(() => { if (g.royale === this && !this.over) this.showResults(); }, 3000);
     this.updateHud(true);
   }
@@ -469,7 +478,7 @@ export class Royale {
   finish(winner) {
     if (this.over) return;
     this.over = true;
-    const g = this.g, won = winner === g.player;
+    const g = this.g, won = winner === g.player || (!!winner?.team && winner.team === g.player?.team);
     g.slowmo = 1.2;
     g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills, d: Math.round(g.stats?.dmg || 0) }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
     g.audio.ui(won ? 'victory' : 'defeat');
@@ -495,7 +504,7 @@ export class Royale {
     const left = Z.state === 'wait' ? Math.ceil(P.wait - Z.st) : Z.state === 'shrink' ? Math.ceil(P.shrink - Z.st) : 0;
     const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
     const zoneTxt = Z.state === 'wait' ? t('royale.zoneWait', { t: mm }) : Z.state === 'shrink' ? t('royale.zoneShrink', { t: mm }) : t('royale.zoneFinal');
-    g.hud.round(`✦ ${this.alive().length} ${t('royale.alive')} · ⚔ ${p.kills} · ${zoneTxt}`);
+    g.hud.round(`✦ ${this.duos ? this.teamsLeft() + ' ' + t('royale.teams') : this.alive().length + ' ' + t('royale.alive')} · ⚔ ${p.kills} · ${zoneTxt}`);
     const box = document.getElementById('br-inv'); if (!box) return;
     const key = JSON.stringify([p.inv, p.affinity, p.relics]);
     if (!force && key === this._invKey) return; this._invKey = key;
