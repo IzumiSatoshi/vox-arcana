@@ -95,10 +95,15 @@ export class AudioEngine {
     let tail = g;
     // air absorption: far sounds lose their top end and sit further back in the reverb
     const dist = pos && this.lp ? Math.hypot(pos.x - this.lp.x, pos.y - this.lp.y, pos.z - this.lp.z) : 0;
+    // occlusion: a wall, cliff or ruin between you and the source muffles it heavily
+    if (pos && dist > 5 && dist < 70 && this.occluded?.(this.lp, pos)) {
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700; f.Q.value = 0.4;
+      tail.connect(f); tail = f; g.gain.value *= 0.7; rev *= 1.3;
+    }
     if (dist > 14) {
       const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.5;
       f.frequency.value = Math.max(900, 20000 * Math.exp(-(dist - 14) / 38));
-      g.connect(f); tail = f; rev *= 1 + Math.min(1.4, dist / 45);
+      tail.connect(f); tail = f; rev *= 1 + Math.min(1.4, dist / 45);
       if (dist > 30) { const dl = ctx.createDelay(0.5); dl.delayTime.value = Math.min(0.35, dist / 340); tail.connect(dl); tail = dl; } // sound arrives after the flash
     }
     if (pos) {

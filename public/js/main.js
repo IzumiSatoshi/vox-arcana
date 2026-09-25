@@ -97,6 +97,18 @@ class Game {
     this.post = new PostFX(this.renderer, this.scene, this.camera, this.fx.distortScene, this.settings.quality);
     this.spells = new SpellSystem(this);
     this.audio = audio;
+    // coarse line-of-sight test for sound occlusion (1.2 m steps, skipping the first and last metre around each end)
+    const occCache = new Map(); let occT = 0;
+    audio.occluded = (a, b) => {
+      const now = performance.now(); if (now - occT > 300) { occCache.clear(); occT = now; } // results live ~0.3 s, keyed on 3 m cells
+      const key = `${Math.round(a.x / 3)},${Math.round(a.z / 3)},${Math.round(b.x / 3)},${Math.round(b.y / 3)},${Math.round(b.z / 3)}`;
+      if (occCache.has(key)) return occCache.get(key);
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz), p = { x: 0, y: 0, z: 0 };
+      let hit = false;
+      for (let t = 1.5; t < L - 1.5 && !hit; t += 2) { const k = t / L; p.x = a.x + dx * k; p.y = a.y + dy * k; p.z = a.z + dz * k; hit = this.world.solid(p); }
+      occCache.set(key, hit);
+      return hit;
+    };
     this.hud = new Hud(this);
     this.hud.buildMinimapBg(this.world);
     this.voice = new Voice();
