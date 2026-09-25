@@ -412,9 +412,11 @@ class DrainSpell extends Spell {
 
 // ============================================================ 5. BEAST — a serpent dragon of the element that hunts the foe
 class BeastSpell extends Spell {
-  constructor(...a) {
-    super(...a);
+  constructor(sys, spec, caster, aim, opts = {}) {
+    super(sys, spec, caster, aim);
     const s = this.spec, c = this.caster, L = this.look;
+    this.twin = opts.twin ? -1 : 1;
+    if (!opts.twin && s.count > 0.65) this.sys.active.push(new BeastSpell(sys, { ...s, count: 0 }, caster, aim, { twin: true }));
     this.kit = kitOf(this.el, L);
     this.r = (0.5 + s.size * 0.4) * (0.65 + this.m * 0.45);
     this.N = 40; this.len = this.r * 26 * (0.85 + 0.15 * L.sx); this.pts = ptArray(this.N);
@@ -446,14 +448,14 @@ class BeastSpell extends Spell {
     for (let i = 0; i < 9; i++) { const f = new THREE.Mesh(OCTA, hornM); this.add(f); this.fins.push(f); }
     // spawn from a sigil in front of the caster, rising
     const f = c.forward(new THREE.Vector3()).setY(0).normalize();
-    this.pos = c.pos.clone().addScaledVector(f, 2.5).setY(c.pos.y + 0.3);
+    this.pos = c.pos.clone().addScaledVector(f, 2.5).addScaledVector(new THREE.Vector3(-f.z, 0, f.x), this.twin < 0 ? 3 : 0).setY(c.pos.y + 0.3);
     this.vel = new THREE.Vector3(0, 1, 0).addScaledVector(f, 0.3).normalize().multiplyScalar(this.speed * 0.8);
     this.hist = [];
     for (let i = 0; i < 12; i++) this.hist.push(this.pos.clone().addScaledVector(_up, -i * this.len / 11));
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: 2 + this.m, intensity: 1.6 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.pos).setY(groundY(this.g, this.pos) + 0.1); this.add(this.mc.group);
     this.state = 'rise'; this.stT = 0; this.bite = 0; this.hits = 0;
-    this.g.audio.roar?.(this.el, this.m, this.pos, this.look);
+    if (this.twin > 0) this.g.audio.roar?.(this.el, this.m, this.pos, this.look);
     this.loopSnd = this.g.audio.loop(this.el, this.pos, 0.3, this.look, { spin: 0.2 });
   }
   steer(want, dt, turn) { const sp = this.vel.length(); this.vel.lerp(want.clone().setLength(sp), clamp(dt * turn)); this.vel.setLength(lerp(sp, this.speed, clamp(dt * 2))); }
@@ -462,7 +464,7 @@ class BeastSpell extends Spell {
     const s = this.spec, fx = this.g.fx, tgt = this.state === 'hunt' || this.state === 'loop' ? (this.target?.alive ? this.target : (this.target = this.nearestTarget(this.pos, null, -1, 80))) : null;
     this.mc.update(dt); this.mc.target = this.t < 1 ? 1 : 0;
     if (this.state === 'rise') {
-      const c = this.caster.pos; const around = new THREE.Vector3(Math.cos(this.t * 3) * 4, 8 + this.t * 2, Math.sin(this.t * 3) * 4).add(c).sub(this.pos);
+      const c = this.caster.pos, w = this.t * 3 * this.twin + (this.twin < 0 ? Math.PI : 0); const around = new THREE.Vector3(Math.cos(w) * 4, 8 + this.t * 2, Math.sin(w) * 4).add(c).sub(this.pos);
       this.steer(around, dt, 3);
       if (this.stT > 0.9) { this.state = 'hunt'; this.stT = 0; this.target = this.nearestTarget(this.pos, null, -1, 80); this.g.audio.roar?.(this.el, this.m * 0.6, this.pos, this.look); }
     } else if (this.state === 'hunt') {
@@ -630,12 +632,22 @@ const SWORD_PARTS = (() => {
   return { blade, guard, grip, pommel, gem };
 })();
 class SwordSpell extends Spell {
-  constructor(...a) {
-    super(...a);
-    const s = this.spec, L = this.look, aim = this.caster.getAim();
+  constructor(sys, spec, caster, aim, opts = {}) {
+    super(sys, spec, caster, aim);
+    const s = this.spec, L = this.look;
+    aim = this.caster.getAim();
     this.kit = kitOf(this.el, L);
-    this.target = this.nearestTarget(this.caster.eye(new THREE.Vector3()), aim.dir, 0.75, 60);
-    this.at = (this.target ? this.target.pos : aim.point).clone(); this.at.y = groundY(this.g, this.at);
+    this.target = opts.target !== undefined ? opts.target : this.nearestTarget(this.caster.eye(new THREE.Vector3()), aim.dir, 0.75, 60);
+    this.at = (opts.at || (this.target ? this.target.pos : aim.point)).clone(); this.at.y = groundY(this.g, this.at);
+    this.minor = !!opts.at;
+    if (opts.at) this.target = null; // satellites strike the ground around the foe, they do not track it
+    this.pt = -(opts.delay || 0);
+    const extra = opts.at ? 0 : Math.round(clamp((s.count - 0.35) / 0.65) * 5);
+    for (let i = 0; i < extra; i++) { // a ring of lesser blades closes in around the main one
+      const a = (i / extra) * TAU + rand(-0.2, 0.2), r = rand(3, 5.5) * (0.8 + s.size * 0.4);
+      const at = this.at.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+      this.sys.active.push(new SwordSpell(sys, { ...s, size: s.size * 0.55, count: 0 }, caster, aim, { at, delay: 0.12 + i * 0.1, target: null }));
+    }
     this.Ls = (6 + s.size * 6) * (0.65 + this.m * 0.45) * L.sy;
     this.R = (2.6 + s.size * 2.5) * (0.65 + this.m * 0.45) * L.sx;
     this.hover = 12 + this.Ls * 0.8;
@@ -654,8 +666,9 @@ class SwordSpell extends Spell {
     this.mc.group.rotation.x = Math.PI / 2; this.add(this.mc.group);
     this.ground = new MagicCircle({ seed: s.seed + 5, tier: 2, color: this.pal.color, radius: this.R, intensity: 1 });
     this.ground.group.rotation.x = -Math.PI / 2; this.add(this.ground.group);
-    this.phase = 'form'; this.y = this.at.y + this.hover; this.vy = 0; this.pt = 0;
-    this.g.audio.cast('light', 0.4 + this.m * 0.4, this.at, this.look); this.g.audio.cast(this.el, this.m, this.at, this.look);
+    this.phase = 'form'; this.y = this.at.y + this.hover; this.vy = 0;
+    if (!opts.at) { this.g.audio.cast('light', 0.4 + this.m * 0.4, this.at, this.look); this.g.audio.cast(this.el, this.m, this.at, this.look); }
+    this.sword.visible = this.pt >= 0;
   }
   update(dt) {
     this.t += dt; this.pt += dt;
@@ -663,7 +676,8 @@ class SwordSpell extends Spell {
     if (this.phase === 'form' && this.target?.alive && this.pt < 0.45) { const tp = this.target.pos; this.at.x += (tp.x - this.at.x) * clamp(dt * 6); this.at.z += (tp.z - this.at.z) * clamp(dt * 6); this.at.y = groundY(this.g, this.at); }
     this.ground.group.position.copy(this.at).y += 0.12; this.ground.update(dt); this.ground.target = this.phase === 'form' || this.phase === 'fall' ? 1 : 0;
     this.mc.update(dt); this.mc.target = this.phase === 'form' ? 1 : 0;
-    const formK = easeOut(this.t / 0.5);
+    const formK = easeOut(Math.max(0, this.pt) / 0.5);
+    if (this.phase === 'form') sw.visible = this.pt >= 0;
     if (this.phase === 'form') {
       this.y = this.at.y + this.hover + Math.sin(this.t * 3) * 0.2;
       sw.rotation.set(0, this.t * 0.8, 0); // geometry is point-down: tip at the origin, hilt at +y
@@ -690,8 +704,8 @@ class SwordSpell extends Spell {
         fx.addShake(0.5 + this.m * 0.35, c); if (this.caster.isPlayer || this.target === this.g.player) this.g.screenFlash?.('#' + this.pal.core.getHexString(), 0.12);
         fx.debris?.(c, this.R * 0.8, this.el, this.pal, this.look);
         if (this.el === 'earth' || this.el === 'ice') this.sys.spikeRing(this, this.at, this.R * 0.8);
-        escalateImpact(this, c, this.R * 0.8, this.target);
-        this.g.audio.impact('earth', 0.8 + this.m * 0.4, c, this.look);
+        if (!this.minor) escalateImpact(this, c, this.R * 0.8, this.target);
+        this.g.audio.impact('earth', (0.8 + this.m * 0.4) * (this.minor ? 0.5 : 1), c, this.look);
       }
     } else if (this.phase === 'stuck') {
       const pulse = 1 + Math.sin(this.pt * 14) * 0.06;
@@ -778,12 +792,13 @@ class RushSpell extends Spell {
 // ============================================================ 9. TOTEM — a floating crystal obelisk that fires at foes nearby
 const TOTEM_BASE = (() => { const g = new THREE.CylinderGeometry(0.75, 1.05, 0.55, 8, 1); g.translate(0, 0.275, 0); g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3)); return g; })();
 class TotemSpell extends Spell {
-  constructor(...a) {
-    super(...a);
+  constructor(sys, spec, caster, aim0, opts = {}) {
+    super(sys, spec, caster, aim0);
     const s = this.spec, c = this.caster, aim = c.getAim(), L = this.look;
     this.kit = kitOf(this.el, L);
     const f = aim.dir.clone().setY(0).normalize();
-    this.at = aim.point.distanceTo(c.pos) < 20 ? aim.point.clone() : c.pos.clone().addScaledVector(f, 8);
+    this.at = opts.at ? opts.at.clone() : aim.point.distanceTo(c.pos) < 20 ? aim.point.clone() : c.pos.clone().addScaledVector(f, 8);
+    if (!opts.at && s.count > 0.6) this.sys.active.push(new TotemSpell(sys, { ...s, count: 0 }, caster, aim0, { at: this.at.clone().addScaledVector(new THREE.Vector3(-f.z, 0, f.x), 4.5) }));
     this.at.y = this.g.world.groundAt(this.at.x, this.at.z, this.at.y + 1);
     this.life = 10 + s.duration * 10 + this.m * 4;
     this.range = 24 + s.size * 10;
