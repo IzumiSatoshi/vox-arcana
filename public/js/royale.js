@@ -539,6 +539,12 @@ export class Royale {
     const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
     const zoneTxt = Z.state === 'wait' ? t('royale.zoneWait', { t: mm }) : Z.state === 'shrink' ? t('royale.zoneShrink', { t: mm }) : t('royale.zoneFinal');
     g.hud.round(`✦ ${this.duos ? this.teamsLeft() + ' ' + t('royale.teams') : this.alive().length + ' ' + t('royale.alive')} · ⚔ ${p.kills} · ${zoneTxt}`);
+    const ap = document.getElementById('ally-panel');
+    if (ap) {
+      const mate = this.duos && g.bots.find((b) => b.ally === p);
+      ap.classList.toggle('hidden', !mate);
+      if (mate) { const w = this.wisps?.find((q) => q.c === mate); ap.innerHTML = '<span class="an">◆ ' + mate.name + '</span>' + (mate.alive ? '<span class="ab"><i style="width:' + Math.round(clamp(mate.hp / mate.maxHp) * 100) + '%"></i></span>' : '<span class="ad">' + t('royale.down') + (w ? ' · ' + Math.ceil(w.t) + 's' : '') + '</span>'); }
+    }
     const box = document.getElementById('br-inv'); if (!box) return;
     const key = JSON.stringify([p.inv, p.affinity, p.relics]);
     if (!force && key === this._invKey) return; this._invKey = key;
@@ -623,7 +629,7 @@ export class Royale {
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop(); this.rainSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
-    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden'); document.getElementById('br-look')?.classList.remove('show');
+    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden'); document.getElementById('br-look')?.classList.remove('show'); document.getElementById('ally-panel')?.classList.add('hidden');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }
