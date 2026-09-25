@@ -449,7 +449,7 @@ export class Royale {
     for (const [id, n] of Object.entries(target.inv || {})) for (let i = 0; i < n; i++) this.dropItem(at, { type: 'potion', id }, true);
     this.dropItem(at, this.randomKind(), true);
     if (target === g.player) {
-      this.deadT = 0;
+      this.deadT = 0; if (killer?.alive && killer !== target) this.spec = killer; // the camera finds whoever got you
       g.hud.banner(`#${target.place}`, (killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm')) + ' · ⚔ ' + target.kills + ' · ' + Math.round(g.stats?.dmg || 0) + ' ' + t('damage'), 6);
       g.audio.ui('defeat');
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
