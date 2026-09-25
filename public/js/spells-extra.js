@@ -395,6 +395,11 @@ class DrainSpell extends Spell {
       fx.glow.emit({ x: p.x, y: p.y, z: p.z, life: 0.09, size: this.r0 * 3.2, size1: this.r0 * 1.5, color: this.pal.core, color1: this.pal.color, alpha: k, drag: 0, frame: 1 });
     }
     if (Math.random() < 0.5) fx.element(this.el, from, { count: 1, speed: 1.2, size: 0.25, palette: this.pal, look: this.look, dir: to.clone().sub(from).normalize() });
+    if (tg && k > 0) for (let q = 0; q < 2; q++) { // essence spirals off the victim into the stream
+      const a = this.t * 7 + q * Math.PI + rand(-0.3, 0.3), r = 0.9 + rand(-0.1, 0.2), d = to.clone().sub(from).normalize();
+      const px = from.x + Math.cos(a) * r, pz = from.z + Math.sin(a) * r, py = from.y + rand(-0.7, 0.7);
+      fx.glow.emit({ x: px, y: py, z: pz, vx: -Math.sin(a) * 3 + d.x * 2 + (from.x - px) * 2, vy: (from.y - py) * 2, vz: Math.cos(a) * 3 + d.z * 2 + (from.z - pz) * 2, life: 0.35, size: 0.14, size1: 0.03, color: q ? this.pal.core : this.pal.color, alpha: 1, drag: 0.5, frame: 1 });
+    }
     this.light(from, 120 * k, 6); this.light(to, 60 * k, 4);
     this.loopSnd?.set(to);
     if (tg && !end) {
