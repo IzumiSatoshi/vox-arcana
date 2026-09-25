@@ -9,6 +9,7 @@ import { applyHit } from './combat.js';
 import { t, getLang } from './i18n.js';
 import { MagicCircle } from './magicCircle.js';
 import { MageModel } from './characters.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, equip, grant } from './royale-rules.js';
 import { rand, pick, clamp, TAU } from './util.js';
 
@@ -100,6 +101,7 @@ export class Royale {
     p.yaw = Math.atan2(-this.ship.dir.x, -this.ship.dir.z);
     this.placeOnShip();
     this.spawnLoot(48);
+    this.buildShrines();
     document.getElementById('br-inv')?.classList.remove('hidden');
     g.hud.banner(t('ban.royale'), t('royale.jumpHint'), 4);
     g.hud.hint?.('hint.royale');
@@ -312,6 +314,7 @@ export class Royale {
     const pl = g.player; this.windSnd?.set(null, pl?.onShip ? 0.25 : pl?.dropping ? clamp(-pl.vel.y / 22) * 0.9 : 0);
     if (!this.over) this.updateZone(dt);
     this.updateFalling(dt);
+    this.updateShrines(dt);
     // drop phase: slow magical descent with strong air control; a burst on landing
     for (const c of g.combatants) {
       if (!c.dropping) continue;
@@ -488,6 +491,7 @@ export class Royale {
     const zx = (Z.nx - p.pos.x) * scale, zy = (Z.nz - p.pos.z) * scale, zl = Math.hypot(zx, zy);
     if (zl > 78) { const ux = zx / zl, uy = zy / zl; g2.save(); g2.translate(ux * 74, uy * 74); g2.rotate(Math.atan2(uy, ux)); g2.fillStyle = '#fff'; g2.shadowColor = '#a040ff'; g2.shadowBlur = 8; g2.beginPath(); g2.moveTo(9, 0); g2.lineTo(-6, -6); g2.lineTo(-3, 0); g2.lineTo(-6, 6); g2.closePath(); g2.fill(); g2.restore(); }
     if (this.cacheMark) { const x = (this.cacheMark.x - p.pos.x) * scale, y = (this.cacheMark.z - p.pos.z) * scale, l = Math.hypot(x, y), k = l > 80 ? 80 / l : 1; g2.fillStyle = '#ffd46a'; g2.shadowColor = '#ffb000'; g2.shadowBlur = 10; g2.beginPath(); g2.arc(x * k, y * k, 5, 0, TAU); g2.fill(); g2.shadowBlur = 0; }
+    for (const S of this.shrines || []) { const x = (S.pos.x - p.pos.x) * scale, y = (S.pos.z - p.pos.z) * scale; if (x * x + y * y > 8100) continue; g2.strokeStyle = '#9fe8ff'; g2.lineWidth = 2; g2.beginPath(); g2.arc(x, y, 5, 0, TAU); g2.stroke(); }
     for (const it of this.items) { const x = (it.pos.x - p.pos.x) * scale, y = (it.pos.z - p.pos.z) * scale; if (x * x + y * y > 8100) continue; g2.fillStyle = hex(this.colorOf(it.kind)); g2.beginPath(); g2.arc(x, y, 2.2, 0, TAU); g2.fill(); }
     g2.restore();
   }
@@ -497,11 +501,51 @@ export class Royale {
     if (c.dropping && c.brain?.dropTo) return c.brain.dropTo;
     const dz = Math.hypot(c.pos.x - Z.nx, c.pos.z - Z.nz);
     if (!this.inZone(c.pos, -6) || (Z.state === 'shrink' && dz > Z.nr - 4)) return new THREE.Vector3(Z.nx, 0, Z.nz);
+    if (c.mana < c.maxMana * 0.35 || c.hp < c.maxHp * 0.5) { const sh = this.nearestShrine(c.pos, 60); if (sh) return sh.pos; } // go recover at a shrine
     const it = this.nearestItem(c.pos, 45); if (it) return it.pos;
     return new THREE.Vector3(Z.nx, 0, Z.nz);
   }
+  // ------------------------------------------------------------ mana shrines: contested circles that restore mana and health
+  buildShrines() {
+    const g = this.g; this.shrines = [];
+    for (let k = 0; k < 4; k++) {
+      let pos = null;
+      for (let tries = 0; tries < 30 && !pos; tries++) {
+        const a = (k / 4) * TAU + Math.PI / 4 + rand(-0.3, 0.3), r = rand(30, 62), x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (MESAS.some((m) => Math.hypot(x - m.x, z - m.z) < m.R + 5) || g.world.normalAt(x, z).y < 0.9 || g.world.heightAt(x, z) < SEA_Y + 1.5) continue;
+        const q = new THREE.Vector3(x, g.world.heightAt(x, z) + 1, z); g.world.collideBody(q, 3); if (Math.hypot(q.x - x, q.z - z) > 0.01) continue;
+        pos = new THREE.Vector3(x, g.world.heightAt(x, z), z);
+      }
+      if (!pos) continue;
+      const grp = new THREE.Group(); grp.position.copy(pos);
+      const mc = new MagicCircle({ seed: 40 + k, tier: 5, color: new THREE.Color(0x6fd8ff), radius: 4.2, intensity: 1.2 }); mc.group.rotation.x = -Math.PI / 2; mc.group.position.y = 0.1; mc.target = 1; mc.spin = 0.3; grp.add(mc.group);
+      const stoneM = this.mat('shrineStone', () => new THREE.MeshStandardMaterial({ color: 0xc8bca0, roughness: 0.85 }));
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU, h = 2.2 + (i % 2) * 0.8, st = new THREE.Mesh(new RoundedBoxGeometry(0.75, h, 0.55, 2, 0.12), stoneM); st.position.set(Math.cos(a) * 4.6, h / 2 - 0.15, Math.sin(a) * 4.6); st.rotation.set(rand(-0.06, 0.06), -a + rand(-0.15, 0.15), rand(-0.08, 0.08)); st.castShadow = true; st.userData.ownGeo = true; grp.add(st); }
+      const cry = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), this.mat('shrineCry', () => crystalMaterial({ color: new THREE.Color(0xcff4ff), glow: new THREE.Color(0x6fd8ff), emissive: 1.8, crack: 0.2 }))); cry.scale.set(1, 2, 1); cry.position.y = 2.6; grp.add(cry);
+      const beam = new THREE.Mesh(BEAM, this.mat('shrineBeam', () => flowMaterial({ color: new THREE.Color(0x6fd8ff), core: 0xffffff, intensity: 1, scroll: -1.2, stripes: 2, opacity: 0.3 }))); beam.scale.set(3, 18, 3); grp.add(beam);
+      g.scene.add(grp);
+      this.shrines.push({ pos, grp, mc, cry, R: 4.2, busy: 0 });
+    }
+  }
+  nearestShrine(p, maxD) { let best = null, bd = maxD; for (const s of this.shrines || []) { const d = s.pos.distanceTo(p); if (d < bd && this.inZone(s.pos, -3)) { bd = d; best = s; } } return best; }
+  updateShrines(dt) {
+    const g = this.g;
+    for (const S of this.shrines || []) {
+      S.mc.update(dt); S.cry.rotation.y += dt * 1.2; S.cry.position.y = 2.6 + Math.sin(this.t * 1.5 + S.pos.x) * 0.2;
+      let n = 0;
+      for (const c of g.combatants) {
+        if (!c.alive || c.decoy || !c.inv || Math.hypot(c.pos.x - S.pos.x, c.pos.z - S.pos.z) > S.R || Math.abs(c.pos.y - S.pos.y) > 3) continue;
+        n++; c.mana = Math.min(c.maxMana, c.mana + dt * 22); c.heal(dt * 7);
+        if (Math.random() < 0.3) g.fx.glow.emit({ x: c.pos.x + rand(-0.4, 0.4), y: c.pos.y + 0.2, z: c.pos.z + rand(-0.4, 0.4), vy: rand(2, 3.5), life: 0.8, size: 0.14, size1: 0.02, color: new THREE.Color(0x9fe8ff), alpha: 1, drag: 0.4, frame: 1 });
+      }
+      if (n && !S.busy && g.player && Math.hypot(g.player.pos.x - S.pos.x, g.player.pos.z - S.pos.z) < S.R) { g.audio.shimmer?.(S.pos); g.hud.feed('<b style="color:#9fe8ff">✦ ' + t('royale.shrine') + '</b>'); }
+      S.busy = n;
+      g.fx.lights.request?.(S.cry.position.clone().add(S.pos), new THREE.Color(0x6fd8ff), n ? 160 : 60, 10);
+    }
+  }
   dispose() {
     const s = this.g.scene;
+    for (const S of this.shrines || []) { s.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => m.userData.ownGeo && m.geometry.dispose()); }
     for (const it of [...this.items]) this.removeItem(it);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
