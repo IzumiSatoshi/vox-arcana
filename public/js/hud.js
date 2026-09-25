@@ -241,6 +241,7 @@ export class Hud {
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
   hintHTML(html) { $('chant-hint-txt').innerHTML = html; }
+  tr(key) { return t(key); }
   // a red arc around the crosshair pointing at whoever hit you (merged per attacker, fades out)
   hitFrom(src, amount) {
     if (!src?.pos || !this.g.player) return;

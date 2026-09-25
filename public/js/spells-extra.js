@@ -223,7 +223,7 @@ class PrisonSpell extends Spell {
         this.closed = true; this.crown.visible = true;
         fx.ring(c.clone().setY(c.y + 0.2), this.pal.color, this.R * 2.4, 0.5); fx.shockwave(c.clone().setY(c.y + 1), this.R * 3, 1, 0.4); fx.addShake(0.2, c);
         this.g.audio.impact(this.el, 0.5 + this.m * 0.3, c, this.look);
-        for (const tg of this.targets()) if (Math.hypot(tg.pos.x - c.x, tg.pos.z - c.z) < this.R * 1.1) { this.trapped.add(tg); this.hit(tg, 20, tg.center(), { stun: 0.35 }); }
+        for (const tg of this.targets()) if (Math.hypot(tg.pos.x - c.x, tg.pos.z - c.z) < this.R * 1.1) { this.trapped.add(tg); this.hit(tg, 20, tg.center(), { stun: 0.35 }); if (tg === this.g.player) this.g.hud.banner('', this.g.hud.tr?.('warn.trapped') || 'TRAPPED', 1.6); }
       }
       const ck = easeOut((this.t - 0.18) / 0.2) * (1 - out);
       this.crown.position.set(c.x, topY, c.z); this.crown.scale.setScalar(Math.max(0.01, this.R * 0.55 * ck)); this.crown.scale.z = (0.8 + this.m * 0.4) * Math.max(0.01, ck);
@@ -863,6 +863,9 @@ class TotemSpell extends Spell {
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: 2.2 * this.S, intensity: 1.2 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.at).y += 0.08; this.mc.spin = 0.5; this.add(this.mc.group);
     this.cd = 0.8; this.pulse = 0;
+    // its reach, drawn faintly on the ground
+    this.reach = this.add(new THREE.Mesh(new THREE.RingGeometry(this.range - 0.25, this.range, 96), new THREE.MeshBasicMaterial({ color: this.pal.color, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide })));
+    this.reach.userData.ownGeo = true; this.reach.rotation.x = -Math.PI / 2; this.reach.position.copy(this.at).y += 0.15; this.reach.renderOrder = 4;
     this.loopSnd = this.g.audio.loop(this.el, this.at.clone().setY(this.at.y + 2.4), 0.1, this.look);
     this.g.audio.impact('earth', 0.35, this.at, this.look); this.g.audio.cast(this.el, this.m * 0.8, this.at, this.look);
     this.g.fx.explosion('earth', this.at.clone().setY(this.at.y + 0.3), 1.4, 0.2, null, { noDecal: true });
@@ -906,6 +909,7 @@ class TotemSpell extends Spell {
     this.rings.forEach((r, i) => { r.position.copy(this.cry.position); r.rotation.set(Math.PI / 2 + Math.sin(this.t * (1 + i)) * 0.6, this.t * (i ? -1.3 : 1.7), 0); r.scale.setScalar(Math.max(0.01, (0.8 + i * 0.3) * S * k)); });
     this.shards.forEach((m, i) => { const a = this.t * 2.2 + (i / 3) * TAU; m.position.set(at.x + Math.cos(a) * 1.3 * S, hy - 0.6 * S + Math.sin(a * 2) * 0.2, at.z + Math.sin(a) * 1.3 * S); m.rotation.set(a, a * 0.7, 0); m.scale.set(0.1, 0.3, 0.1).multiplyScalar(S * Math.max(0.01, k)); });
     this.mc.update(dt); this.mc.target = this.t < this.life ? 0.9 : 0;
+    this.reach.material.opacity = 0.22 * k * (0.7 + 0.3 * Math.sin(this.t * 3));
     if (Math.random() < 0.3 * k) fx.element(this.el, this.cry.position, { count: 1, speed: 0.5, size: 0.25, palette: this.pal, look: this.look });
     this.light(this.cry.position, (80 + this.pulse * 300) * k, 8);
     if (this.t > 0.5 && this.t < this.life && this.caster.alive) {
@@ -947,6 +951,7 @@ class MarkSpell extends Spell {
     // a gyroscope of rune bands locked around the body, readable from any angle, closing in as the mark ripens
     this.bands = [0, 1].map((i) => { const b = this.add(new THREE.Mesh(TORUS_GEO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.8, noiseAmp: 0.05, opacity: 0.9 }))); b.userData.tilt = i ? 1.2 : 0.35; return b; });
     this.g.audio.cast('arcane', 0.35, to, L); this.g.audio.tick?.(to, 0);
+    if (this.target && this.target === this.g.player) { this.g.hud.banner('', this.g.hud.tr?.('warn.marked') || 'MARKED', 1.6); this.g.screenFlash?.('#' + this.pal.color.getHexString(), 0.2); }
   }
   where() { return this.target?.alive ? this.target.center() : this.point || this.lastPos; }
   update(dt) {
