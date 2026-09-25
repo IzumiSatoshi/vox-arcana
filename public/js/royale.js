@@ -127,6 +127,12 @@ export class Royale {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(9.5, 0.22, 8, 64), energyMaterial({ color: 0xffc444, core: 0xffffff, intensity: 1.6, noiseAmp: 0.05, opacity: 0.9 })); ring.rotation.x = Math.PI / 2; ring.position.y = -1; grp.add(ring);
     const cm = crystalMaterial({ color: new THREE.Color(0xbfe8ff), glow: new THREE.Color(0x6fd8ff), emissive: 1.6, crack: 0.2 });
     for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + 0.3, c = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), cm); c.scale.set(0.8, 2.2, 0.8); c.position.set(Math.cos(a) * 7.4, 2.6, Math.sin(a) * 7.4); c.rotation.z = Math.cos(a) * 0.2; grp.add(c); }
+    // a floating waystone as the mast, and rock roots hanging beneath the island
+    const mast = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0), cm); mast.scale.set(0.9, 3.4, 0.9); mast.position.y = 5.2; grp.add(mast); this.mast = mast;
+    const rockM = rock.material;
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.5, r = rand(2, 5.5), st = new THREE.Mesh(new THREE.ConeGeometry(rand(0.8, 1.6), rand(3, 6), 6), rockM); st.rotation.x = Math.PI; st.position.set(Math.cos(a) * r * 0.6, -8.5 - rand(0, 2), Math.sin(a) * r * 0.6); grp.add(st); }
+    const vineM = new THREE.MeshStandardMaterial({ color: 0x4a8a3a, roughness: 0.9 });
+    for (let k = 0; k < 10; k++) { const a = rand(0, TAU), v = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.03, rand(2, 4.5), 4), vineM); v.position.set(Math.cos(a) * 8.2, -0.4 - v.geometry.parameters.height / 2, Math.sin(a) * 8.2); grp.add(v); }
     const mc = new MagicCircle({ seed: 7, tier: 7, color: new THREE.Color(0xffc444), radius: 10, intensity: 1.6 }); mc.group.rotation.x = Math.PI / 2; mc.group.position.y = -3.2; mc.target = 1; grp.add(mc.group);
     grp.traverse((m) => { if (m.isMesh) m.castShadow = true; });
     g.scene.add(grp);
@@ -155,6 +161,7 @@ export class Royale {
     S.t += dt; const k = (S.t * S.speed) / S.len;
     S.pos.lerpVectors(S.from, S.to, Math.min(1.25, k)); S.pos.y = 88 + Math.sin(S.t * 0.8) * 0.4;
     S.grp.position.copy(S.pos); S.grp.rotation.y += dt * 0.05; S.ring.rotation.z += dt * 0.6; S.mc.update(dt);
+    if (this.mast) { this.mast.rotation.y += dt * 0.8; this.mast.position.y = 5.2 + Math.sin(S.t * 1.6) * 0.3; }
     // bots leave when the ferry passes over where they want to land; everyone is out by the end of the line
     for (const c of this.g.combatants) if (c.onShip && ((c.brain && k >= c.brain.jumpAt) || k >= 1)) this.jump(c);
     this.placeOnShip();
