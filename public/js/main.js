@@ -8,6 +8,7 @@ import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
 import './spells-extra.js';
 import { Royale, royaleGuide } from './royale.js';
+import { FORM_GUIDE } from './form-guide.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
 import { MagicCircle } from './magicCircle.js';
@@ -738,7 +739,7 @@ class Game {
     this.refreshJevLabels();
     if (this.voiceInit) $('menu-mic-message').textContent = t('menu.mic.ready');
     $('howto-elements').innerHTML = ELEMENT_KEYS.map((k) => `<span class="chip">${elChip(k)} ${elName(k)}</span>`).join('');
-    $('howto-shapes').innerHTML = Object.keys(SHAPES).map((k) => `<span class="chip">${SHAPES[k].icon} ${shapeName(k)}</span>`).join('');
+    $('howto-shapes').innerHTML = Object.keys(SHAPES).map((k) => `<span class="chip form-chip" title="${FORM_GUIDE[k]?.[ui === 'ja' ? 1 : 0] || ''}">${SHAPES[k].icon} <b>${shapeName(k)}</b> <small>${FORM_GUIDE[k]?.[ui === 'ja' ? 1 : 0] || ''}</small></span>`).join('');
     const ja = ui === 'ja';
     $('howto-royale').innerHTML = royaleGuide(ja);
     $('howto-reactions').innerHTML = REACTIONS.map(([n, c, en, jp]) => `<li><b style="color:${c}">${reactName(n)}</b> ${ja ? jp : en}</li>`).join('');
