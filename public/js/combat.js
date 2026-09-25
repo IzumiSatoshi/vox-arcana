@@ -51,7 +51,7 @@ export class Combatant {
   }
   heal(n) { if (this.alive) this.hp = Math.min(this.maxHp, this.hp + n * (this.dots.some((d) => d.el === 'poison') ? 0.5 : 1)); }
   addShield(n, t = 8, el = null) { this.shield = Math.min(400, this.shield + n); this.shieldTime = Math.max(this.shieldTime, t); this.shieldEl = el; }
-  canAct() { return this.alive && this.frozen <= 0 && this.stun <= 0; }
+  canAct() { return this.alive && this.frozen <= 0 && this.stun <= 0 && !this.onShip; }
   enhP(el) { return this.enh[el] ? this.enh[el].p : null; }
   moveMult() {
     if (this.frozen > 0 || this.stun > 0) return 0;

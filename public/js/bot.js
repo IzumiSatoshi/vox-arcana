@@ -51,6 +51,7 @@ export class BotBrain {
       return { wish, jump };
     }
     const R = this.royale;
+    if (c.onShip) return { wish, jump: false };
     if (c.dropping || (!tgt && R)) { // battle royale: steer the drop, loot, keep ahead of the storm
       const to = R ? R.roamTarget(c).clone().sub(c.pos).setY(0) : new THREE.Vector3();
       if (to.lengthSq() > 1) wish.copy(to.normalize());

@@ -204,7 +204,10 @@ element reacts with it:
 - **Duel the Archmage**: best of three against an AI that chants generated incantations out loud (speech synthesis),
   runs them through Jev, reads your aura to set up reactions, dodges, walls and heals.
 - **Training Grounds**: a regenerating golem to test spells on.
-- **Battle Royale** (`public/js/royale.js`): eight mages drop onto the island from the sky. Steer the fall with WASD and hold Space to slow it.
+- **Battle Royale** (`public/js/royale.js`): 4, 8 or 12 mages board a floating sky ferry that crosses the island.
+  - Press **Space** to jump off wherever you like. Bots leave near the spot they want to land, and anyone still aboard is thrown off at the end of the line.
+  - Steer the fall with WASD and hold Space to slow it.
+  - The minimap shows rivals within 40 m, or within 80 m while they chant.
   - **Loot**: glowing relics with light beams are scattered across the map.
     - Element cores give +20% damage for that element and stack.
     - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed) and Sage Focus (cheaper spells).

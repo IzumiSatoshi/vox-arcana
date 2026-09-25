@@ -7,6 +7,7 @@ import { energyMaterial, crystalMaterial, flowMaterial, TIME, NOISE } from './sh
 import { ARENA_R, SEA_Y, MESAS } from './world.js';
 import { applyHit } from './combat.js';
 import { t, getLang } from './i18n.js';
+import { MagicCircle } from './magicCircle.js';
 import { rand, pick, clamp, TAU } from './util.js';
 
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
@@ -94,22 +95,72 @@ export class Royale {
       const b = g.createBot(names[i % names.length] + (i >= names.length ? ' II' : ''), diffs[i % diffs.length], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
       b.brain.sight = 55; b.brain.royale = this;
     }
-    // everyone drops from the sky over a random spot on the island
+    // everyone boards a floating sky-island that ferries them across the map; each mage picks the moment to jump
     const all = [p, ...g.bots];
+    this.buildShip();
     all.forEach((c, i) => {
-      const a = (i / all.length) * TAU + rand(-0.3, 0.3), r = rand(25, 85);
       c.resetStats(); this.equip(c);
-      c.pos.set(Math.cos(a) * r, 0, Math.sin(a) * r); c.pos.y = g.world.heightAt(c.pos.x, c.pos.z) + 70 + rand(0, 20);
-      c.yaw = Math.atan2(c.pos.x, c.pos.z); c.pitch = -0.5; c.vel.set(0, 0, 0); c.dropping = true; c.grounded = false;
-      if (c.brain) { const la = rand(0, TAU), lr = rand(10, 90); c.brain.dropTo = new THREE.Vector3(Math.cos(la) * lr, 0, Math.sin(la) * lr); }
+      c.onShip = true; c.deckA = (i / all.length) * TAU; c.vel.set(0, 0, 0); c.grounded = true; c.pitch = -0.25;
+      if (c.brain) { const la = rand(0, TAU), lr = rand(10, 90); c.brain.dropTo = new THREE.Vector3(Math.cos(la) * lr, 0, Math.sin(la) * lr); c.brain.jumpAt = this.closestT(c.brain.dropTo) + rand(-0.08, 0.04); }
       if (c.model) c.model.root.visible = true;
     });
+    p.yaw = Math.atan2(-this.ship.dir.x, -this.ship.dir.z);
+    this.placeOnShip();
     this.spawnLoot(48);
     document.getElementById('br-inv')?.classList.remove('hidden');
-    g.hud.banner(t('ban.royale'), t('ban.royale2'), 3.5);
+    g.hud.banner(t('ban.royale'), t('royale.jumpHint'), 4);
     g.hud.hint?.('hint.royale');
     this.updateHud(true);
   }
+  // ------------------------------------------------------------ the sky ferry
+  buildShip() {
+    const g = this.g, a0 = rand(0, TAU), off = rand(-25, 25);
+    const dir = new THREE.Vector3(-Math.cos(a0), 0, -Math.sin(a0)), side = new THREE.Vector3(-dir.z, 0, dir.x);
+    const from = dir.clone().multiplyScalar(-135).addScaledVector(side, off).setY(88), to = dir.clone().multiplyScalar(135).addScaledVector(side, off).setY(88);
+    const grp = new THREE.Group();
+    const rockG = new THREE.DodecahedronGeometry(1, 1), rp = rockG.attributes.position;
+    for (let i = 0; i < rp.count; i++) { const y = rp.getY(i); rp.setY(i, y > 0 ? 0.25 : y * (1.6 + Math.random() * 0.3)); } // flat top, long hanging root
+    rockG.computeVertexNormals();
+    const rock = new THREE.Mesh(rockG, new THREE.MeshStandardMaterial({ color: 0x8a7866, roughness: 0.95 })); rock.scale.set(8.5, 5, 8.5); grp.add(rock);
+    const turf = new THREE.Mesh(new THREE.CylinderGeometry(8.3, 8.6, 0.5, 24), new THREE.MeshStandardMaterial({ color: 0x6aa84a, roughness: 0.9 })); turf.position.y = 1.35; grp.add(turf);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(9.5, 0.22, 8, 64), energyMaterial({ color: 0xffc444, core: 0xffffff, intensity: 1.6, noiseAmp: 0.05, opacity: 0.9 })); ring.rotation.x = Math.PI / 2; ring.position.y = -1; grp.add(ring);
+    const cm = crystalMaterial({ color: new THREE.Color(0xbfe8ff), glow: new THREE.Color(0x6fd8ff), emissive: 1.6, crack: 0.2 });
+    for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + 0.3, c = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), cm); c.scale.set(0.8, 2.2, 0.8); c.position.set(Math.cos(a) * 7.4, 2.6, Math.sin(a) * 7.4); c.rotation.z = Math.cos(a) * 0.2; grp.add(c); }
+    const mc = new MagicCircle({ seed: 7, tier: 7, color: new THREE.Color(0xffc444), radius: 10, intensity: 1.6 }); mc.group.rotation.x = Math.PI / 2; mc.group.position.y = -3.2; mc.target = 1; grp.add(mc.group);
+    grp.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    g.scene.add(grp);
+    this.ship = { grp, mc, ring, from, to, dir, t: 0, len: from.distanceTo(to), speed: 20, pos: from.clone(), active: true };
+  }
+  // path parameter (0..1) where the ferry passes closest to a point
+  closestT(p) { const S = this.ship, ab = S.to.clone().sub(S.from).setY(0); return clamp(p.clone().sub(S.from).setY(0).dot(ab) / ab.lengthSq()); }
+  placeOnShip() {
+    const S = this.ship;
+    for (const c of this.g.combatants) {
+      if (!c.onShip) continue;
+      c.pos.set(S.pos.x + Math.cos(c.deckA) * 4.2, S.pos.y + 1.62, S.pos.z + Math.sin(c.deckA) * 4.2); c.vel.set(0, 0, 0); c.grounded = true;
+      if (c.brain) c.yaw = Math.atan2(-S.dir.x, -S.dir.z);
+    }
+  }
+  jump(c) {
+    if (!c.onShip) return;
+    const S = this.ship, g = this.g;
+    c.onShip = false; c.dropping = true; c.grounded = false;
+    c.vel.copy(S.dir).multiplyScalar(S.speed * 0.5).setY(4);
+    g.fx.ring(c.pos.clone(), new THREE.Color(0xffc444), 3, 0.4); g.fx.shockwave(c.center(), 4, 0.8, 0.3);
+    if (c === g.player) { g.audio.whoosh(1); g.hud.banner('', t('ban.royale2'), 2.5); }
+  }
+  updateShip(dt) {
+    const S = this.ship; if (!S) return;
+    S.t += dt; const k = (S.t * S.speed) / S.len;
+    S.pos.lerpVectors(S.from, S.to, Math.min(1.25, k)); S.pos.y = 88 + Math.sin(S.t * 0.8) * 0.4;
+    S.grp.position.copy(S.pos); S.grp.rotation.y += dt * 0.05; S.ring.rotation.z += dt * 0.6; S.mc.update(dt);
+    // bots leave when the ferry passes over where they want to land; everyone is out by the end of the line
+    for (const c of this.g.combatants) if (c.onShip && ((c.brain && k >= c.brain.jumpAt) || k >= 1)) this.jump(c);
+    this.placeOnShip();
+    if (Math.random() < 0.5) this.g.fx.glow.emit({ x: S.pos.x + rand(-8, 8), y: S.pos.y - 2, z: S.pos.z + rand(-8, 8), vy: -3, life: 1, size: 0.3, size1: 0.05, color: new THREE.Color(0xffd070), alpha: 1, drag: 0.2, frame: 1 });
+    if (k > 1.2) { this.g.scene.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => { m.geometry?.dispose(); }); this.ship = null; }
+  }
+  boarding() { return this.g.combatants.some((c) => c.onShip); }
   equip(c) {
     c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {};
     c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.maxHp = 600; c.maxMana = 120; c.hp = 600; c.mana = 120;
@@ -224,7 +275,7 @@ export class Royale {
   }
   inZone(p, margin = 0) { const Z = this.zone; return Math.hypot(p.x - Z.cx, p.z - Z.cz) < Z.r + margin; }
   updateZone(dt) {
-    const Z = this.zone; Z.st += dt;
+    const Z = this.zone; if (!this.boarding()) Z.st += dt;
     const P = PHASES[Math.min(Z.phase, PHASES.length - 1)];
     if (Z.state === 'wait' && !Z.cached && Z.st >= P.wait * 0.35 && Z.phase < 4) { Z.cached = true; this.dropCache(); }
     if (Z.state === 'wait' && Z.st >= P.wait) { Z.cached = false; Z.state = 'shrink'; Z.st = 0; Object.assign(Z, { fromX: Z.cx, fromZ: Z.cz, fromR: Z.r }); this.g.hud.banner('', t('royale.closing'), 2.5); this.g.audio.stormWarn?.(); }
@@ -270,6 +321,7 @@ export class Royale {
   update(dt) {
     const g = this.g;
     this.t += dt;
+    this.updateShip(dt);
     if (!this.over) this.updateZone(dt);
     this.updateFalling(dt);
     // drop phase: slow magical descent with strong air control; a burst on landing
@@ -441,6 +493,8 @@ export class Royale {
     const s = this.g.scene;
     for (const it of [...this.items]) this.removeItem(it);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
+    if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
+    for (const c of this.g.combatants) c.onShip = false;
     this.howl?.stop();
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();

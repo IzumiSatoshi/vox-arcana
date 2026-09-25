@@ -679,6 +679,7 @@ class Game {
       if (this.mode === 'menu') return;
       this.keys[e.code] = true;
       if (e.repeat) return;
+      if (e.code === 'Space' && this.player?.onShip) this.royale?.jump(this.player);
       if (e.code === 'KeyF' || e.code === 'KeyV') this.beginChant();
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
       if (e.code === 'KeyE') this.dashPlayer();
@@ -918,7 +919,7 @@ class Game {
       if (sprint && wish.lengthSq()) p.stamina -= dt * 18;
       const speed = (sprint ? 10.5 : 7) * (this.chanting || this.channel ? 0.6 : 1);
       const fallV = p.vel.y, wasGrounded = p.grounded;
-      if (p.alive) this.stepBody(p, dt, wish, speed, this.keys.Space, this.keys.Space, this.keys.ControlLeft || this.keys.KeyC);
+      if (p.alive && !p.onShip) this.stepBody(p, dt, wish, speed, this.keys.Space, this.keys.Space, this.keys.ControlLeft || this.keys.KeyC);
       const onStone = Math.hypot(p.pos.x, p.pos.z) < 10.5 || p.pos.y - this.world.heightAt(p.pos.x, p.pos.z) > 0.25;
       if (!wasGrounded && p.grounded && fallV < -5) audio.land(clamp(-fallV / 22), onStone);
       if (p.alive && p.hp < p.maxHp * 0.3) { this.beatT = (this.beatT || 0) - dt; if (this.beatT <= 0) { this.beatT = 0.55 + (p.hp / p.maxHp) * 1.5; audio.heartbeat(); } }
@@ -991,7 +992,7 @@ class Game {
     for (const b of this.bots) {
       const out = b.brain.update(dt);
       if (out.dash && b.stamina > 30) { b.stamina -= 30; b.vel.addScaledVector(out.dash, 15); }
-      if (b.alive) this.stepBody(b, dt, out.wish, out.speed || 6, out.jump, false);
+      if (b.alive && !b.onShip) this.stepBody(b, dt, out.wish, out.speed || 6, out.jump, false);
       b.updateStatus(dt, this);
     }
     for (const c of this.combatants) {
