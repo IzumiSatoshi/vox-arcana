@@ -569,10 +569,10 @@ export class Royale {
   }
   dispose() {
     const s = this.g.scene;
-    for (const S of this.shrines || []) { s.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => m.userData.ownGeo && m.geometry.dispose()); }
+    for (const S of this.shrines || []) { s.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => m.geometry?.dispose()); }
     for (const it of [...this.items]) this.removeItem(it);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
-    if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
+    if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); this.ship.grp.traverse((m) => m.geometry?.dispose()); }
     for (const c of this.g.combatants) c.onShip = false;
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop(); this.rainSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();

@@ -228,7 +228,7 @@ class Game {
   }
   removeCombatant(c) {
     const i = this.combatants.indexOf(c); if (i >= 0) this.combatants.splice(i, 1);
-    if (c.model) this.scene.remove(c.model.root);
+    if (c.model) { this.scene.remove(c.model.root); c.model.root.traverse((m) => m.geometry?.dispose()); } // free GPU buffers (decoys come and go all match)
   }
   clearArena() {
     this.voice?.cancelChant(); this.grace = null; this.chanting = false;
