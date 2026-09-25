@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { ELEMENTS, ELEMENT_KEYS, elName } from './elements.js';
 import { energyMaterial, crystalMaterial, flowMaterial, TIME, NOISE } from './shaders.js';
 import { ARENA_R, SEA_Y, MESAS } from './world.js';
-import { applyHit } from './combat.js';
+import { applyHit, ENHANCE } from './combat.js';
 import { t, getLang } from './i18n.js';
 import { MagicCircle } from './magicCircle.js';
 import { MageModel } from './characters.js';
@@ -257,6 +257,13 @@ export class Royale {
   pickup(c, it) {
     const g = this.g, col = this.colorOf(it.kind);
     this.grant(c, it.kind);
+    // three cores of one element attune you: that element's Enhance blessing for the rest of the match
+    const el = it.kind.el;
+    if (it.kind.type === 'core' && c.affinity[el] >= 0.6 && !(c.attuned ||= {})[el]) {
+      c.attuned[el] = true; c.enh[el] = { t: 1e9, p: 0.6, dur: 1e9 }; if (el === 'ice') c.addShield(90, 1e9, 'ice');
+      g.fx.ring(c.pos.clone().setY(c.pos.y + 0.2), new THREE.Color(ELEMENTS[el].color), 7, 0.7); g.fx.shockwave(c.center(), 6, 1, 0.4);
+      if (c === g.player) { g.hud.banner(t('royale.attuned', { el: elName(el).toUpperCase() }), getLang() === 'ja' ? ENHANCE[el].ja : ENHANCE[el].name, 2.5); g.audio.streak?.(3); }
+    }
     g.fx.ring(it.pos.clone().setY(it.pos.y + 0.1), new THREE.Color(col), 2.5, 0.4);
     for (let i = 0; i < 14; i++) g.fx.glow.emit({ x: it.pos.x, y: it.pos.y + 1, z: it.pos.z, vx: rand(-2, 2), vy: rand(1, 5), vz: rand(-2, 2), life: rand(0.4, 0.8), size: 0.18, size1: 0.02, color: new THREE.Color(col), alpha: 1, drag: 1.5, frame: 1 });
     if (c === g.player) {

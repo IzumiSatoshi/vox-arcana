@@ -28,7 +28,7 @@ export const POTION_EFFECT = { hp: 220, mana: 90, shield: 160 };
 
 // a fresh loadout for the drop
 export function equip(c) {
-  c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {};
+  c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {}; c.attuned = {};
   c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.allDmg = 1; c.echo = 0; c.stormRes = 0;
   c.maxHp = 600; c.maxMana = 120; c.hp = 600; c.mana = 120;
 }
