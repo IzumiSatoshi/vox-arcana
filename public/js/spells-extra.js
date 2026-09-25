@@ -170,7 +170,8 @@ class WhipSpell extends Spell {
 // ============================================================ 2. PRISON — a cage of matter erupts around the target
 const BAR_GEO = (() => { const g = new THREE.CylinderGeometry(0.55, 1, 1, 6, 1); g.translate(0, 0.5, 0); return g; })();
 const BAR_TIP = (() => { const g = new THREE.ConeGeometry(0.55, 0.6, 6, 1); g.translate(0, 1.3, 0); return g; })();
-const COLUMN_GEO = (() => { const pts = [[0.9, 0], [0.62, 0.1], [0.5, 0.35], [0.46, 0.7], [0.52, 0.88], [0.3, 0.98], [0.02, 1.02]].map(([r, y]) => new THREE.Vector2(r, y)); return new THREE.LatheGeometry(new THREE.SplineCurve(pts).getPoints(20), 20); })();
+// a flared foot tapering to a clean point (a spire of matter, no crown bulb)
+const COLUMN_GEO = (() => { const pts = [[0.95, 0], [0.6, 0.07], [0.44, 0.25], [0.36, 0.55], [0.25, 0.8], [0.1, 0.95], [0.01, 1.02]].map(([r, y]) => new THREE.Vector2(r, y)); return new THREE.LatheGeometry(new THREE.SplineCurve(pts).getPoints(20), 20); })();
 class PrisonSpell extends Spell {
   constructor(...a) {
     super(...a);
