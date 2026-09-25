@@ -207,7 +207,7 @@ class PrisonSpell extends Spell {
   }
   update(dt) {
     this.t += dt;
-    const s = this.spec, c = this.center, fx = this.g.fx;
+    const c = this.center, fx = this.g.fx;
     const endT = this.life, out = clamp((this.t - endT) / 0.25);
     this.mc.update(dt); this.mc.target = this.t < endT ? 1 : 0;
     for (const bar of this.bars) {
@@ -859,7 +859,7 @@ class TotemSpell extends Spell {
     this.base = this.add(new THREE.Mesh(bg, baseM)); this.base.userData.ownGeo = true; this.base.position.copy(this.at); this.base.castShadow = this.base.receiveShadow = true;
     this.cry = this.add(new THREE.Mesh(OCTA, cryM)); this.cry.castShadow = true;
     if (!solidKit(this)) { const sh = surfaceMaterial({ ...this.kit, opacity: 0.6 }, { spin: 1.5, twist: 1, bulge: 0.12 }); sh.uniforms.uTopFade.value = 0; this.shell = new THREE.Mesh(SMOOTH, sh); this.shell.scale.set(0.8, 0.55, 0.8); this.shell.renderOrder = 3; this.cry.add(this.shell); this.mats.push(sh); }
-    this.rings = [0, 1].map((i) => { const r = new THREE.Mesh(TORUS_GEO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.4, noiseAmp: 0.05, opacity: 0.85 })); this.add(r); return r; });
+    this.rings = [0, 1].map(() => { const r = new THREE.Mesh(TORUS_GEO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.4, noiseAmp: 0.05, opacity: 0.85 })); this.add(r); return r; });
     this.shards = [0, 1, 2].map(() => { const m = new THREE.Mesh(OCTA, cryM); this.add(m); return m; });
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: 2.2 * this.S, intensity: 1.2 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.at).y += 0.08; this.mc.spin = 0.5; this.add(this.mc.group);
@@ -900,7 +900,7 @@ class TotemSpell extends Spell {
   }
   update(dt) {
     this.t += dt;
-    const s = this.spec, fx = this.g.fx, at = this.at, S = this.S;
+    const fx = this.g.fx, at = this.at, S = this.S;
     const rise = easeOut(this.t / 0.4), out = clamp((this.t - this.life) / 0.5), k = rise * (1 - out);
     this.base.scale.set(S, Math.max(0.01, S * rise * (1 - out)), S);
     const hy = at.y + (2.4 + Math.sin(this.t * 2) * 0.15) * S + (1 - rise) * 5 - out * 1.5;
@@ -957,7 +957,7 @@ class MarkSpell extends Spell {
   where() { return this.target?.alive ? this.target.center() : this.point || this.lastPos; }
   update(dt) {
     this.t += dt; this.st += dt;
-    const s = this.spec, fx = this.g.fx, cam = this.g.camera;
+    const fx = this.g.fx, cam = this.g.camera;
     const p = this.where(); if (p) this.lastPos = p.clone();
     if (!p) { this.done = true; return false; }
     const gy = this.g.world.groundAt(p.x, p.z, p.y);
