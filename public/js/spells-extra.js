@@ -6,7 +6,8 @@ import { energyMaterial, crystalMaterial } from './shaders.js';
 import { kitOf, surfaceMaterial } from './vfxkit.js';
 import { stoneMaterial } from './world.js';
 import { MagicCircle } from './magicCircle.js';
-import { boltSpec } from './spellbook.js';
+import { boltSpec, generateIncantation } from './spellbook.js';
+import { getLang } from './i18n.js';
 import { Spell, registerShape, SPHERE_LO, OCTA, SMOOTH, COMET, TORUS_GEO, BLADE_GEO, coreMesh, escalateImpact } from './spells.js';
 import { rand, clamp, lerp, TAU } from './util.js';
 
@@ -331,7 +332,9 @@ class DecoySpell extends Spell {
       d.yaw = Math.atan2(-wish.x, -wish.z);
       const jump = d.jumpT <= 0; if (jump) d.jumpT = rand(1.5, 4);
       g.stepBody?.(d, dt, wish, 6.8, jump, false);
-      d.chanting = Math.sin(this.t * 1.3 + d.heading) > 0.6;
+      const chanting = Math.sin(this.t * 1.3 + d.heading) > 0.6;
+      if (chanting && !d.chanting) d.chantText = generateIncantation(this.rng, 0.2, this.el, ['orb', 'barrage', 'crescent', 'chain', 'beam'][Math.floor(this.rng() * 5)], getLang()); // a convincing mutter
+      d.chanting = chanting; if (!chanting) d.chantText = '';
       // the act: doubles loose harmless bolts at the nearest foe, like the real caster would
       d.shootT -= dt;
       if (d.shootT <= 0) {
