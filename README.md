@@ -18,18 +18,21 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
   - **halo** (円環): its blades intercept incoming shots
   - **sword** (大剣): at a high count, a ring of swords falls
   - **rush** (突進), **totem** (祭壇) and **mark** (刻印)
+  - The How-to page has a one-line guide for all 33 forms, and you get a warning when you are marked or trapped.
 - **Battle Royale**:
   - 4, 8 or 12 mages, solo or in duos with an AI ally, ride a floating sky ferry and jump when they like.
   - Loot element cores, relics and potions. Mesa tops hold extra relics, and a rare cache falls once per storm phase.
   - Mana shrines in every quarter restore mana and health, and named places are announced as you enter them. A marker shows where you'll land.
   - Survive a five-phase violet storm that ends in sudden death.
   - The radar only shows foes that are close or chanting. After you fall you can spectate, and a standings panel shows the results.
-  - Hold Tab for the live standings. The winner gets a victory lap with fireworks.
+  - Hold Tab for the live standings. The kill leader wears a crown. The winner gets a victory lap with fireworks and can press Enter to play again. A lifetime record appears on the setup screen.
+  - Duos: a fallen teammate leaves a soul wisp you can revive them from, and an ally panel tracks your partner.
+  - Relics include the Storm Cloak (half storm damage) and the Echo Charm (spells may echo). Aim at any relic to read what it does.
 - **Sound**:
   - Distance filtering: air absorption and a delay before far sounds arrive. Walls and ruins occlude sound, missiles and serpents whoosh past your head, and standing in the storm muffles the world.
   - A hall reverb and a voice budget, so dense fights stay clear. Per-element loudness is balanced.
-  - A choir under the chant, and music that ducks while you speak.
-  - Late storm phases bring rain. The music ducks while you speak, muffles near death, and presses on when three mages remain.
+  - A choir under the chant. Late storm phases bring rain.
+  - The music ducks while you speak, muffles near death, and presses on when three mages remain.
   - New effects: form sweeteners (whip crack, dragon roar, rune ticks, sword whistle, shatter), footsteps on grass or stone, landings, a heartbeat at low HP, a victory fanfare, kill-streak stings, a storm howl, and birds and wind.
 - **Game feel**: a damage-direction indicator around the crosshair, hit-stop on heavy hits, kill-streak banners, and example chants that rotate in the training grounds.
 - **Performance**: mage models use distance LOD down to a five-mesh impostor, so large lobbies stay smooth.
