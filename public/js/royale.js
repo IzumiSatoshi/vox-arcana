@@ -623,14 +623,16 @@ export class Royale {
     this.shrineSnd?.set(near ? near.pos.clone().setY(near.pos.y + 2.5) : null, near ? clamp(1 - near.pos.distanceTo(pl.pos) / 30) * 0.3 : 0); // a soft hum draws you in
     for (const S of this.shrines || []) {
       S.mc.update(dt); S.cry.rotation.y += dt * 1.2; S.cry.position.y = 2.6 + Math.sin(this.t * 1.5 + S.pos.x) * 0.2;
-      let n = 0;
+      let n = 0, mine = 0, foes = 0; const me = g.player;
       for (const c of g.combatants) {
         if (!c.alive || c.decoy || !c.inv || Math.hypot(c.pos.x - S.pos.x, c.pos.z - S.pos.z) > S.R || Math.abs(c.pos.y - S.pos.y) > 3) continue;
-        n++; c.mana = Math.min(c.maxMana, c.mana + dt * 22); c.heal(dt * 7);
+        n++; if (c === me || (me?.team && c.team === me.team)) mine++; else foes++; c.mana = Math.min(c.maxMana, c.mana + dt * 22); c.heal(dt * 7);
         if (Math.random() < 0.3) g.fx.glow.emit({ x: c.pos.x + rand(-0.4, 0.4), y: c.pos.y + 0.2, z: c.pos.z + rand(-0.4, 0.4), vy: rand(2, 3.5), life: 0.8, size: 0.14, size1: 0.02, color: new THREE.Color(0x9fe8ff), alpha: 1, drag: 0.4, frame: 1 });
       }
       if (n && !S.busy && g.player && Math.hypot(g.player.pos.x - S.pos.x, g.player.pos.z - S.pos.z) < S.R) { g.audio.shimmer?.(S.pos); g.hud.feed('<b style="color:#9fe8ff">✦ ' + t('royale.shrine') + '</b>'); }
       S.busy = n;
+      // who holds it: blue (you / your team), red (rivals), violet (contested), calm cyan (empty)
+      S.mc.setColor?.(mine && foes ? 0xc070ff : mine ? 0x4aa8ff : foes ? 0xff5a4a : 0x6fd8ff, 1.2);
       g.fx.lights.request?.(S.cry.position.clone().add(S.pos), new THREE.Color(0x6fd8ff), n ? 160 : 60, 10);
     }
   }
