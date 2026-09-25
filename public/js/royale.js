@@ -78,6 +78,7 @@ export class Royale {
     this.howl = game.audio.loop('darkness', new THREE.Vector3(), 0, null, { spin: 0.9 });
     this.windSnd = game.audio.loop('wind', null, 0, null, { spin: 0.5 });
     this.shrineSnd = game.audio.loop('light', new THREE.Vector3(), 0);
+    this.rainSnd = game.audio.loop('water', null, 0);
     // where you will land: a ring on the ground under you while you fall
     this.landMark = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.15, 40), new THREE.MeshBasicMaterial({ color: 0xffd46a, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
     this.landMark.rotation.x = -Math.PI / 2; this.landMark.renderOrder = 6; this.landMark.visible = false; game.scene.add(this.landMark);
@@ -384,6 +385,10 @@ export class Royale {
       if (reg !== this.region) { this.region = reg; const el = document.getElementById('br-region'); if (el) { el.textContent = reg; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); } }
     }
     const mt = g.audio.musicTrack; if (mt) { const want = !this.over && this.alive().length <= 3 ? 1.07 : 1; if (mt.playbackRate !== want) { mt.preservesPitch = true; mt.playbackRate = want; } } // the last few: the music presses on
+    // the late storm brings rain: streaks around the camera and a hiss that grows with the phase
+    const rain = this.over ? 0 : clamp((this.zone.phase - 1.5) / 2.5);
+    this.rainSnd?.set(null, rain * 0.35);
+    if (rain > 0) { const cp = g.camera.position, n = Math.round(rain * 22 * g.fx.quality); for (let k = 0; k < n; k++) { const x = cp.x + rand(-18, 18), z = cp.z + rand(-18, 18); g.fx.sparks.emit(x, cp.y + rand(4, 14), z, -2, -34, -1, 0.5, new THREE.Color(0xc8d8f0), 0, 0.12); } }
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
   alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
@@ -562,7 +567,7 @@ export class Royale {
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
     for (const c of this.g.combatants) c.onShip = false;
-    this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
+    this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop(); this.rainSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden');
