@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Ribbon, boltPoints } from './fx.js';
 import { MagicCircle } from './magicCircle.js';
 import { ELEMENTS, paletteFor } from './elements.js';
+import { weakenSpec } from './spellbook.js';
 import { applyHit } from './combat.js';
 import { rand, clamp, lerp, mulberry32, TAU, fbm, pick } from './util.js';
 
@@ -2800,6 +2801,10 @@ export class SpellSystem {
     if (!spec.basic && (spec.level ?? 1) >= 2) this.manifest(spec, caster);
     const s = new Cls(this, spec, caster, caster.getAim());
     this.active.push(s);
+    // Echo Charm (battle royale): the spell rings out again a moment later at half power
+    if (!spec.basic && !spec.echoed && caster.echo && Math.random() < caster.echo) {
+      setTimeout(() => { if (caster.alive && this.game.combatants.includes(caster)) { this.game.fx.ring(caster.pos.clone().setY(caster.pos.y + 0.2), paletteFor(spec.element).color, 3, 0.4); this.cast({ ...weakenSpec(spec, 0.5), echoed: true }, caster); } }, 650);
+    }
     return s;
   }
   // Greater: ground sigil + pillar of light around the caster. Ultimate: a full domain takeover of the sky.

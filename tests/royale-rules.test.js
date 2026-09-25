@@ -28,6 +28,7 @@ test('relics change the stats they promise', () => {
   grant(c, { type: 'relic', id: 'focus' }); assert.ok(Math.abs(c.costBonus - 0.88) < 1e-9);
   grant(c, { type: 'relic', id: 'crown' }); assert.ok(Math.abs(c.allDmg - 1.15) < 1e-9);
   grant(c, { type: 'relic', id: 'phoenix' }); assert.equal(c.relics.phoenix, 1);
+  grant(c, { type: 'relic', id: 'echo' }); grant(c, { type: 'relic', id: 'echo' }); grant(c, { type: 'relic', id: 'echo' }); assert.equal(c.echo, 0.6);
   assert.deepEqual(RARE_RELICS.sort(), ['crown', 'phoenix']);
   assert.ok(!COMMON_RELICS.some((k) => RARE_RELICS.includes(k)));
 });
