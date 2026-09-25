@@ -364,6 +364,7 @@ export class Royale {
       if (g.mouse.lmb && !this._lmb) this.nextSpectate(); this._lmb = g.mouse.lmb;
       if (this.deadT > 2.5) {
         let s = this.spec; if (!s?.alive) s = this.spec = this.alive().sort((a, b) => b.kills - a.kills)[0];
+        const lab = document.getElementById('br-spec'); if (lab) { lab.textContent = s ? '◉ ' + s.name + ' · ⚔ ' + s.kills : ''; lab.classList.toggle('hidden', !s || this.over); }
         if (s) { // over the shoulder, pulled in so walls and trees never block the view
           const f = s.forward(new THREE.Vector3()).setY(0).normalize(), head = s.pos.clone().setY(s.pos.y + 1.8), want = f.clone().multiplyScalar(-7).setY(2.4), L = want.length();
           const rc = g.world.raycast(head, want.clone().normalize(), L, 0.4), d = rc.hit ? Math.max(1.2, rc.dist - 0.6) : L;
@@ -564,7 +565,7 @@ export class Royale {
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
-    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
+    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }
