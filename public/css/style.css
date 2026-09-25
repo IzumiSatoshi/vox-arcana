@@ -247,3 +247,5 @@ body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-
 #br-results tr.me td { color: #7fd0ff; font-weight: 700; }
 #br-results tr.alive td:first-child { color: #9dff9a; }
 #br-results .brr-foot { margin-top: 8px; font-size: 11px; opacity: .65; letter-spacing: 1px; }
+
+.new-badge { font-style: normal; font-size: 9px; letter-spacing: 1.5px; padding: 1px 6px; margin-left: 6px; border-radius: 999px; color: #1a1020; background: linear-gradient(90deg, #ffd46a, #ff9ae0); box-shadow: 0 0 10px rgba(255, 180, 120, .6); vertical-align: 1px; }
