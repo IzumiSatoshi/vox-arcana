@@ -190,6 +190,13 @@ export class Hud {
     if (p.z > 1 || p.z < -1) return null;
     return { x: (p.x * 0.5 + 0.5) * innerWidth, y: (-p.y * 0.5 + 0.5) * innerHeight };
   }
+  // battle royale: show what the caster's relics add to this cast
+  bonusTag(spec, who) {
+    const c = who ? this.g.combatants.find((o) => o.name === who) : this.g.player;
+    if (!c?.affinity) return '';
+    const k = (1 + (c.affinity[spec.element] || 0)) * (c.allDmg || 1) - 1;
+    return k > 0.001 ? `<span class="sc-dmg" style="color:#ffd46a">+<b>${Math.round(k * 100)}%</b> ${t('relics')}</span>` : '';
+  }
   statusTags(c) {
     let s = '';
     if (c.frozen > 0) s += `<span class="status-tag" style="color:#9ff0ff">${t('st.frozen')}</span>`;
@@ -363,7 +370,7 @@ export class Hud {
     const box = $('sc-params');
     box.innerHTML = P.map(([k, v]) => `<div class="sp"><span class="sp-k">${t(k)}</span><span class="sp-n">${Math.round(v * 100)}</span><span class="pb"><i style="width:0"></i></span></div>`).join('');
     requestAnimationFrame(() => box.querySelectorAll('i').forEach((i, n) => (i.style.width = Math.round(P[n][1] * 100) + '%')));
-    $('sc-cost').innerHTML = `<span class="sc-mana"><b>${spec.cost}</b> ${t('mana')}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}`;
+    $('sc-cost').innerHTML = `<span class="sc-mana"><b>${spec.cost}</b> ${t('mana')}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}${this.bonusTag(spec, casterName)}`;
     this.cardTimer = this.g.mode === 'practice' && !casterName ? Infinity : 6;
   }
   banner(a, b, dur = 3) {
