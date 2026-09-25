@@ -45,9 +45,11 @@ const stormMat = () => new THREE.ShaderMaterial({
       float a=vUv.x*6.2832*18.0;
       float n=fbm3(vec3(vUv.x*60.0, vUv.y*6.0-uTime*0.6, uTime*0.15))*0.5+0.5;
       float streak=smoothstep(0.55,0.95,fbm3(vec3(vUv.x*140.0, vUv.y*1.5+uTime*0.9, 3.0))*0.5+0.5);
-      float low=1.0-smoothstep(0.0,0.55,vUv.y);
-      vec3 c=mix(uCol*0.55, uCol, n); c=mix(c, uHi, streak*0.7+low*0.25);
-      float al=(0.18+0.35*n+0.35*streak)*(0.35+0.65*low)*smoothstep(1.0,0.75,vUv.y);
+      float low=1.0-smoothstep(0.1,0.55,vUv.y);
+      float band=exp(-pow((vUv.y-0.135)/0.035,2.0)); // a seething glow where the wall meets the ground (the wall starts 20 m below it)
+      float bolt=smoothstep(0.93,0.99,fbm3(vec3(vUv.x*90.0, uTime*2.0, 7.0))*0.5+0.5)*low; // flickering veins of charge
+      vec3 c=mix(uCol*0.55, uCol, n); c=mix(c, uHi, clamp(streak*0.7+low*0.25+band*0.8+bolt,0.0,1.0));
+      float al=(0.22+0.33*n+0.45*streak+bolt)*(0.4+0.6*low)*smoothstep(1.0,0.6,vUv.y)+band*0.55;
       gl_FragColor=vec4(c, al);
     }`,
   transparent: true, depthWrite: false, side: THREE.DoubleSide,
