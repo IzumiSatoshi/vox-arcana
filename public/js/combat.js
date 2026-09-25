@@ -166,7 +166,7 @@ export function applyHit(game, target, hit) {
   if (!hit.dot && hit.src?.allDmg) mult *= hit.src.allDmg;
   if (hit.src?.enhP?.('poison') != null && !hit.dot && hit.src !== target) addDot(target, 'poison', 6 + 10 * hit.src.enhP('poison'), 4, hit.src);
   if (!hit.dot || hit.dotEl) mult *= target.incoming();
-  let dmg = Math.max(0, hit.dmg * mult);
+  let dmg = Math.max(0, hit.dmg * mult) * (target.fragile || 1); // decoys wear their owner's health bar
   if (hit.src && hit.src === target) dmg *= 0.35;
   let absorbed = 0;
   if (target.shield > 0 && !trueDmg) {
@@ -182,7 +182,8 @@ export function applyHit(game, target, hit) {
   }
   if (hit.knock && target.frozen <= 0) target.vel.add(hit.knock);
   if (hit.stun) target.stun = Math.max(target.stun, hit.stun);
-  const res = { dmg: dmg + absorbed, absorbed, reaction: finisher ? { name: finisher.name, color: finisher.color, combo: true } : reaction, chain: target.chain.n };
+  // report the nominal hit, so a decoy's numbers look real
+  const res = { dmg: (dmg + absorbed) / (target.fragile || 1), absorbed, reaction: finisher ? { name: finisher.name, color: finisher.color, combo: true } : reaction, chain: target.chain.n };
   game.onDamage(target, res, pos, el || hit.dotEl, hit);
   if (target.hp <= 0) { target.hp = 0; game.onDeath(target, hit.src); }
   return res;

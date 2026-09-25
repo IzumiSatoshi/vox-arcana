@@ -279,7 +279,9 @@ class DecoySpell extends Spell {
     for (let i = 0; i < n; i++) {
       if (!g.makeCombatant) break;
       const d = g.makeCombatant({ id: 'decoy' + ++DECOY_ID, name: c.name }, colors);
-      d.decoy = true; d.owner = c; d.maxHp = d.hp = 30 + 60 * clamp(s.power * 0.6 + s.tier * 0.4);
+      // the double shows its owner's health bar, but takes damage many times over (its real toughness is small)
+      const tough = 30 + 60 * clamp(s.power * 0.6 + s.tier * 0.4);
+      d.decoy = true; d.owner = c; d.maxHp = c.maxHp; d.hp = Math.max(1, c.hp); d.fragile = d.hp / tough; d.shield = c.shield;
       const off = (i - (n - 1) / 2) * 1.2;
       const f = c.forward(new THREE.Vector3()).setY(0).normalize(), r = new THREE.Vector3(-f.z, 0, f.x);
       d.pos.copy(c.pos).addScaledVector(r, off); d.pos.y = g.world.groundAt(d.pos.x, d.pos.z, c.pos.y + 1);
