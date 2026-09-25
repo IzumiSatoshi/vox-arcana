@@ -382,6 +382,7 @@ export class Royale {
       const reg = regionOf(g.world, p.pos.x, p.pos.z)[getLang() === 'ja' ? 1 : 0];
       if (reg !== this.region) { this.region = reg; const el = document.getElementById('br-region'); if (el) { el.textContent = reg; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); } }
     }
+    const mt = g.audio.musicTrack; if (mt) { const want = !this.over && this.alive().length <= 3 ? 1.07 : 1; if (mt.playbackRate !== want) { mt.preservesPitch = true; mt.playbackRate = want; } } // the last few: the music presses on
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
   alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
@@ -563,7 +564,7 @@ export class Royale {
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
-    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
+    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }
