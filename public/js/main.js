@@ -1013,7 +1013,8 @@ class Game {
       if (!c.model) continue;
       c.model.root.position.copy(c.pos);
       c.model.root.rotation.y = c.yaw;
-      const camD = c.pos.distanceTo(this.camera.position);
+      const eye = this.debugCam ? this.debugCam.pos : this.camera.position; // spectating renders from the observer camera
+      const camD = Array.isArray(eye) ? Math.hypot(c.pos.x - eye[0], c.pos.y - eye[1], c.pos.z - eye[2]) : c.pos.distanceTo(eye);
       c.model.lod?.(camD > 62 ? 3 : camD > 40 ? 2 : camD > 22 ? 1 : 0);
       if (c.hitFlash > 0) c.hitFlash = Math.max(0, c.hitFlash - dt * 5);
       c.model.update(dt, { hit: c.hitFlash || 0, speed: Math.hypot(c.vel.x, c.vel.z), chanting: c.chanting, pitch: c.pitch, frozen: c.frozen > 0, shield: c.shield, shieldEl: c.shieldEl, aura: c.aura?.el });
