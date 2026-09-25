@@ -2244,6 +2244,10 @@ class MissileSpell extends Spell {
   update(dt) {
     this.t += dt;
     this.missiles = this.missiles.filter((m) => m.update(dt));
+    if (!this.spec.basic && this.caster !== this.g.player) for (const m of this.missiles) { // near misses whoosh past your ear
+      if (!m.launched) continue; const d = m.pos.distanceTo(this.g.camera.position);
+      if (d < 3.5 && (m.camD ?? 99) >= 3.5) this.g.audio.passby?.(m.pos, this.m * 0.6); m.camD = d;
+    }
     const lead = this.missiles.find((m) => m.launched);
     if (lead) this.loopSnd?.set(lead.pos);
     this.updateCommon(dt);
