@@ -344,6 +344,7 @@ export class Royale {
       it.grp.position.set(it.pos.x, it.pos.y + bob, it.pos.z); it.body.rotation.y += dt * 1.6; it.body.rotation.x = Math.sin(this.t + it.seed) * 0.2;
       it.halo.position.set(it.pos.x, it.pos.y + 0.06, it.pos.z); it.halo.scale.setScalar(1 + Math.sin(this.t * 3 + it.seed) * 0.08);
       it.beam.position.set(it.pos.x, it.pos.y, it.pos.z);
+      if (Math.random() < 0.06) { const c = it.col || (it.col = new THREE.Color(this.colorOf(it.kind))), a = rand(0, TAU); g.fx.glow.emit({ x: it.pos.x + Math.cos(a) * 0.5, y: it.pos.y + 0.6, z: it.pos.z + Math.sin(a) * 0.5, vy: rand(0.6, 1.4), life: rand(0.8, 1.4), size: 0.12, size1: 0.02, color: c, alpha: 1, drag: 0.3, frame: 1 }); } // motes rising off the relic
       if (it.age < 0.6) continue;
       for (const c of g.combatants) {
         if (!c.alive || c.decoy || !c.inv || c.dropping) continue;
