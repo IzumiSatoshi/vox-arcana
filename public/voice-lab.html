@@ -10,7 +10,7 @@
 <pre id="capabilities">Checking browser…</pre>
 <label>Recognition <select id="engine"><option value="auto">Automatic (local if installed)</option><option value="browser">Browser service</option></select></label>
 <label><input id="warm" type="checkbox" checked> Prepare next cast</label>
-<label>Language <select id="language"><option value="en-US">English</option><option value="ja-JP">日本語</option></select></label>
+<label>Language <select id="language"></select></label>
 <div><button id="mic">Enable microphone</button><button id="sample">Run synthetic speech comparison</button><button id="stop">Stop capture</button></div>
 <button id="chant" disabled>Hold to chant (or hold F)</button>
 <p id="status">Idle</p><p id="transcript">No words yet</p>
@@ -19,11 +19,13 @@
 <p id="visual-state"></p><pre id="timings">No casts yet</pre>
 <script type="module">
 import { Voice } from './js/voice.js';
+import { VOICE_LANGUAGES } from './js/languages.js';
 import { smoothVoiceLevel } from './js/voice-feedback.js';
 import * as THREE from 'three';
 import { ViewModel, initViewEnv } from './js/characters.js';
 import { TIME } from './js/shaders.js';
 const $ = id => document.getElementById(id);
+$('language').replaceChildren(...Object.entries(VOICE_LANGUAGES).map(([code, name]) => new Option(name, code)));
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const out = { browser: navigator.userAgent, speechRecognition: !!SR, onDevice: !!SR && 'processLocally' in new SR() };
 if (out.onDevice && typeof SR.available === 'function') {

@@ -6,12 +6,12 @@ const main = readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf
 const book = readFileSync(new URL('../public/js/spellbook.js', import.meta.url), 'utf8');
 const builder = book.slice(book.indexOf('export function buildJevSpec'), book.indexOf('// Merge local + Jev')).replace('export ', '');
 const gameClass = main.slice(main.indexOf('class Game {'), main.indexOf('window.game = new Game();'));
-function setup(ask = async () => ({ok: false})) {
+function setup(ask = async () => ({ok: false}), now = () => 1000) {
   const context = vm.createContext({
     clamp: n => Math.max(0, Math.min(1,n)), ELEMENT_KEYS: ['arcane','fire','ice'], SHAPE_KEYS: ['orb','spear'], finalizeSpec: x => x,
     localParse: () => { throw new Error('Keyword parser must not run in Jev mode'); },
     buildSpec: () => { throw new Error('Hybrid builder must not run in Jev mode'); },
-    performance: {now:()=>1000}, askJev: ask, audio: {chantStart() {}, chantStop() {}, ui() {}}, t: x => x,
+    performance: {now}, askJev: ask, audio: {chantStart() {}, chantStop() {}, ui() {}}, t: x => x,
   });
   vm.runInContext(builder, context);
   const Game = vm.runInContext(gameClass+'; Game;', context);
@@ -88,21 +88,74 @@ test('newest valid magic is chosen by transcript order, not response order', asy
   replies[0](result);await Promise.resolve();
   assert.equal(g.spec.latestMagic.text,'second');
 });
-test('instant release freezes the newest completed magic and casts once', async () => {
+test('instant release cannot cast an earlier Jev answer without the last words', async () => {
   const replies=[];const {g}=setup(()=>new Promise(r=>replies.push(r)));startSpec(g);
   g.speculate('fire');replies[0](result);await Promise.resolve();
+  const win={ended:false,closed:false,text:'fire with ice'};
   g.chanting=true;g.voice.rec={};g.voice.chantText=()=> 'fire with ice';
-  g.voice.endChant=()=>({text:'fire with ice',win:{},loudness:0.4});g.voice.finishChant=()=>{};
-  g.endChant();assert.equal(g.cast.length,1);assert.equal(g.cast[0].text,'fire');
-  replies[1]({...result,params:{...result.params,element:'ice'}});await Promise.resolve();
-  assert.equal(g.cast.length,1);assert.equal(g.cast[0].element,'fire');
+  g.voice.endChant=()=>({text:win.text,win,loudness:0.4});g.voice.finishChant=()=>{};g.voice.textOf=w=>w.text;
+  g.endChant();assert.equal(g.cast.length,0);assert.ok(g.grace);
+  g.resolveVoiceGrace();assert.equal(g.cast.length,0);
+  win.ended=true;g.resolveVoiceGrace();assert.equal(g.cast.length,0);
+  replies[1]({...result,params:{...result.params,element:'ice'}});await new Promise(r=>setImmediate(r));
+  assert.equal(g.cast.length,1);assert.equal(g.cast[0].text,'fire with ice');assert.equal(g.cast[0].element,'ice');
 });
 test('superseded speculative replies cannot populate another chant', async () => {
   let reply;const {g}=setup(()=>new Promise(r=>reply=r));startSpec(g);g.speculate('old');
   startSpec(g);reply(result);await Promise.resolve();assert.equal(g.spec.latestMagic,null);
 });
-test('non-instant mode keeps throttling and exact-text casting', () => {
+test('non-instant mode sends throttled partial chants to Jev', () => {
   const calls=[];const {g}=setup(t=>{calls.push(t);return new Promise(()=>{});});startSpec(g);g.settings.instantCast=false;
   g.speculate('one');g.speculate('two');assert.deepEqual(calls,['one']);
   g.spec.latestMagic={text:'old',j:result};assert.equal(g.bestJev('two'),null);
+});
+test('non-instant mode activates the full chant instead of its earlier partial answer', async () => {
+  const calls=[];const {g}=setup(async text=>{calls.push(text);return result;});startSpec(g);g.settings.instantCast=false;
+  g.speculate('open your eyes');
+  await g.castIncantation('open your eyes fire tornado',{},null);
+  assert.deepEqual(calls,['open your eyes','open your eyes fire tornado']);
+  assert.equal(g.cast[0].text,'open your eyes fire tornado');
+});
+test('temporary failure of the latest speculative result retries exactly those words', async () => {
+  const calls=[];const {g}=setup(async text=>{calls.push(text);return result;});
+  const text='ウォーターフィールドを展開';
+  g.spec={pending:new Map([[text,Promise.resolve({ok:false,retryable:true})]])};
+  await g.castIncantation(text,{},null);
+  assert.deepEqual(calls,[text]);assert.equal(g.cast.length,1);assert.equal(g.cast[0].text,text);
+});
+test('temporary failures are retried once and cannot activate an older spell', async () => {
+  let calls=0;const {g}=setup(async()=>{calls++;return {ok:false,retryable:true};});
+  g.spec={map:new Map([['old',result]]),pending:new Map()};
+  await g.castIncantation('latest words',{},null);
+  assert.equal(calls,2);assert.equal(g.cast.length,0);assert.equal(g.outcome,'jev-error');
+});
+test('holding unchanged complete words retries a 503 and replaces the partial response with Instant Cast off', async () => {
+  let time=1000; const calls=[], replies=[], shown=[];
+  const {g}=setup(text=>{calls.push(text);return new Promise(r=>replies.push(r));},()=>time);
+  startSpec(g);g.settings.instantCast=false;
+  g.hud.jevPending=text=>shown.push(['pending',text]);
+  g.hud.jevFailure=text=>shown.push(['error',text]);
+  g.hud.jevReply=(_,text)=>shown.push(['reply',text]);
+  g.speculate('ファイヤートルネ');
+  time+=200;g.speculate('ファイヤートルネード');
+  replies[1]({ok:false,retryable:true,errorCode:'upstream_unavailable'});await Promise.resolve();
+  replies[0]({...result,raw:{}});await Promise.resolve();
+  assert.deepEqual(shown.at(-1),['error','ファイヤートルネード']);
+  time+=499;g.speculate('ファイヤートルネード');assert.equal(calls.length,2);
+  time+=1;g.speculate('ファイヤートルネード');assert.equal(calls.length,3);
+  replies[2]({...result,raw:{}});await Promise.resolve();
+  assert.deepEqual(shown.at(-1),['reply','ファイヤートルネード']);
+  time+=5000;g.speculate('ファイヤートルネード');assert.equal(calls.length,3);
+  await g.castIncantation('ファイヤートルネード',{},g.bestJev('ファイヤートルネード'));
+  assert.equal(g.cast[0].text,'ファイヤートルネード');
+});
+test('holding retries are bounded and rate limits do not trigger retry loops', async () => {
+  for (const retryable of [true,false]) {
+    let time=1000,calls=0;
+    const {g}=setup(async()=>{calls++;return {ok:false,retryable};},()=>time);
+    startSpec(g);g.settings.instantCast=false;
+    for(let i=0;i<10;i++){g.speculate('same words');await Promise.resolve();time+=2000;}
+    assert.equal(calls,retryable?3:1);
+    g.spec.closed=true;time+=10000;g.speculate('same words');assert.equal(calls,retryable?3:1);
+  }
 });

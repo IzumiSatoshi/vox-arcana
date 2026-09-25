@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 const main = readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf8');
-const method = main.slice(main.indexOf('  async loadLocalModel()'), main.indexOf('  noteJev(j)'));
+const method = main.slice(main.indexOf('  async loadLocalModel()'), main.indexOf('  jevError(j)'));
 function setup(response) {
   const nodes = { 'set-loadmodel': {disabled:false}, 'local-model-status': {textContent:''} };
   const context = vm.createContext({$: id => nodes[id], t:key=>key, fetch:async()=>response});

@@ -1,4 +1,7 @@
-// Tiny i18n layer: English / 日本語
+import { MORE_LOCALES } from './more-locales.js';
+import { uiLanguage } from './languages.js';
+
+// English is the fallback for game text that has not yet been translated.
 const DICT = {
   en: {
     'set.reload': 'Reload the page to apply graphics quality.',
@@ -36,12 +39,19 @@ const DICT = {
     'local.unloaded': 'Load once before casting. First use downloads model files; later loads use the disk cache.',
     'local.loading': 'Downloading / loading MiniLM… This can take several minutes on first use.',
     'local.ready': 'MiniLM ready. Chants run locally with no API fee.', 'local.error': 'Local model failed to load. Retry loading.',
-    'set.instantcast': 'Instant cast: release the latest interpreted spell',
+    'set.instantcast': 'Fast interpretation while chanting',
+    'chant.upstream_unavailable': 'Jev service is temporarily unavailable (upstream error). Please try again shortly.',
+    'chant.upstream_rate_limit': 'Jev provider rate limit reached. Please wait before trying again.',
+    'chant.rate_limit': 'Game API request limit reached (429). Please wait before trying again.',
+    'chant.timeout': 'Jev response timed out. Please try again shortly.',
+    'chant.network_error': 'Could not connect to the server. Check your connection and try again.',
+    'chant.service_error': 'Spell service error. Please try again shortly.',
     'chant.jevwait': 'Interpreting…', 'chant.jeverror': 'The model could not interpret this chant. Please try again.',
     'title.small': 'A Voice-Cast Duel', 'title.sub': 'Speak, and the world answers. Powered by <b>Jev</b>.',
     'menu.duel': '⚔ Duel the Archmage', 'menu.practice': '◎ Training Grounds', 'menu.howto': '❖ Grimoire (How to Cast)', 'menu.settings': '⚙ Settings',
     'back': 'Back', 'done': 'Done', 'close': 'Close',
     'set.title': 'Settings', 'set.ui': 'Language', 'set.voice': 'Voice recognition', 'set.diff': 'Rival difficulty', 'set.gfx': 'Graphics', 'set.cam': 'Camera', 'set.sens': 'Mouse sensitivity', 'set.chantsize': 'Chant text size', 'set.vol': 'Master volume', 'set.music': 'Music',
+    'set.voice.help': 'Click ▾ to browse, search for “Chinese”, or enter a code such as es-MX. Browser support varies.', 'set.voice.invalid': 'Enter a valid language code, such as es-MX.', 'set.ui.invalid': 'Choose an interface language from the list.',
     'set.localvoice': 'Experimental: prefer installed offline recognition', 'set.warmvoice': 'Prepare next recognition (microphone stays listening between casts)',
     'set.jev': 'Use selected model (off: keyword parser)', 'set.botjev': 'Rival also uses the selected model', 'set.botvoice': 'Rival speaks its chants aloud', 'set.handsfree': 'Hands-free casting (cast whenever you speak a spell)',
     'diff.easy': 'Apprentice', 'diff.normal': 'Archmage', 'diff.hard': 'Sage of Ruin', 'gfx.ultra': 'Ultra', 'gfx.high': 'High', 'gfx.perf': 'Performance', 'cam.tps': 'Third person (over the shoulder)', 'cam.fps': 'First person',
@@ -104,12 +114,19 @@ const DICT = {
     'local.unloaded': '詠唱前に読み込んでください。初回はモデルをダウンロードし、次回からキャッシュを使います。',
     'local.loading': 'MiniLM を準備中… 初回は数分かかる場合があります。',
     'local.ready': 'MiniLM 準備完了。詠唱はローカル処理・API料金なし。', 'local.error': '読み込みに失敗しました。再試行してください。',
-    'set.instantcast': '即時発動：モデルが解釈済みの最新の魔法を放つ',
+    'set.instantcast': '詠唱中に高速で解釈する',
+    'chant.upstream_unavailable': 'Jev側で一時的な障害が発生しています（上流サービスエラー）。少し待って再試行してください。',
+    'chant.upstream_rate_limit': 'Jev提供元のリクエスト上限に達しました。少し待って再試行してください。',
+    'chant.rate_limit': 'ゲームAPIのリクエスト上限に達しました（429）。少し待って再試行してください。',
+    'chant.timeout': 'Jevの応答がタイムアウトしました。少し待って再試行してください。',
+    'chant.network_error': 'サーバーに接続できませんでした。通信状態を確認して再試行してください。',
+    'chant.service_error': '詠唱サービスでエラーが発生しました。少し待って再試行してください。',
     'chant.jevwait': '詠唱を解釈中…', 'chant.jeverror': 'モデルが詠唱を解釈できませんでした。もう一度お試しください。',
     'title.small': '声で詠唱する魔法決闘', 'title.sub': '唱えよ、世界は応える。Powered by <b>Jev</b>',
     'menu.duel': '⚔ 大魔導師と決闘', 'menu.practice': '◎ 修練場', 'menu.howto': '❖ 魔導書（遊び方）', 'menu.settings': '⚙ 設定',
     'back': '戻る', 'done': '完了', 'close': '閉じる',
     'set.title': '設定', 'set.ui': '言語', 'set.voice': '音声認識の言語', 'set.diff': '対戦相手の強さ', 'set.gfx': 'グラフィック', 'set.cam': 'カメラ', 'set.sens': 'マウス感度', 'set.chantsize': '詠唱文字の大きさ', 'set.vol': '全体音量', 'set.music': '音楽',
+    'set.voice.help': '▾ から選ぶか、Chinese などで検索、または es-MX のような言語コードを入力。対応状況はブラウザーによって異なります。', 'set.voice.invalid': 'es-MX のような有効な言語コードを入力してください。', 'set.ui.invalid': '一覧から表示言語を選んでください。',
     'set.localvoice': '実験機能：導入済みのオフライン音声認識を優先', 'set.warmvoice': '次の音声認識を準備（詠唱の間もマイク認識を継続）',
     'set.jev': '選択したモデルで詠唱を解釈する', 'set.botjev': '相手も選択したモデルを使う', 'set.botvoice': '相手の詠唱を読み上げる', 'set.handsfree': 'ハンズフリー詠唱（呪文を話すと自動で発動）',
     'diff.easy': '見習い', 'diff.normal': '大魔導師', 'diff.hard': '破滅の賢者', 'gfx.ultra': '最高品質', 'gfx.high': '高品質', 'gfx.perf': 'パフォーマンス', 'cam.tps': '三人称（肩越し）', 'cam.fps': '一人称',
@@ -137,11 +154,12 @@ const DICT = {
     'bot.rival': '大魔導師レア', 'bot.hard': '破滅の賢者', 'bot.easy': '見習いリオ', 'bot.golem': '修練ゴーレム',
   },
 };
+Object.assign(DICT, MORE_LOCALES);
 
 let lang = 'en';
 export const getLang = () => lang;
 export function setLang(l) {
-  lang = DICT[l] ? l : 'en';
+  lang = uiLanguage(l);
   document.documentElement.lang = lang;
   document.body.classList.toggle('ja', lang === 'ja');
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });

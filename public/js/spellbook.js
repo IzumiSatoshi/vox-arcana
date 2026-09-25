@@ -151,11 +151,15 @@ export async function askJev(text, meta = {}) {
       body: JSON.stringify({ text, provider: meta.provider || 'jev', language: meta.language || 'en-US' }),
       signal: AbortSignal.timeout(7000),
     });
-    const j = await r.json();
-    if (!j.ok) return { ok: false, error: j.error, rtt: performance.now() - t0 };
+    // Firewall rate limits may return HTML, so inspect HTTP status before parsing JSON.
+    if (r.status === 429) return { ok: false, error: 'Request rate limit reached.', errorCode: 'rate_limit', retryable: false };
+    if (r.ok === false) return { ok: false, error: `HTTP ${r.status}`, errorCode: 'service_error', retryable: [502, 503, 504].includes(r.status) };
+    let j;
+    try { j = await r.json(); } catch { return { ok: false, error: 'Invalid server response.', errorCode: 'service_error', retryable: true }; }
+    if (!j.ok) return { ok: false, error: j.error, errorCode: j.errorCode || 'service_error', retryable: !!j.retryable, rtt: performance.now() - t0 };
     return { ok: true, params: j.params, raw: j.raw, latency: j.latency, cached: j.cached, model: j.model, provider: j.provider || 'jev', rtt: Math.round(performance.now() - t0) };
   } catch (e) {
-    return { ok: false, error: String(e.message || e), rtt: performance.now() - t0 };
+    return { ok: false, error: String(e.message || e), errorCode: e.name === 'TimeoutError' ? 'timeout' : 'network_error', retryable: true, rtt: performance.now() - t0 };
   }
 }
 

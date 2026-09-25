@@ -15,6 +15,8 @@ import { Voice } from './voice.js';
 import { voiceChargeFeedback } from './voice-feedback.js';
 import { audio } from './audio.js';
 import { t, setLang, getLang } from './i18n.js';
+import { UI_LANGUAGES, VOICE_LANGUAGES, uiLanguage, recognitionLanguage, defaultRecognitionLanguage } from './languages.js';
+import { bindLanguagePicker } from './language-picker.js';
 import { localParse, askJev, buildSpec, buildJevSpec, boltSpec, finalizeSpec } from './spellbook.js';
 import { ELEMENTS, SHAPES, ELEMENT_KEYS, elName, shapeName, reactName } from './elements.js';
 import { clamp, rand, TAU } from './util.js';
@@ -25,17 +27,20 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: (navigator.language || 'en').startsWith('ja') ? 'ja' : 'en', lang: '', diff: 'normal', quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: true, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
+const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
     const saved = JSON.parse(localStorage.getItem('voxarcana') || '{}');
     s = { ...DEFAULTS, ...saved };
+    // Apply the new rival default once; later manual opt-ins remain saved.
+    if (saved.botJevDefaultsVersion !== 1) { s.botJev = false; s.botJevDefaultsVersion = 1; saveSettings(s); }
     // The previous release enabled experimental speech paths for everyone.
     // Migrate once so existing users also return to direct microphone capture.
     if (saved.voiceDefaultsVersion !== 2) { s.localVoice = false; s.warmVoice = false; s.voiceDefaultsVersion = 2; saveSettings(s); }
   } catch { s = { ...DEFAULTS }; }
-  if (!s.lang) s.lang = s.ui === 'ja' ? 'ja-JP' : 'en-US';
+  s.ui = uiLanguage(s.ui);
+  s.lang = recognitionLanguage(s.lang) || recognitionLanguage(navigator.language) || defaultRecognitionLanguage(s.ui);
   return s;
 }
 function saveSettings(s) { try { localStorage.setItem('voxarcana', JSON.stringify(s)); } catch { /* private mode */ } }
@@ -178,10 +183,14 @@ class Game {
       $('local-model-status').textContent = error || this.localStatus?.error || t(`local.${this.localStatus?.phase || 'unloaded'}`);
     }
   }
+  jevError(j) {
+    const codes = ['rate_limit', 'upstream_rate_limit', 'upstream_unavailable', 'timeout', 'network_error', 'service_error'];
+    return t(codes.includes(j?.errorCode) ? `chant.${j.errorCode}` : 'chant.jeverror');
+  }
   noteJev(j) {
     if (!j) return;
     if (j.ok) { this.jevFails = 0; this.jevOnline = true; this.hud.jev('on', `${j.provider === 'local' ? 'MiniLM' : 'Jev'} · ${j.cached ? 'cached' : j.latency + 'ms'}`); }
-    else { this.jevFails++; this.hud.jev('off', t('jev.err')); if (this.jevFails >= 3) this.jevOnline = false; console.warn('Jev:', j.error); }
+    else { this.jevFails++; this.hud.jev('off', j.errorCode ? this.jevError(j) : t('jev.err')); if (this.jevFails >= 3) this.jevOnline = false; console.warn('Jev:', j.error); }
   }
 
   // ------------------------------------------------------------ combatants
@@ -363,25 +372,43 @@ class Game {
     const S = this.spec;
     if (!S || S.closed || !text || !this.settings.useJev) return;
     const now = performance.now();
-    if (text === S.lastText) return;
+    if (S.desiredText !== text) {
+      S.desiredText = text;
+      this.hud.jevPending?.(text, this.mode === 'practice');
+    }
+    // Deduplicate requests in flight, but do not permanently suppress failed words.
+    if (text === S.lastText && (!S.retry || S.retry.text !== text || now < S.retry.at)) return;
     if (!this.settings.instantCast && (now - S.lastSend < 160 || S.inflight >= 3)) return;
+    S.retry = null;
+    S.attempts ||= new Map();
+    const attempt = (S.attempts.get(text) || 0) + 1;
+    S.attempts.set(text, attempt);
     S.lastText = text; S.lastSend = now; S.inflight++;
+    this.hud.jevPending?.(text, this.mode === 'practice');
     const order = ++S.order;
     const promise = askJev(text, { provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang, chantSeconds: this.chantT, loudness: this.voice.peak });
     S.pending.set(text, promise);
     promise.then((j) => {
       S.inflight--;
       if (this.spec !== S || S.closed || this.paused || this.mode === 'menu') return;
-      this.noteJev(j);
-      if (!j.ok) return;
+      const current = text === S.desiredText;
+      if (current) this.noteJev(j);
+      if (!j.ok) {
+        if (current) {
+          // At most two retries while holding, with backoff; release still owns the final cast.
+          if (j.retryable && attempt < 3) S.retry = { text, at: performance.now() + 500 * 2 ** (attempt - 1) };
+          this.hud.jevFailure?.(text, this.mode === 'practice', this.jevError(j));
+        }
+        return;
+      }
       S.map.set(text, j);
-      if (j.raw && (!S.displayOrder || order > S.displayOrder)) {
+      if (current && j.raw && (!S.displayOrder || order > S.displayOrder)) {
         S.displayOrder = order;
         this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
       }
       if (!S.latest || order > S.latest.order) S.latest = { order, text, j };
       if (j.params?.isSpell >= 0.65 && (!S.latestMagic || order > S.latestMagic.order)) S.latestMagic = { order, text, j };
-      if (this.grace && this.settings.instantCast) this.resolveVoiceGrace();
+      if (this.grace) this.resolveVoiceGrace();
     });
   }
   bestJev(text) {
@@ -393,8 +420,7 @@ class Game {
     if (!text) return false;
     if (!this.settings.useJev) return localParse(text).isSpell >= 0.65;
     const parts = win?.chunks?.flat().filter(p => p.text) || [];
-    const j = this.bestJev(text);
-    return (j?.ok && j.params?.isSpell >= 0.65) || (parts.length > 0 && parts.every(p => p.final));
+    return parts.length > 0 && parts.every(p => p.final);
   }
   endChant() {
     if (!this.chanting) return;
@@ -402,12 +428,9 @@ class Game {
     if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
     const text = this.voice.chantText();
     this.speculate(text);
-    const magic = this.settings.useJev && this.settings.instantCast && this.spec?.latestMagic;
-    if (magic) {
-      const res = this.voice.endChant(); this.voice.finishChant(res.win); this.spec.closed = true;
-      void this.castIncantation(magic.text, res, magic.j); return;
-    }
-    const ready = this.readyToInterpret(text, this.voice.win);
+    // Jev must receive the recognizer's final words, including audio buffered at key release.
+    // stop() flushes the recognizer; onend follows its last result in normal browser operation.
+    const ready = !this.settings.useJev && this.readyToInterpret(text, this.voice.win);
     const res = this.voice.endChant({ waitForWords: !ready });
     if (ready) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
     // Missing or incomplete words: allow delayed spell words (a new press cancels instantly).
@@ -416,17 +439,12 @@ class Game {
   resolveVoiceGrace() {
     const g = this.grace;
     if (!g) return;
-    const magic = this.settings.useJev && this.settings.instantCast && this.spec?.latestMagic;
-    if (magic && !g.win?.closed) {
-      this.grace = null; this.voice.finishChant(g.win); this.spec.closed = true;
-      void this.castIncantation(magic.text, g.meta, magic.j); return;
-    }
     const text = this.voice.textOf(g.win);
     const ended = g.win?.ended || performance.now() > g.until;
     if (g.win?.closed || (ended && !text)) {
       this.voice.finishChant(g.win); this.grace = null;
       this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
-    } else if (text && (this.readyToInterpret(text, g.win) || ended)) {
+    } else if (text && (ended || (!this.settings.useJev && this.readyToInterpret(text, g.win)))) {
       this.grace = null; this.voice.finishChant(g.win);
       this.castIncantation(text, g.meta, this.bestJev(text));
     }
@@ -439,13 +457,19 @@ class Game {
       const token = this.pendingJevCast = {}, mode = this.mode;
       this.previewCost = 0; this.hud.preview(null);
       this.hud.chant(t('chant.jevwait'), '');
-      const j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, { ...meta, provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang }));
+      const request = { ...meta, provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang };
+      let j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, request));
+      // A failed speculative request is not a cached verdict. Retry transient failures for these exact words.
+      if (!j.ok && j.retryable && this.pendingJevCast === token && this.player === p && p.alive && !this.paused && this.mode === mode && this.settings.useJev) {
+        j = await askJev(text, request);
+      }
       if (this.pendingJevCast !== token || this.player !== p || !p.alive || this.paused || this.mode !== mode || this.mode === 'menu' || !this.settings.useJev) return;
       this.pendingJevCast = null; this.noteJev(j);
       if (j.raw) this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
+      else if (!j.ok) this.hud.jevFailure?.(text, this.mode === 'practice', this.jevError(j));
       spec = buildJevSpec(text, j, meta);
       if (!spec) {
-        this.voice.finishMetric(meta.win, 'jev-error'); this.hud.chant(t('chant.jeverror'), 'fizzle'); audio.ui('fizzle'); return;
+        this.voice.finishMetric(meta.win, 'jev-error'); this.hud.chant(this.jevError(j), 'fizzle'); audio.ui('fizzle'); return;
       }
     } else spec = buildSpec(text, localParse(text), null, meta);
     this.previewCost = 0;
@@ -674,9 +698,10 @@ class Game {
     this.fx.element(this.lastEl, p.center(), { count: 14, speed: 3, size: 0.3 });
   }
   applyLanguage(ui) {
-    this.settings.ui = ui; setLang(ui); saveSettings(this.settings);
+    this.settings.ui = uiLanguage(ui); setLang(this.settings.ui); saveSettings(this.settings);
     document.querySelectorAll('.lang-switch button').forEach((b) => b.classList.toggle('on', b.dataset.lang === ui));
-    $('set-ui').value = ui;
+    this.uiLanguagePicker?.setValue(this.settings.ui);
+    $('set-lang-help').textContent = t('set.voice.help');
     this.refreshJevLabels();
     if (this.voiceInit) $('menu-mic-message').textContent = t('menu.mic.ready');
     $('howto-elements').innerHTML = ELEMENT_KEYS.map((k) => `<span class="chip">${elChip(k)} ${elName(k)}</span>`).join('');
@@ -687,6 +712,17 @@ class Game {
   }
   bindMenus() {
     const s = this.settings;
+    this.uiLanguagePicker = bindLanguagePicker({
+      input: $('set-ui'), toggle: $('set-ui-toggle'), list: $('ui-language-list'),
+      languages: UI_LANGUAGES, value: s.ui, onSelect: ui => { this.applyLanguage(ui); void this.refreshVoiceDownload?.(); },
+      invalidMessage: () => t('set.ui.invalid'),
+    });
+    this.voiceLanguagePicker = bindLanguagePicker({
+      input: $('set-lang'), toggle: $('set-lang-toggle'), list: $('voice-language-list'),
+      languages: VOICE_LANGUAGES, value: s.lang, normalizeCustom: recognitionLanguage,
+      invalidMessage: () => t('set.voice.invalid'),
+      onSelect: language => { s.lang = language; saveSettings(s); this.voice.setLang(language); void this.refreshVoiceDownload?.(); },
+    });
     $('menu-enable-voice').addEventListener('click', () => { void this.enableVoice(); });
     $('menu-disable-voice').addEventListener('click', () => {
       this.voice.dispose(); this.voiceInit = false;
@@ -709,15 +745,13 @@ class Game {
     document.querySelectorAll('[data-back]').forEach((b) => b.addEventListener('click', () => { audio.ui('click'); this.showScreen(this.backTo || 'menu'); this.backTo = null; }));
     document.querySelectorAll('.lang-switch button').forEach((b) => b.addEventListener('click', () => {
       const ui = b.dataset.lang; this.applyLanguage(ui);
-      s.lang = ui === 'ja' ? 'ja-JP' : 'en-US'; $('set-lang').value = s.lang; this.voice.setLang(s.lang); saveSettings(s);
+      s.lang = defaultRecognitionLanguage(ui); this.voiceLanguagePicker.setValue(s.lang); this.voice.setLang(s.lang); saveSettings(s);
     }));
     const bind = (id, key, conv = (v) => v, prop = 'value', after) => {
       const el = $(id); el[prop] = s[key];
       el.addEventListener('change', () => { s[key] = conv(el[prop]); saveSettings(s); after?.(); });
       el.addEventListener('input', () => { s[key] = conv(el[prop]); after?.(); });
     };
-    bind('set-ui', 'ui', String, 'value', () => this.applyLanguage(s.ui));
-    bind('set-lang', 'lang', String, 'value', () => this.voice.setLang(s.lang));
     bind('set-diff', 'diff');
     bind('set-quality', 'quality', Number, 'value', () => { $('settings-reload').textContent = t('set.reload'); });
     bind('set-chantsize', 'chantSize', Number, 'value', () => {
@@ -751,7 +785,6 @@ class Game {
         if (this.voice.lang === lang) await this.voice.checkLocal();
       },
     });
-    for (const id of ['set-lang', 'set-ui']) $(id).addEventListener('change', this.refreshVoiceDownload);
     document.querySelectorAll('.lang-switch button').forEach(b => b.addEventListener('click', this.refreshVoiceDownload));
     audio.volume = s.vol; audio.musicVolume = s.music;
     this.applyLanguage(s.ui);
@@ -885,7 +918,7 @@ class Game {
         const local = text && !this.settings.useJev ? localParse(text) : null;
         this.speculate(text);
         const meta = { chantSeconds: this.chantT, loudness: this.voice.peak };
-        const magic = this.settings.instantCast ? this.spec?.latestMagic : null;
+        const magic = this.settings.instantCast && this.spec?.latestMagic?.text === text ? this.spec.latestMagic : null;
         const pv = this.settings.useJev ? buildJevSpec(magic?.text || text, magic?.j || this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
         this.hud.chant(text || '…', ''); this.hud.preview(pv); this.previewCost = pv?.cost || 0;
         const el = pv?.element || this.lastEl;

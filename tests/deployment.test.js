@@ -94,6 +94,8 @@ test('hosted spell calls use the budgeted gateway and hide provider errors', asy
     assert.equal(authorization, 'Bearer gateway-test-token');
     assert.equal(code, 200);
     assert.equal(data.ok, false);
+    assert.equal(data.errorCode, 'upstream_unavailable');
+    assert.equal(data.retryable, true);
     assert.equal(JSON.stringify(data).includes('upstream-private-error-marker'), false);
     await handler({ url: '/api/status', method: 'GET', headers: {} }, res);
     assert.equal(JSON.stringify(data).includes('upstream-private-error-marker'), false);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { Voice } from '../public/js/voice.js';
+import { uiLanguage, recognitionLanguage, defaultRecognitionLanguage } from '../public/js/languages.js';
 
 // Exercise the real Game methods without constructing its WebGL scene.
 const main = readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf8');
@@ -56,17 +57,37 @@ test('a chant held past the former circle fill still accepts words and casts on 
   assert.deepEqual(g.cast, ['summon fireball']);
   g.voice.dispose();
 });
+test('Jev waits for the flushed final word and casts the exact transcript', async () => {
+  const { g, rec } = await game();
+  g.settings.useJev = true;
+  const sent = [];
+  g.speculate = text => sent.push(text);
+  g.voice.onText = () => { if (g.grace) { g.speculate(g.voice.textOf(g.grace.win)); g.resolveVoiceGrace(); } };
+  rec.result('この大地に眠るし精霊たちよ 今そのなまなこを開け', true);
+  g.endChant();
+  assert.deepEqual(g.cast, []);
+  assert.equal(rec.stopped, true);
+  rec.result('この大地に眠るし精霊たちよ 今そのなまなこを開け ファイアートルネード', true);
+  g.resolveVoiceGrace();
+  assert.deepEqual(g.cast, []);
+  rec.onend(); g.resolveVoiceGrace();
+  assert.deepEqual(g.cast, ['この大地に眠るし精霊たちよ 今そのなまなこを開け ファイアートルネード']);
+  assert.ok(sent.includes('この大地に眠るし精霊たちよ 今そのなまなこを開け ファイアートルネード'));
+  g.voice.dispose();
+});
 test('silence eventually fizzles and cannot cast from later callbacks', async () => {
   const { g, rec, advance } = await game(); g.endChant(); advance(1801); g.resolveVoiceGrace();
   assert.equal(g.message, 'chant.silence'); assert.equal(g.grace, null);
   rec.result('fireball', true); g.resolveVoiceGrace(); assert.deepEqual(g.cast, []); g.voice.dispose();
 });
 test('old saved defaults migrate once while later explicit opt-ins persist', () => {
-  let stored = JSON.stringify({ localVoice: true, warmVoice: true, lang: 'ja-JP' });
+  let stored = JSON.stringify({ localVoice: true, warmVoice: true, botJev: true, lang: 'ja-JP' });
   const code = main.slice(main.indexOf('const DEFAULTS ='), main.indexOf('const REACTIONS ='));
-  const context = vm.createContext({ navigator: { language: 'ja-JP' }, localStorage: { getItem: () => stored, setItem: (key, value) => { stored = value; } } });
+  const context = vm.createContext({ navigator: { language: 'ja-JP' }, uiLanguage, recognitionLanguage, defaultRecognitionLanguage, localStorage: { getItem: () => stored, setItem: (key, value) => { stored = value; } } });
   const settings = vm.runInContext(code + '\nloadSettings();', context);
   assert.equal(settings.instantCast, false); assert.equal(settings.music, 0.175); assert.equal(settings.localVoice, false); assert.equal(settings.warmVoice, false); assert.equal(settings.lang, 'ja-JP');
-  stored = JSON.stringify({ ...settings, localVoice: true });
+  assert.equal(settings.botJev, false);
+  stored = JSON.stringify({ ...settings, localVoice: true, botJev: true });
   assert.equal(vm.runInContext('loadSettings()', context).localVoice, true);
+  assert.equal(vm.runInContext('loadSettings()', context).botJev, true);
 });

@@ -141,7 +141,7 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
     });
     const latency = Math.round(performance.now() - t0);
     const bodyText = await res.text();
-    if (!res.ok) throw new Error(`Jev HTTP ${res.status}: ${bodyText.slice(0, 300)}`);
+    if (!res.ok) throw Object.assign(new Error(`Jev HTTP ${res.status}: ${bodyText.slice(0, 300)}`), { upstreamStatus: res.status });
     const json = JSON.parse(bodyText);
     const answers = json.answers || json.decisions || json.output || {};
     const params = normalise(answers);
@@ -192,8 +192,14 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
       }
       const text = body.text.trim();
       if (!text) return sendJson(res, 400, { ok: false, error: 'empty incantation' });
-      const language = body.language || 'en-US';
-      if (!['en-US', 'en-GB', 'ja-JP'].includes(language)) return sendJson(res, 400, { ok: false, error: 'unsupported recognition language' });
+      let language;
+      try {
+        if (typeof body.language !== 'string' && body.language !== undefined) throw new Error('invalid language');
+        const requested = (body.language || 'en-US').trim();
+        if (!requested || requested.length > 35) throw new Error('invalid language');
+        language = Intl.getCanonicalLocales(requested)[0];
+        if (!/^[a-z]{2,3}(?:-|$)/i.test(language)) throw new Error('invalid language');
+      } catch { return sendJson(res, 400, { ok: false, error: 'invalid recognition language' }); }
       const provider = body.provider || 'jev';
       if (!['jev', 'local'].includes(provider)) return sendJson(res, 400, { ok: false, error: 'unknown spell provider' });
       if (provider === 'local') {
@@ -212,7 +218,11 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
       } catch (e) {
         jevState.lastError = String(e.message || e).slice(0, 300);
         console.warn('[jev error]', jevState.lastError);
-        return sendJson(res, 200, { ok: false, error: 'Spell interpretation is temporarily unavailable.' });
+        const retryable = /Jev HTTP (429|502|503|504)\b|timeout|timed out|fetch failed/i.test(jevState.lastError);
+        const errorCode = e.upstreamStatus === 429 ? 'upstream_rate_limit'
+          : [502, 503, 504].includes(e.upstreamStatus) ? 'upstream_unavailable'
+          : /timeout|timed out/i.test(jevState.lastError) ? 'timeout' : 'service_error';
+        return sendJson(res, 200, { ok: false, error: 'Spell interpretation is temporarily unavailable.', errorCode, retryable });
       }
     }
       return sendJson(res, 404, { ok: false, error: 'API route not found' });

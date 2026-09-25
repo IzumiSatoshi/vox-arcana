@@ -284,6 +284,17 @@ export class Hud {
     this.jrView(this.jrRaw);
     this.replyTimer = persistent ? Infinity : 6;
   }
+  jevPending(chant, persistent = false) {
+    this.jevFailure(chant, persistent, t('chant.jevwait'));
+  }
+  jevFailure(chant, persistent = false, message = t('chant.jeverror')) {
+    setText($('jr-chant'), `“${chant}”`);
+    setText($('jr-model'), '');
+    setText($('jr-readout'), message);
+    setText($('jr-json'), message);
+    $('jev-reply').classList.remove('hidden');
+    this.replyTimer = persistent ? Infinity : 6;
+  }
   // every Jev answer as one row: key, pick, confidence, and its top alternatives as a stacked probability strip
   jevReadout(raw) {
     const esc = (x) => String(x).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
