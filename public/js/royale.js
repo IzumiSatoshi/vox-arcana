@@ -164,6 +164,7 @@ export class Royale {
     S.grp.position.copy(S.pos); S.grp.rotation.y += dt * 0.05; S.ring.rotation.z += dt * 0.6; S.mc.update(dt);
     if (this.mast) { this.mast.rotation.y += dt * 0.8; this.mast.position.y = 5.2 + Math.sin(S.t * 1.6) * 0.3; }
     // bots leave when the ferry passes over where they want to land; everyone is out by the end of the line
+    if (k > 0.8 && !S.warned && this.g.player?.onShip) { S.warned = true; this.g.hud.banner('', t('royale.jumpSoon'), 2); this.g.audio.tick?.(null, 3); }
     for (const c of this.g.combatants) if (c.onShip && ((c.brain && k >= c.brain.jumpAt) || k >= 1)) this.jump(c);
     this.placeOnShip();
     if (Math.random() < 0.5) this.g.fx.glow.emit({ x: S.pos.x + rand(-8, 8), y: S.pos.y - 2, z: S.pos.z + rand(-8, 8), vy: -3, life: 1, size: 0.3, size1: 0.05, color: new THREE.Color(0xffd070), alpha: 1, drag: 0.2, frame: 1 });
