@@ -434,7 +434,7 @@ export class Royale {
     const g = this.g, box = document.getElementById('br-results'); if (!box) return;
     const mages = g.combatants.filter((c) => !c.decoy && c.inv).sort((a, b) => (a.alive ? 0 : a.place || 99) - (b.alive ? 0 : b.place || 99) || b.kills - a.kills);
     const rows = mages.map((c) => '<tr class="' + (c === g.player ? 'me' : '') + (c.alive ? ' alive' : '') + '"><td>' + (c.alive ? (this.over ? '♛' : '•') : '#' + c.place) + '</td><td>' + (c === g.player ? t('you') : c.name) + '</td><td>⚔ ' + c.kills + '</td><td class="by">' + (c.alive ? t(this.over ? 'royale.winner' : 'royale.alive') : c.killedBy ? '← ' + c.killedBy : t('royale.storm')) + '</td></tr>').join('');
-    box.innerHTML = '<div class="brr-head">' + t('royale.standings') + '</div><table>' + rows + '</table><div class="brr-foot">' + (this.over ? t('royale.back') : t('royale.spectate')) + '</div>';
+    box.innerHTML = '<div class="brr-head">' + t('royale.standings') + '</div><table>' + rows + '</table><div class="brr-foot">' + (this.over ? t('royale.back') : g.player?.alive ? t('royale.tabHint') : t('royale.spectate')) + '</div>';
     box.classList.remove('hidden');
   }
   nextSpectate() { const a = this.alive(); if (!a.length) return; const i = a.indexOf(this.spec); this.spec = a[(i + 1) % a.length]; }

@@ -692,11 +692,12 @@ class Game {
       if (e.code === 'KeyE') this.dashPlayer();
       if (e.code === 'KeyJ') this.hud.toggleJevView();
       if (this.royale && this.player && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.royale.drink(this.player, ['hp', 'mana', 'shield'][+e.code.slice(5) - 1]);
-      if (e.code === 'Tab') e.preventDefault();
+      if (e.code === 'Tab') { e.preventDefault(); if (this.royale && !this.royale.over) this.royale.showResults(); }
     });
     addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
       if (e.code === 'KeyF' || e.code === 'KeyV') this.endChant();
+      if (e.code === 'Tab' && this.royale && !this.royale.over && this.player?.alive) document.getElementById('br-results')?.classList.add('hidden'); // hold Tab: standings
     });
     canvas.addEventListener('mousedown', (e) => {
       if (this.mode === 'menu') return;
