@@ -262,3 +262,8 @@ body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-
 .form-chip small { display: block; opacity: .7; font-size: 11px; margin-top: 2px; }
 
 #br-spec { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); padding: 5px 16px; border-radius: 999px; background: rgba(12,10,22,.7); border: 1px solid rgba(240,213,146,.5); color: #fff4d6; font-weight: 700; letter-spacing: 2px; font-size: 14px; pointer-events: none; }
+
+#br-look { position: absolute; left: 50%; top: calc(50% + 46px); transform: translateX(-50%); text-align: center; pointer-events: none; opacity: 0; transition: opacity .15s; text-shadow: 0 1px 3px #000, 0 0 10px rgba(0,0,0,.7); }
+#br-look.show { opacity: 1; }
+#br-look b { display: block; font-size: 15px; letter-spacing: 1px; }
+#br-look span { display: block; font-size: 12px; color: #e8e2d4; opacity: .85; }

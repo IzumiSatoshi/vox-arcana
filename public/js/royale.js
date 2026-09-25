@@ -379,6 +379,13 @@ export class Royale {
       g.debugCam = { pos: [V.at.x + Math.cos(a) * r, V.at.y + 2.2 + V.t * 0.25, V.at.z + Math.sin(a) * r], target: [V.at.x, V.at.y + 1.3, V.at.z] };
       p.yaw = Math.atan2(p.pos.x - g.debugCam.pos[0], p.pos.z - g.debugCam.pos[2]) + Math.sin(V.t * 2) * 0.3; p.chanting = V.t % 3 < 1.5; // turn toward the lens, staff raised
     }
+    // look at a relic to read it
+    const lookEl = document.getElementById('br-look');
+    if (lookEl) {
+      let best = null, bd = 0.992;
+      if (p?.alive && !p.onShip) { const cp = g.camera.position, dir = g.camera.getWorldDirection(new THREE.Vector3()); for (const it of this.items) { const v = it.grp.position.clone().sub(cp), L = v.length(); if (L > 12) continue; const d = v.divideScalar(L).dot(dir); if (d > bd) { bd = d; best = it; } } }
+      if (best !== this.looked) { this.looked = best; lookEl.innerHTML = best ? '<b style="color:' + hex(this.colorOf(best.kind)) + '">' + this.itemName(best.kind) + '</b><span>' + this.itemDesc(best.kind) + '</span>' : ''; lookEl.classList.toggle('show', !!best); }
+    }
     // announce the place you walk into
     if (p?.alive && !p.onShip && !p.dropping) {
       const reg = regionOf(g.world, p.pos.x, p.pos.z)[getLang() === 'ja' ? 1 : 0];
@@ -570,7 +577,7 @@ export class Royale {
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop(); this.rainSnd?.stop();
     s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
-    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden');
+    document.body.classList.remove('storm-out'); this.g.audio.sfxMuffle?.(0); if (this.g.audio.musicTrack) this.g.audio.musicTrack.playbackRate = 1; document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden'); document.getElementById('br-look')?.classList.remove('show');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
   }
 }
