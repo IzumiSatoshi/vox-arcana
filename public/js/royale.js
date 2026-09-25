@@ -215,7 +215,8 @@ export class Royale {
     grp.add(body);
     const halo = new THREE.Mesh(RING, this.mat('ring' + key, () => new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })));
     const beam = new THREE.Mesh(BEAM, this.mat('beam' + key, () => flowMaterial({ color: new THREE.Color(col), core: 0xffffff, intensity: 1.4, scroll: -1.5, stripes: 2, opacity: 0.55 })));
-    beam.scale.set(1, kind.type === 'relic' ? 16 : 10, 1);
+    const rare = kind.type === 'relic' && PASSIVES[kind.id].rare;
+    beam.scale.set(rare ? 1.8 : 1, rare ? 30 : kind.type === 'relic' ? 16 : 10, rare ? 1.8 : 1); // rare relics shine a taller, wider column
     g.scene.add(grp, halo, beam);
     const it = { kind, grp, body, halo, beam, pos: pos.clone(), vel: pop ? new THREE.Vector3(rand(-4, 4), rand(5, 8), rand(-4, 4)) : null, seed: Math.random() * 10, age: 0 };
     this.items.push(it);
