@@ -41,10 +41,17 @@ export class AudioEngine {
     this.startMusic();
   }
   impulse(sec, decay) {
-    const ctx = this.ctx, len = ctx.sampleRate * sec, buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    // an open-air hall: sparse early reflections off the ruins, then a diffuse tail whose highs die first
+    const ctx = this.ctx, sr = ctx.sampleRate, len = Math.floor(sr * sec), buf = ctx.createBuffer(2, len, sr);
     for (let c = 0; c < 2; c++) {
       const d = buf.getChannelData(c);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay) * (i < 200 ? i / 200 : 1);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const u = i / len, a = 0.55 - 0.5 * Math.min(1, u * 1.6); // one-pole lowpass closing over time
+        lp += ((Math.random() * 2 - 1) - lp) * a;
+        d[i] = lp * Math.pow(1 - u, decay) * (i < 300 ? i / 300 : 1) * 0.9;
+      }
+      for (let k = 0; k < 9; k++) { const at = Math.floor(sr * (0.011 + k * 0.009 + Math.random() * 0.012 + c * 0.003)); if (at < len) d[at] += (Math.random() < 0.5 ? -1 : 1) * (0.7 - k * 0.06); }
     }
     return buf;
   }
@@ -56,6 +63,7 @@ export class AudioEngine {
     const l = this.ctx.listener, p = cam.position;
     const f = cam.getWorldDirection(this._f || (this._f = cam.position.clone()));
     const t = this.ctx.currentTime;
+    (this.lp ||= p.clone()).copy(p);
     if (l.positionX) {
       l.positionX.setTargetAtTime(p.x, t, 0.02); l.positionY.setTargetAtTime(p.y, t, 0.02); l.positionZ.setTargetAtTime(p.z, t, 0.02);
       l.forwardX.setTargetAtTime(f.x, t, 0.02); l.forwardY.setTargetAtTime(f.y, t, 0.02); l.forwardZ.setTargetAtTime(f.z, t, 0.02);
@@ -67,11 +75,19 @@ export class AudioEngine {
   out(pos, gain = 1, rev = 0.3) {
     const ctx = this.ctx, g = ctx.createGain(); g.gain.value = gain;
     let tail = g;
+    // air absorption: far sounds lose their top end and sit further back in the reverb
+    const dist = pos && this.lp ? Math.hypot(pos.x - this.lp.x, pos.y - this.lp.y, pos.z - this.lp.z) : 0;
+    if (dist > 14) {
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.5;
+      f.frequency.value = Math.max(900, 20000 * Math.exp(-(dist - 14) / 38));
+      g.connect(f); tail = f; rev *= 1 + Math.min(1.4, dist / 45);
+      if (dist > 30) { const dl = ctx.createDelay(0.5); dl.delayTime.value = Math.min(0.35, dist / 340); tail.connect(dl); tail = dl; } // sound arrives after the flash
+    }
     if (pos) {
       const pn = ctx.createPanner();
       pn.panningModel = 'HRTF'; pn.distanceModel = 'inverse'; pn.refDistance = 5; pn.maxDistance = 400; pn.rolloffFactor = 0.9;
       if (pn.positionX) { pn.positionX.value = pos.x; pn.positionY.value = pos.y; pn.positionZ.value = pos.z; } else pn.setPosition(pos.x, pos.y, pos.z);
-      g.connect(pn); tail = pn; g._panner = pn;
+      tail.connect(pn); tail = pn; g._panner = pn;
     }
     tail.connect(this.sfx);
     if (rev > 0) { const s = ctx.createGain(); s.gain.value = rev; tail.connect(s); s.connect(this.reverbIn); }
@@ -90,7 +106,10 @@ export class AudioEngine {
     this.mod = G ? { p: 1.35 - G.weight * 0.7, b: 0.55 + G.temperature * 0.5 + G.luminosity * 0.45, j: G.dispersion, grit: G.density } : null;
     try { fn(); } finally { this.mod = null; }
   }
+  busy(gain) { return this.voices > 220 && gain < 0.35; }
   noise(dest, { type = 'white', dur = 0.5, a = 0.005, gain = 0.5, f = 'lowpass', f0 = 2000, f1 = null, Q = 1, delay = 0, rate = 1 } = {}) {
+    if (this.busy(gain)) return null;
+    this.voices = (this.voices || 0) + 1;
     if (this.mod) { f0 *= this.mod.b; if (f1) f1 *= this.mod.b; delay += Math.random() * this.mod.j * 0.05; rate *= this.mod.p; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const src = ctx.createBufferSource(); src.buffer = this[type]; src.loop = true; src.playbackRate.value = rate;
@@ -98,18 +117,20 @@ export class AudioEngine {
     if (f1) fl.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const g = ctx.createGain(); this.env(g.gain, t, a, gain, dur);
     src.connect(fl); fl.connect(g); g.connect(dest);
-    src.onended = () => { src.disconnect(); fl.disconnect(); g.disconnect(); };
+    src.onended = () => { this.voices--; src.disconnect(); fl.disconnect(); g.disconnect(); };
     src.start(t, Math.random() * 1.5); src.stop(t + a + dur + 0.05);
     return fl;
   }
   tone(dest, { type = 'sine', f0 = 440, f1 = null, dur = 0.5, a = 0.005, gain = 0.3, delay = 0, detune = 0, curve = 'exp' } = {}) {
+    if (this.busy(gain)) return null;
+    this.voices = (this.voices || 0) + 1;
     if (this.mod) { f0 *= this.mod.p; if (f1) f1 *= this.mod.p; detune += (Math.random() - 0.5) * this.mod.j * 60; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const o = ctx.createOscillator(); o.type = type; o.detune.value = detune; o.frequency.setValueAtTime(f0, t);
     if (f1) curve === 'exp' ? o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur) : o.frequency.linearRampToValueAtTime(f1, t + dur);
     const g = ctx.createGain(); this.env(g.gain, t, a, gain, dur);
     o.connect(g); g.connect(dest);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
+    o.onended = () => { this.voices--; o.disconnect(); g.disconnect(); };
     o.start(t); o.stop(t + a + dur + 0.05);
     return o;
   }
@@ -272,9 +293,151 @@ export class AudioEngine {
     else if (kind === 'victory') [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 1.2, gain: 0.15, delay: i * 0.12 }));
     else if (kind === 'defeat') [392, 349, 311, 262].forEach((f, i) => this.tone(o, { type: 'sine', f0: f, dur: 1.2, gain: 0.18, delay: i * 0.25 }));
     else if (kind === 'weave') for (let i = 0; i < 4; i++) this.tone(o, { f0: 600 + i * 150, dur: 0.15, gain: 0.06, delay: i * 0.05 });
+    else if (kind === 'hover') this.tone(o, { type: 'sine', f0: 1320, f1: 1480, dur: 0.05, a: 0.002, gain: 0.06 });
   }
-  footstep() { if (!this.enabled) return; const o = this.out(null, 0.12, 0); this.noise(o, { type: 'brown', f0: rand(500, 800), dur: 0.08, gain: 0.8 }); }
+  footstep(stone = false, sprint = false) {
+    if (!this.enabled) return;
+    const o = this.out(null, sprint ? 0.16 : 0.12, 0.02);
+    this.noise(o, { type: 'brown', f0: rand(500, 800), dur: 0.08, gain: 0.8 });
+    if (stone) this.noise(o, { f: 'bandpass', f0: rand(2500, 3800), Q: 3, dur: 0.025, a: 0.001, gain: 0.35 });
+    else this.noise(o, { type: 'pink', f: 'highpass', f0: rand(3000, 5000), dur: 0.09, a: 0.01, gain: 0.3 });
+  }
   whoosh(m = 0.5) { if (!this.enabled) return; const o = this.out(null, 0.4, 0.1); this.noise(o, { type: 'pink', f: 'bandpass', f0: 500, f1: 2500, Q: 2, dur: 0.25 + m * 0.2, a: 0.03, gain: 1.2 }); }
+
+  // ---------------------------------------------------------------- form-specific sweeteners (new forms, items, storm)
+  // left-click mana bolt: a short tuned "pew" whose pitch and grit follow the element
+  bolt(el = 'arcane') {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.9, 0.12), f = BASE[el] || 294;
+    this.tone(o, { type: el === 'lightning' ? 'sawtooth' : 'triangle', f0: f * 4, f1: f * 1.5, dur: 0.12, a: 0.002, gain: 0.35 });
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 1800, f1: 600, Q: 2, dur: 0.1, a: 0.002, gain: 0.5 });
+    if (el === 'fire' || el === 'earth') this.noise(o, { type: 'brown', f0: 600, f1: 120, dur: 0.12, gain: 0.5 });
+  }
+  // whip crack: a supersonic snap (broadband click + ringing high partial) with a slap off the terrain
+  crack(m = 0.5, pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.9 + m * 0.3, 0.45);
+    this.noise(o, { f: 'highpass', f0: 1800, dur: 0.018, a: 0.0005, gain: 1.6 });
+    this.noise(o, { f: 'bandpass', f0: 4200, Q: 3, dur: 0.06, a: 0.001, gain: 0.8 });
+    this.tone(o, { type: 'square', f0: 2600, f1: 1200, dur: 0.05, a: 0.001, gain: 0.12 });
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 900, Q: 1, dur: 0.12, a: 0.001, gain: 0.5, delay: 0.07 }); // slap-back
+  }
+  // beast roar: a growling sawtooth through vocal formants, pitch sagging, with breath noise
+  roar(el = 'arcane', m = 0.5, pos = null) {
+    if (!this.enabled) return;
+    const ctx = this.ctx, o = this.out(pos, 0.7 + m * 0.4, 0.55), t = ctx.currentTime, L = 1.1 + m * 0.6;
+    const f0 = el === 'light' || el === 'ice' ? 150 : el === 'earth' || el === 'darkness' ? 62 : 95;
+    for (const [ff, q, gg] of [[480, 6, 0.9], [1050, 8, 0.5], [2400, 10, 0.25]]) {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = ff; bp.Q.value = q;
+      const g = ctx.createGain(); g.gain.value = gg; bp.connect(g); g.connect(o);
+      const d = this.distort(bp, 0.9);
+      const osc = this.tone(d, { type: 'sawtooth', f0: f0 * 1.3, f1: f0 * 0.7, dur: L, a: 0.08, gain: 0.5, curve: 'lin' });
+      if (osc) { const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 28; lg.gain.value = f0 * 0.12; lfo.connect(lg); lg.connect(osc.frequency); lfo.start(t); lfo.stop(t + L + 0.1); }
+      this.noise(bp, { type: 'pink', dur: L, a: 0.1, gain: 0.5, f: 'lowpass', f0: 3000 });
+    }
+    this.tone(o, { f0: 55, f1: 32, dur: L, a: 0.05, gain: 0.5 });
+  }
+  // mark heartbeat: a hollow tick that climbs in pitch as the rune nears detonation
+  tick(pos = null, n = 0) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.6, 0.35), f = 700 * Math.pow(1.12, n);
+    this.tone(o, { type: 'triangle', f0: f, dur: 0.12, a: 0.001, gain: 0.35 });
+    this.tone(o, { f0: f * 2.01, dur: 0.08, a: 0.001, gain: 0.12 });
+    this.tone(o, { f0: 90, f1: 50, dur: 0.14, a: 0.001, gain: 0.45 });
+  }
+  runeBurst(pos = null, m = 0.5) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.7 + m * 0.3, 0.6);
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 300, f1: 5000, Q: 2, dur: 0.18, a: 0.16, gain: 0.8 }); // inhale
+    [1, 1.5, 2, 3].forEach((r, i) => this.tone(o, { type: 'triangle', f0: 220 * r, dur: 1.2, a: 0.01, gain: 0.1, delay: 0.17 + i * 0.015 }));
+  }
+  // decoys / halo: glassy chimes that spread out in time
+  shimmer(pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.45, 0.7);
+    [1318, 1568, 1976, 2637, 2093].forEach((f, i) => this.tone(o, { f0: f, dur: 0.7, a: 0.004, gain: 0.07, delay: i * 0.045, detune: i % 2 ? 8 : -8 }));
+    this.noise(o, { f: 'highpass', f0: 5000, f1: 9000, dur: 0.5, a: 0.1, gain: 0.25 });
+  }
+  // a blade parrying a shot: inharmonic metal partials
+  clang(pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.6, 0.4);
+    for (const [r, g] of [[1, 0.25], [2.76, 0.16], [5.4, 0.1], [8.93, 0.06]]) this.tone(o, { f0: 620 * r, dur: 0.5 / Math.sqrt(r), a: 0.001, gain: g });
+    this.noise(o, { f: 'highpass', f0: 3000, dur: 0.03, a: 0.001, gain: 0.6 });
+  }
+  // the sword's plunge: a falling whistle that tightens toward impact
+  swordFall(pos = null, m = 0.5) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.7, 0.4);
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 500, f1: 3800, Q: 7, dur: 0.45, a: 0.3, gain: 1.3 });
+    this.tone(o, { f0: 400, f1: 1800, dur: 0.42, a: 0.3, gain: 0.08 });
+  }
+  shatter(pos = null, m = 0.5) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.6 + m * 0.3, 0.5);
+    for (let i = 0; i < 14; i++) { this.noise(o, { f: 'highpass', f0: rand(3000, 8000), dur: rand(0.02, 0.07), a: 0.001, gain: rand(0.2, 0.5), delay: rand(0, 0.25) }); this.tone(o, { f0: rand(2200, 5200), dur: rand(0.1, 0.3), a: 0.001, gain: 0.04, delay: rand(0, 0.3) }); }
+    this.noise(o, { type: 'brown', f0: 800, f1: 150, dur: 0.4, gain: 0.5 });
+  }
+  // rush: a sonic boom with a downward sweep
+  rushBoom(pos = null, m = 0.5) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.8, 0.35);
+    this.noise(o, { type: 'pink', f: 'lowpass', f0: 5000, f1: 200, dur: 0.6, a: 0.01, gain: 1.3 });
+    this.tone(o, { f0: 120, f1: 35, dur: 0.5, a: 0.005, gain: 0.8 });
+    this.noise(o, { f: 'highpass', f0: 2500, dur: 0.03, a: 0.001, gain: 0.8 });
+  }
+  // totem shot
+  zap(el = 'arcane', pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.45, 0.3), f = (BASE[el] || 294) * 3;
+    this.tone(o, { type: el === 'lightning' ? 'sawtooth' : 'triangle', f0: f * 1.8, f1: f * 0.6, dur: 0.14, a: 0.001, gain: 0.3 });
+    this.noise(o, { f: 'bandpass', f0: 2500, f1: 800, Q: 3, dur: 0.1, gain: 0.4 });
+  }
+  // loot: element cores ring bright, relics hum a deeper chord, potions pop their cork
+  pickup(type = 'core') {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.45, 0.35);
+    if (type === 'potion') { this.tone(o, { f0: 900, f1: 300, dur: 0.06, a: 0.001, gain: 0.4 }); this.noise(o, { f: 'bandpass', f0: 1500, Q: 2, dur: 0.05, gain: 0.5 }); [523, 784].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 0.25, gain: 0.1, delay: 0.06 + i * 0.07 })); }
+    else if (type === 'relic') { [196, 247, 294, 392].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 1.0, a: 0.02, gain: 0.1, delay: i * 0.05 })); this.shimmer(null); }
+    else [659, 784, 988, 1319].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 0.35, a: 0.003, gain: 0.13, delay: i * 0.055 }));
+  }
+  drink(id = 'hp', pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.5, 0.2);
+    for (let i = 0; i < 3; i++) { this.tone(o, { f0: rand(180, 260), f1: rand(420, 600), dur: 0.09, a: 0.004, gain: 0.3, delay: i * 0.16 }); this.noise(o, { type: 'pink', f: 'lowpass', f0: 700, dur: 0.1, gain: 0.35, delay: i * 0.16 }); }
+    const chord = id === 'hp' ? [523, 659, 784] : id === 'mana' ? [587, 740, 880] : [440, 554, 659];
+    chord.forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 0.6, a: 0.02, gain: 0.08, delay: 0.5 + i * 0.05 }));
+  }
+  // the storm advances: a low horn over rolling thunder
+  stormWarn() {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.55, 0.8);
+    for (const d of [-12, 0, 7]) this.tone(o, { type: 'sawtooth', f0: 73.4, dur: 2.2, a: 0.4, gain: 0.07, detune: d * 5 });
+    this.noise(o, { type: 'brown', f0: 400, f1: 60, dur: 2.5, a: 0.3, gain: 1.1 });
+  }
+  // landing thud + scuff (surface aware)
+  land(v = 0.5, stone = false) {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.2 + v * 0.3, 0.05);
+    this.tone(o, { f0: 110, f1: 45, dur: 0.15, a: 0.002, gain: 0.6 });
+    this.noise(o, { type: stone ? 'white' : 'pink', f: stone ? 'bandpass' : 'lowpass', f0: stone ? 2200 : 900, Q: 1, dur: 0.12, gain: 0.7 });
+  }
+  heartbeat() {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.5, 0);
+    this.tone(o, { f0: 62, f1: 40, dur: 0.14, a: 0.004, gain: 0.8 }); this.tone(o, { f0: 58, f1: 38, dur: 0.12, a: 0.004, gain: 0.55, delay: 0.2 });
+  }
+  shieldHit(pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 1.1, 0.4);
+    this.tone(o, { type: 'triangle', f0: 1760, f1: 1320, dur: 0.25, a: 0.001, gain: 0.18 }); this.tone(o, { f0: 2640, dur: 0.15, a: 0.001, gain: 0.07 });
+  }
+  elimination(pos = null) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.7, 0.7);
+    [784, 587, 440, 294].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 0.5, a: 0.005, gain: 0.12, delay: i * 0.07 }));
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 3000, f1: 300, Q: 2, dur: 0.8, a: 0.02, gain: 0.7 });
+  }
 
   // ---------------------------------------------------------------- looping sounds (beams, tornados, orbs in flight)
   // Sustained spell sound. opts.spin (0..1) adds a swept resonant howl (vortices), the look adds rumble, brightness
@@ -335,20 +498,27 @@ export class AudioEngine {
     const fl = ctx.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = 3000; fl.Q.value = 6;
     const ng = ctx.createGain(); ng.gain.value = 0.15;
     src.connect(fl); fl.connect(ng); ng.connect(o); src.start();
+    // a distant choir: detuned saws through "ah" vowel formants with a slow vibrato, swelling as the chant grows
+    const choirIn = ctx.createGain(); choirIn.gain.value = 0.0;
+    for (const [f, q, g] of [[760, 7, 1], [1150, 9, 0.6], [2600, 12, 0.25]]) { const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = q; const bg = ctx.createGain(); bg.gain.value = g; choirIn.connect(b); b.connect(bg); bg.connect(o); }
+    const vib = ctx.createOscillator(), vg = ctx.createGain(); vib.frequency.value = 5.2; vg.gain.value = 4; vib.connect(vg); vib.start();
+    const choir = [1, 1.5, 2].flatMap((r) => [-9, 9].map((dt) => { const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = (BASE[el] || 200) * r; osc.detune.value = dt; vg.connect(osc.detune); osc.connect(choirIn); osc.start(); osc.r = r; return osc; }));
     o.gain.setTargetAtTime(0.5, ctx.currentTime, 0.2);
-    this.chant = { o, oscs, src, fl, el };
+    this.chant = { o, oscs, src, fl, el, choir, choirIn, vib };
   }
   chantUpdate(progress, el) {
     const c = this.chant; if (!c) return;
     const t = this.ctx.currentTime, base = BASE[el] || 200;
     c.oscs.forEach((osc, i) => osc.frequency.setTargetAtTime(base * Math.pow(2, ([0, 7, 12][i] + progress * 12) / 12), t, 0.3));
     c.fl.frequency.setTargetAtTime(2000 + progress * 6000, t, 0.2);
+    c.choir.forEach((osc) => osc.frequency.setTargetAtTime(base * osc.r * Math.pow(2, (progress * 7) / 12), t, 0.4));
+    c.choirIn.gain.setTargetAtTime(0.012 + progress * 0.05, t, 0.4);
     c.o.gain.setTargetAtTime(0.35 + progress * 0.5, t, 0.2);
   }
   chantStop() {
     const c = this.chant; if (!c) return; this.chant = null;
     const t = this.ctx.currentTime; c.o.gain.setTargetAtTime(0, t, 0.1);
-    c.oscs.forEach((o) => o.stop(t + 0.6)); c.src.stop(t + 0.6);
+    c.oscs.forEach((o) => o.stop(t + 0.6)); c.src.stop(t + 0.6); c.choir.forEach((o) => o.stop(t + 0.6)); c.vib.stop(t + 0.6);
   }
 
   // ---------------------------------------------------------------- ambience + background music
@@ -371,7 +541,27 @@ export class AudioEngine {
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07; const lg = ctx.createGain(); lg.gain.value = 250;
     lfo.connect(lg); lg.connect(fl.frequency); lfo.start();
     src.connect(fl); fl.connect(g); g.connect(this.master); src.start();
-
+    // living meadow: songbird phrases from random directions and slow wind gusts through the grass
+    this.amb = { on: true };
+    setInterval(() => {
+      if (!this.amb.on || ctx.state !== 'running') return;
+      if (Math.random() < 0.22) this.bird();
+      if (Math.random() < 0.12) this.gust();
+    }, 1000);
+  }
+  ambience(on) { if (this.amb) this.amb.on = on; }
+  bird() {
+    const L = this.lp, pos = L ? { x: L.x + rand(-40, 40), y: L.y + rand(4, 12), z: L.z + rand(-40, 40) } : null;
+    const o = this.out(pos, 0.05, 0.3), base = rand(2600, 4200), n = 2 + Math.floor(Math.random() * 5), kind = Math.random();
+    for (let i = 0; i < n; i++) {
+      const d = i * rand(0.09, 0.16);
+      if (kind < 0.5) this.tone(o, { f0: base * rand(0.9, 1.1), f1: base * rand(1.2, 1.5), dur: rand(0.05, 0.09), a: 0.005, gain: 0.5, delay: d });
+      else this.tone(o, { f0: base * 1.3, f1: base * 0.8, dur: rand(0.08, 0.14), a: 0.01, gain: 0.45, delay: d });
+    }
+  }
+  gust() {
+    const o = this.out(null, 0.05, 0.1);
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: rand(300, 500), f1: rand(700, 1300), Q: 0.8, dur: rand(2, 3.5), a: rand(0.8, 1.5), gain: 1.2 });
   }
 }
 export const audio = new AudioEngine();

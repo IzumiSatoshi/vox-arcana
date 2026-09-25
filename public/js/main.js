@@ -303,6 +303,7 @@ class Game {
     for (const s of ['menu', 'settings', 'howto', 'pause', 'duel-setup']) $(s).classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
+    audio.ambience?.(!this.paused);
     if (this.paused || this.mode === 'menu') {
       this.pendingJevCast = null;
       this.grace = null; this.chanting = false;
@@ -520,7 +521,7 @@ class Game {
     const spec = boltSpec(this.lastEl);
     this.spells.cast(spec, p);
     this.viewModel.flick = 1;
-    audio.cast(this.lastEl, 0.1, null);
+    audio.bolt(this.lastEl);
   }
 
   // ------------------------------------------------------------ combat hooks
@@ -531,6 +532,7 @@ class Game {
     if (c !== this.player && this.hud.cardTimer < 3 && !spec.basic) this.hud.spellCard(spec, c.name);
   }
   onDamage(target, res, pos, el, hit) {
+    if (res.absorbed > 1 && performance.now() - (this._shT || 0) > 120) { this._shT = performance.now(); audio.shieldHit(pos); }
     if (res.dmg < 0.5 && !res.reaction) return;
     this.hud.damage(pos, res.dmg, el, res.reaction);
     if (target === this.player) {
@@ -621,6 +623,7 @@ class Game {
     if (!target.alive) return;
     if (target.decoy) { target.alive = false; return; } // an illusion: its spell pops it
     target.alive = false; target.deaths++; if (killer && killer !== target) killer.kills++;
+    if (target !== this.player) audio.elimination(target.center());
     target.chanting = false;
     const c = target.center();
     this.fx.explosion('arcane', c, 3, 1, null, {});
@@ -741,6 +744,7 @@ class Game {
       $('menu-meter-fill').style.width = '0%';
       $('menu-mic-message').textContent = t('menu.mic.permission');
     });
+    document.querySelectorAll('.mode-card, .btn').forEach((b) => b.addEventListener('mouseenter', () => audio.ui('hover')));
     document.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => {
       audio.init(); audio.ui('click');
       const a = b.dataset.action;
@@ -896,7 +900,11 @@ class Game {
       const sprint = this.keys.ShiftLeft && p.stamina > 1 && !this.chanting;
       if (sprint && wish.lengthSq()) p.stamina -= dt * 18;
       const speed = (sprint ? 10.5 : 7) * (this.chanting || this.channel ? 0.6 : 1);
+      const fallV = p.vel.y, wasGrounded = p.grounded;
       if (p.alive) this.stepBody(p, dt, wish, speed, this.keys.Space, this.keys.Space, this.keys.ControlLeft || this.keys.KeyC);
+      const onStone = Math.hypot(p.pos.x, p.pos.z) < 10.5 || p.pos.y - this.world.heightAt(p.pos.x, p.pos.z) > 0.25;
+      if (!wasGrounded && p.grounded && fallV < -5) audio.land(clamp(-fallV / 22), onStone);
+      if (p.alive && p.hp < p.maxHp * 0.3) { this.beatT = (this.beatT || 0) - dt; if (this.beatT <= 0) { this.beatT = 0.55 + (p.hp / p.maxHp) * 1.5; audio.heartbeat(); } }
       p.updateStatus(dt, this);
       // camera + subtle head bob / strafe roll
       const eye = p.eye(new THREE.Vector3());
@@ -960,7 +968,7 @@ class Game {
       if (this.mouse.lmb) this.fireBolt();
       this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded, voiceLevel: this.chanting ? this.voice.level : 0 });
       this.viewModel.group.visible = p.alive;
-      if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(); } }
+      if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(onStone, sprint); } }
     }
     for (const b of this.bots) {
       const out = b.brain.update(dt);
