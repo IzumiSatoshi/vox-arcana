@@ -93,6 +93,7 @@ export class Hud {
     if (this.mmBg) { const s = (2 * this.mmR * scale); g.drawImage(this.mmBg, -p.pos.x * scale - s / 2, -p.pos.z * scale - s / 2, s, s); }
     // threats (area spells)
     for (const th of this.g.spells.threatsFor(p)) if (th.area) { g.strokeStyle = 'rgba(255,90,90,0.9)'; g.lineWidth = 2; g.beginPath(); g.arc((th.pos.x - p.pos.x) * scale, (th.pos.z - p.pos.z) * scale, th.radius * scale, 0, TAU); g.stroke(); }
+    this.g.royale?.drawMinimap(g, p, scale);
     for (const c of this.g.combatants) {
       if (c === p || !c.alive) continue;
       const x = (c.pos.x - p.pos.x) * scale, y = (c.pos.z - p.pos.z) * scale;

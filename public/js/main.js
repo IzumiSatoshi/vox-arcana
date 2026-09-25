@@ -7,6 +7,7 @@ import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
 import './spells-extra.js';
+import { Royale } from './royale.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
 import { MagicCircle } from './magicCircle.js';
@@ -213,6 +214,7 @@ class Game {
     this.voice?.cancelChant(); this.grace = null; this.chanting = false;
     audio.chantStop();
     this.spells.clear();
+    this.royale?.dispose(); this.royale = null; this.debugCam = null;
     for (const c of [...this.combatants]) this.removeCombatant(c);
     this.bots = []; this.player = null;
     speechSynthesis?.cancel();
@@ -278,9 +280,11 @@ class Game {
       this.spawnAt(d, Math.PI * 1.5, 14);
       this.hud.round(t('round.train'));
       this.hud.banner(t('ban.train'), t('ban.train2'), 2.5);
+    } else if (mode === 'royale') {
+      this.royale = new Royale(this); this.royale.start();
     }
     this.hud.show(true); this.hud.setEl('arcane'); this.viewModel.setElement('arcane');
-    this.hud.hint('hint.chant'); this.hud.chant('', ''); this.hud.preview(null);
+    this.hud.hint(mode === 'royale' ? 'hint.royale' : 'hint.chant'); this.hud.chant('', ''); this.hud.preview(null);
     this.showScreen(null);
     // Match entry is a user gesture, so request microphone access here for both modes.
     void this.enableVoice();
@@ -639,6 +643,8 @@ class Game {
         this.roundOver = false;
         this.hud.round(t('round', { n: this.score.me + this.score.foe + 1, a: this.score.me, b: this.score.foe }));
       }, 4500);
+    } else if (this.mode === 'royale') {
+      this.royale?.onDeath(target, killer);
     } else if (this.mode === 'practice' && target !== this.player) {
       setTimeout(() => { if (this.mode === 'practice' && this.combatants.includes(target)) this.spawnAt(target, rand(0, TAU), 14); }, 2000);
     } else if (this.mode === 'practice' && target === this.player) {
@@ -664,6 +670,7 @@ class Game {
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
       if (e.code === 'KeyE') this.dashPlayer();
       if (e.code === 'KeyJ') this.hud.toggleJevView();
+      if (this.royale && this.player && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.royale.drink(this.player, ['hp', 'mana', 'shield'][+e.code.slice(5) - 1]);
       if (e.code === 'Tab') e.preventDefault();
     });
     addEventListener('keyup', (e) => {
@@ -740,6 +747,7 @@ class Game {
       if (a === 'duel') { this.backTo = 'menu'; this.showScreen('duel-setup'); }
       else if (a === 'begin-duel') this.startMode('duel');
       else if (a === 'practice') this.startMode('practice');
+      else if (a === 'royale') this.startMode('royale');
       else if (a === 'howto') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('howto'); }
       else if (a === 'settings') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('settings'); }
       else if (a === 'resume') { this.showScreen(null); this.lock(); }
@@ -796,14 +804,16 @@ class Game {
   // ------------------------------------------------------------ physics
   stepBody(c, dt, wish, speed, jump, glide, descend = false) {
     const mm = c.moveMult() * (c.haste > 0 ? 1.35 : 1) * (c.channeling ? 0.5 : 1);
-    const fly = c.flying > 0;
-    const k = Math.min(1, (c.grounded || fly ? 11 : 2.5) * dt);
+    const fly = c.flying > 0, drop = c.dropping;
+    if (drop) speed *= 2;
+    const k = Math.min(1, (c.grounded || fly ? 11 : drop ? 3.5 : 2.5) * dt);
     c.vel.x += (wish.x * speed * mm * (fly ? 1.3 : 1) - c.vel.x) * k;
     c.vel.z += (wish.z * speed * mm * (fly ? 1.3 : 1) - c.vel.z) * k;
     if (fly) { const vy = jump ? 7 : descend ? -7 : 0; c.vel.y += (vy - c.vel.y) * Math.min(1, dt * 5); if (c.pos.y > 40) c.vel.y = Math.min(c.vel.y, 0); }
     else {
       c.vel.y -= 24 * dt;
-      if (glide && c.vel.y < -2.2) c.vel.y = -2.2;
+      if (drop) c.vel.y = Math.max(c.vel.y, glide ? -7 : -22); // battle royale descent: steer the fall, Space slows it
+      else if (glide && c.vel.y < -2.2) c.vel.y = -2.2;
       if (jump && c.grounded && c.canAct()) { c.vel.y = 8.5; c.grounded = false; }
     }
     const prevY = c.pos.y, prevX = c.pos.x, prevZ = c.pos.z;
@@ -975,6 +985,7 @@ class Game {
       }
     }
     this.spells.update(dt);
+    this.royale?.update(dt);
     this.fx.update(dt);
     this.world.update(dt, this.fx, this.camera, this.combatants);
     this.hud.update(raw, this.camera);

@@ -48,6 +48,14 @@ export class BotBrain {
       this.aimDir.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), c.yaw); this.aimPoint.copy(c.pos).addScaledVector(this.aimDir, 10);
       return { wish, jump };
     }
+    const R = this.royale;
+    if (c.dropping || (!tgt && R)) { // battle royale: steer the drop, loot, keep ahead of the storm
+      const to = R ? R.roamTarget(c).clone().sub(c.pos).setY(0) : new THREE.Vector3();
+      if (to.lengthSq() > 1) wish.copy(to.normalize());
+      if (!c.dropping) { const d = wish.lengthSq() ? wish : this.aimDir; c.yaw = Math.atan2(-d.x, -d.z); c.pitch = 0; }
+      this.jumpT -= dt; if (!c.dropping && this.jumpT <= 0) { jump = true; this.jumpT = rand(2.5, 6); }
+      return { wish, jump: c.dropping ? false : jump, speed: this.d.speed * 1.1 };
+    }
     if (!tgt) return { wish, jump };
     // ---------- aim with lead + inaccuracy
     const tc = tgt.center();
@@ -66,8 +74,9 @@ export class BotBrain {
     const pref = this.chant ? 22 : 18;
     wish.addScaledVector(to, flatD > pref + 4 ? 1 : flatD < pref - 5 ? -1 : 0);
     wish.addScaledVector(side, this.strafe * (this.chant ? 0.5 : 1));
-    // keep inside the arena
+    // keep inside the arena (and the storm)
     if (Math.hypot(c.pos.x, c.pos.z) > 95) wish.addScaledVector(c.pos.clone().setY(0).normalize(), -1.5);
+    if (R && !R.inZone(c.pos, -3)) wish.add(new THREE.Vector3(R.zone.cx - c.pos.x, 0, R.zone.cz - c.pos.z).normalize().multiplyScalar(2));
     // steer along cliff faces instead of grinding into them
     if (wish.lengthSq() > 0.01) {
       const w = wish.clone().normalize(), H = (x, z) => g.world.heightAt(x, z), top = c.pos.y + 0.7;

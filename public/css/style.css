@@ -224,3 +224,16 @@ h1 { font-family: 'Cinzel', serif; font-weight: 900; font-size: clamp(48px, 9vw,
 #hud::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 transparent; transition: box-shadow 0.4s; }
 body.overcharge #hud::after { box-shadow: inset 0 0 140px color-mix(in srgb, var(--el) 70%, transparent); animation: overcharge 0.8s ease-in-out infinite alternate; }
 @keyframes overcharge { to { box-shadow: inset 0 0 200px color-mix(in srgb, var(--el) 90%, transparent); } }
+
+/* ---------------- battle royale */
+#br-inv { position: absolute; right: 22px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+.br-pots { display: flex; gap: 6px; }
+.br-pot { position: relative; width: 50px; height: 50px; border-radius: 10px; background: linear-gradient(160deg, rgba(20,16,30,.78), rgba(10,8,16,.86)); border: 1px solid color-mix(in srgb, var(--c) 70%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 40%, transparent), inset 0 0 10px rgba(0,0,0,.6); display: grid; place-items: center; font-size: 22px; color: var(--c); text-shadow: 0 0 8px var(--c); }
+.br-pot.empty { opacity: .35; filter: grayscale(.7); }
+.br-pot kbd { position: absolute; top: 2px; left: 5px; font: 700 10px/1 var(--f-title, sans-serif); color: #f0d592; text-shadow: 0 1px 2px #000; }
+.br-pot b { position: absolute; bottom: 2px; right: 6px; font-size: 13px; color: #fff; text-shadow: 0 1px 3px #000; }
+.br-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 300px; }
+.br-chip { padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: color-mix(in srgb, var(--c) 30%, rgba(10,8,16,.8)); border: 1px solid color-mix(in srgb, var(--c) 80%, transparent); text-shadow: 0 1px 2px #000; }
+#storm-vignette { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .4s; background: radial-gradient(ellipse at center, transparent 45%, rgba(140, 40, 255, 0.55) 100%); }
+body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-out infinite; }
+@keyframes stormPulse { 50% { opacity: .65; } }

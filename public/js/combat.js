@@ -57,7 +57,7 @@ export class Combatant {
     if (this.frozen > 0 || this.stun > 0) return 0;
     let m = this.mud > 0 ? 0.5 : this.aura?.el === 'ice' ? 0.75 : 1;
     const w = this.enhP('wind'); if (w !== null) m *= 1.2 + 0.25 * w;
-    return m;
+    return m * (this.speedMult || 1);
   }
   outgoing() { let m = this.weaken > 0 ? 0.8 : 1; const f = this.enhP('fire'); if (f !== null) m *= 1.12 + 0.25 * f; return m; }
   incoming() {
@@ -66,7 +66,7 @@ export class Combatant {
     const e = this.enhP('earth'); if (e !== null) m *= 0.8 - 0.25 * e;
     return m;
   }
-  costMult() { let m = 1; if (this.enhP('arcane') !== null) m *= 0.75; if (this.enhP('lightning') !== null) m *= 0.9; return m; }
+  costMult() { let m = this.costBonus || 1; if (this.enhP('arcane') !== null) m *= 0.75; if (this.enhP('lightning') !== null) m *= 0.9; return m; }
   resetStats() {
     this.hp = this.maxHp; this.mana = this.maxMana; this.stamina = 100; this.shield = 0; this.aura = null;
     this.frozen = 0; this.stun = 0; this.defDown = 0; this.mud = 0; this.weaken = 0; this.curse = 0; this.dots.length = 0;
@@ -74,7 +74,7 @@ export class Combatant {
   }
   updateStatus(dt, game) {
     if (!this.alive) return;
-    this.mana = Math.min(this.maxMana, this.mana + dt * (this.chanting ? 4 : 9));
+    this.mana = Math.min(this.maxMana, this.mana + dt * (this.chanting ? 4 : 9) * (this.manaRegen || 1));
     this.stamina = Math.min(100, this.stamina + dt * 22);
     if (this.aura) { this.aura.t -= dt; if (this.aura.t <= 0) this.aura = null; }
     if (this.frozen > 0) { this.frozen -= dt; if (this.frozen <= 0 && this.model) game.fx.explosion('ice', this.center(), 1.2, 0.2, null, { noDecal: true }); }
@@ -162,6 +162,7 @@ export function applyHit(game, target, hit) {
       mult *= 1 + Math.max(0, C.n - 1) * 0.08;
     }
   }
+  if (el && !hit.dot && hit.src?.affinity?.[el]) mult *= 1 + hit.src.affinity[el]; // battle royale element cores
   if (hit.src?.enhP?.('poison') != null && !hit.dot && hit.src !== target) addDot(target, 'poison', 6 + 10 * hit.src.enhP('poison'), 4, hit.src);
   if (!hit.dot || hit.dotEl) mult *= target.incoming();
   let dmg = Math.max(0, hit.dmg * mult);

@@ -1,0 +1,342 @@
+// Battle royale: eight mages drop onto the island, loot relics, and fight inside a shrinking storm of wild magic.
+// Items: element cores (+damage for that element), passive relics (mana regen, max HP/mana, speed, cheaper spells)
+// and potions (1 heal · 2 mana · 3 shield). Bots loot, drink, and run from the storm too.
+import * as THREE from 'three';
+import { ELEMENTS, ELEMENT_KEYS, elName } from './elements.js';
+import { energyMaterial, crystalMaterial, flowMaterial, TIME, NOISE } from './shaders.js';
+import { ARENA_R, SEA_Y } from './world.js';
+import { applyHit } from './combat.js';
+import { t, getLang } from './i18n.js';
+import { rand, pick, clamp, TAU } from './util.js';
+
+const hex = (n) => '#' + new THREE.Color(n).getHexString();
+const PASSIVES = {
+  font: { en: 'Mana Font', ja: '魔力の泉', desc: ['+40% mana regen', 'マナ回復+40%'], color: 0x5ab8ff, icon: '✦' },
+  vessel: { en: 'Arcane Vessel', ja: '魔力の器', desc: ['+30 max mana', '最大マナ+30'], color: 0x8a7aff, icon: '⬢' },
+  heart: { en: 'Troll Heart', ja: '巨人の心臓', desc: ['+150 max HP', '最大HP+150'], color: 0xff5a6a, icon: '♥' },
+  boots: { en: 'Windstep Boots', ja: '疾風の靴', desc: ['+12% move speed', '移動速度+12%'], color: 0x6affc8, icon: '➶' },
+  focus: { en: 'Sage Focus', ja: '賢者の宝珠', desc: ['-12% spell cost', '詠唱コスト-12%'], color: 0xffd46a, icon: '◈' },
+};
+const POTIONS = {
+  hp: { en: 'Healing Draught', ja: '回復薬', key: '1', color: 0xff4a5a, icon: '✚' },
+  mana: { en: 'Mana Draught', ja: 'マナ薬', key: '2', color: 0x3a8aff, icon: '◆' },
+  shield: { en: 'Aegis Draught', ja: '守護薬', key: '3', color: 0xffc83a, icon: '⛨' },
+};
+// storm phases: seconds waiting, seconds shrinking, target radius, damage per second outside
+const PHASES = [
+  { wait: 45, shrink: 25, r: 72, dps: 5 }, { wait: 30, shrink: 22, r: 46, dps: 8 }, { wait: 25, shrink: 18, r: 26, dps: 12 },
+  { wait: 20, shrink: 15, r: 11, dps: 18 }, { wait: 15, shrink: 14, r: 0, dps: 28 },
+];
+const NAMES = ['Vel', 'Rhea', 'Morrow', 'Isolde', 'Kael', 'Nyx', 'Oren', 'Sable', 'Thane', 'Lyra', 'Corvin', 'Ember', 'Wren', 'Ash'];
+const NAMES_JA = ['ヴェル', 'レア', 'モロウ', 'イゾルデ', 'カエル', 'ニクス', 'オーレン', 'セーブル', 'セイン', 'ライラ', 'コルヴィン', 'エンバー', 'レン', 'アッシュ'];
+const ROBES = [[0x5a1a2a, 0xff4a6a], [0x1a4a2a, 0x7dff8a], [0x3a1a5a, 0xc07aff], [0x5a3a10, 0xffb040], [0x0a3a4a, 0x40e0ff], [0x4a4a4a, 0xf0f0f0], [0x2a1a10, 0xff7a30], [0x10204a, 0x7aa0ff]];
+
+// ------------------------------------------------------------ storm wall shader: a curtain of wild violet magic
+const stormMat = () => new THREE.ShaderMaterial({
+  uniforms: { uTime: TIME, uCol: { value: new THREE.Color(0xa040ff) }, uHi: { value: new THREE.Color(0xffb8ff) } },
+  vertexShader: 'varying vec2 vUv; varying vec3 vW; void main(){ vUv=uv; vec4 w=modelMatrix*vec4(position,1.0); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }',
+  fragmentShader: NOISE + /* glsl */ `
+    uniform float uTime; uniform vec3 uCol,uHi; varying vec2 vUv; varying vec3 vW;
+    void main(){
+      float a=vUv.x*6.2832*18.0;
+      float n=fbm3(vec3(vUv.x*60.0, vUv.y*6.0-uTime*0.6, uTime*0.15))*0.5+0.5;
+      float streak=smoothstep(0.55,0.95,fbm3(vec3(vUv.x*140.0, vUv.y*1.5+uTime*0.9, 3.0))*0.5+0.5);
+      float low=1.0-smoothstep(0.0,0.55,vUv.y);
+      vec3 c=mix(uCol*0.55, uCol, n); c=mix(c, uHi, streak*0.7+low*0.25);
+      float al=(0.18+0.35*n+0.35*streak)*(0.35+0.65*low)*smoothstep(1.0,0.75,vUv.y);
+      gl_FragColor=vec4(c, al);
+    }`,
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+});
+
+// ------------------------------------------------------------ loot meshes (shared geometry + per-kind materials)
+const BOTTLE = (() => { const pts = [[0, 0], [0.2, 0.02], [0.26, 0.12], [0.26, 0.3], [0.2, 0.42], [0.08, 0.5], [0.08, 0.62], [0.11, 0.66], [0, 0.68]].map(([r, y]) => new THREE.Vector2(r, y)); const g = new THREE.LatheGeometry(pts, 20); g.translate(0, -0.34, 0); return g; })();
+const GEM = new THREE.OctahedronGeometry(0.32, 0);
+const RELIC = new THREE.IcosahedronGeometry(0.3, 0);
+const BEAM = (() => { const g = new THREE.CylinderGeometry(0.12, 0.3, 1, 12, 1, true); g.translate(0, 0.5, 0); return g; })();
+const RING = (() => { const g = new THREE.RingGeometry(0.55, 0.75, 40); g.rotateX(-Math.PI / 2); return g; })();
+
+export class Royale {
+  constructor(game) {
+    this.g = game; this.items = []; this.mats = new Map(); this.t = 0; this.over = false;
+    this.zone = { cx: 0, cz: 0, r: ARENA_R + 12, fromX: 0, fromZ: 0, fromR: ARENA_R + 12, nx: 0, nz: 0, nr: PHASES[0].r, phase: 0, state: 'wait', st: 0, dps: 3 };
+    this.pickNext();
+    const wall = (this.wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 160, 1, true), stormMat()));
+    wall.geometry.translate(0, 0.5, 0); wall.renderOrder = 5; wall.frustumCulled = false; game.scene.add(wall);
+    const nextRing = (this.nextRing = new THREE.Mesh(new THREE.RingGeometry(0.985, 1, 160), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide })));
+    nextRing.rotation.x = -Math.PI / 2; nextRing.renderOrder = 5; game.scene.add(nextRing);
+    this.tick = 0; this.hudT = 0; this.placements = [];
+  }
+  // ------------------------------------------------------------ setup
+  start() {
+    const g = this.g, p = g.player, ja = getLang() === 'ja';
+    const names = [...(ja ? NAMES_JA : NAMES)].sort(() => Math.random() - 0.5);
+    const diffs = ['easy', 'normal', 'normal', 'normal', 'hard', 'normal', 'easy'];
+    for (let i = 0; i < 7; i++) {
+      const [robe, accent] = ROBES[i % ROBES.length];
+      const b = g.createBot(names[i], diffs[i], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
+      b.brain.sight = 55; b.brain.royale = this;
+    }
+    // everyone drops from the sky over a random spot on the island
+    const all = [p, ...g.bots];
+    all.forEach((c, i) => {
+      const a = (i / all.length) * TAU + rand(-0.3, 0.3), r = rand(25, 85);
+      c.resetStats(); this.equip(c);
+      c.pos.set(Math.cos(a) * r, 0, Math.sin(a) * r); c.pos.y = g.world.heightAt(c.pos.x, c.pos.z) + 70 + rand(0, 20);
+      c.yaw = Math.atan2(c.pos.x, c.pos.z); c.pitch = -0.5; c.vel.set(0, 0, 0); c.dropping = true; c.grounded = false;
+      if (c.brain) { const la = rand(0, TAU), lr = rand(10, 90); c.brain.dropTo = new THREE.Vector3(Math.cos(la) * lr, 0, Math.sin(la) * lr); }
+      if (c.model) c.model.root.visible = true;
+    });
+    this.spawnLoot(56);
+    document.getElementById('br-inv')?.classList.remove('hidden');
+    g.hud.banner(t('ban.royale'), t('ban.royale2'), 3.5);
+    g.hud.hint?.('hint.royale');
+    this.updateHud(true);
+  }
+  equip(c) {
+    c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {};
+    c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.maxHp = 600; c.maxMana = 120; c.hp = 600; c.mana = 120;
+  }
+  // ------------------------------------------------------------ loot
+  randomSpot() {
+    const W = this.g.world;
+    for (let k = 0; k < 40; k++) {
+      const a = rand(0, TAU), r = Math.sqrt(Math.random()) * (ARENA_R - 8), x = Math.cos(a) * r, z = Math.sin(a) * r, h = W.heightAt(x, z);
+      if (h < SEA_Y + 1.2 || W.normalAt(x, z).y < 0.85 || W.onRamp?.(x, z)) continue;
+      return new THREE.Vector3(x, W.groundAt(x, z, h + 3), z);
+    }
+    return new THREE.Vector3(rand(-20, 20), 0.5, rand(-20, 20));
+  }
+  randomKind() {
+    const r = Math.random();
+    if (r < 0.4) return { type: 'core', el: pick(ELEMENT_KEYS) };
+    if (r < 0.65) return { type: 'relic', id: pick(Object.keys(PASSIVES)) };
+    return { type: 'potion', id: Math.random() < 0.5 ? 'hp' : Math.random() < 0.55 ? 'mana' : 'shield' };
+  }
+  colorOf(k) { return k.type === 'core' ? ELEMENTS[k.el].color : k.type === 'relic' ? PASSIVES[k.id].color : POTIONS[k.id].color; }
+  mat(key, make) { if (!this.mats.has(key)) this.mats.set(key, make()); return this.mats.get(key); }
+  spawnLoot(n) { for (let i = 0; i < n; i++) this.dropItem(this.randomSpot(), this.randomKind()); }
+  dropItem(pos, kind, pop = false) {
+    const g = this.g, col = this.colorOf(kind), key = kind.type + (kind.el || kind.id);
+    const grp = new THREE.Group();
+    let body;
+    if (kind.type === 'core') body = new THREE.Mesh(GEM, this.mat(key, () => crystalMaterial({ color: new THREE.Color(col).lerp(new THREE.Color(0xffffff), 0.25), glow: new THREE.Color(col), emissive: 1.6, crack: 0.2 })));
+    else if (kind.type === 'relic') body = new THREE.Mesh(RELIC, this.mat(key, () => crystalMaterial({ color: new THREE.Color(0xf0d892), glow: new THREE.Color(col), emissive: 1.3, crack: 0.5 })));
+    else {
+      body = new THREE.Group();
+      const glass = new THREE.Mesh(BOTTLE, this.mat('glass', () => new THREE.MeshStandardMaterial({ color: 0xdff4ff, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.45, depthWrite: false })));
+      const liquid = new THREE.Mesh(BOTTLE, this.mat(key, () => new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.8, roughness: 0.3 }))); liquid.scale.set(0.82, 0.7, 0.82); liquid.position.y = -0.06;
+      const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.065, 0.1, 10), this.mat('cork', () => new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.9 }))); cork.position.y = 0.36; cork.userData.ownGeo = true;
+      body.add(liquid, glass, cork); body.scale.setScalar(1.4);
+    }
+    grp.add(body);
+    const halo = new THREE.Mesh(RING, this.mat('ring' + key, () => new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })));
+    const beam = new THREE.Mesh(BEAM, this.mat('beam' + key, () => flowMaterial({ color: new THREE.Color(col), core: 0xffffff, intensity: 1.4, scroll: -1.5, stripes: 2, opacity: 0.55 })));
+    beam.scale.set(1, kind.type === 'relic' ? 16 : 10, 1);
+    g.scene.add(grp, halo, beam);
+    const it = { kind, grp, body, halo, beam, pos: pos.clone(), vel: pop ? new THREE.Vector3(rand(-4, 4), rand(5, 8), rand(-4, 4)) : null, seed: Math.random() * 10, age: 0 };
+    this.items.push(it);
+    return it;
+  }
+  removeItem(it) { const s = this.g.scene; s.remove(it.grp, it.halo, it.beam); it.grp.traverse((m) => m.userData.ownGeo && m.geometry.dispose()); this.items.splice(this.items.indexOf(it), 1); }
+  nearestItem(pos, maxD = 40) { let best = null, bd = maxD; for (const it of this.items) { const d = it.pos.distanceTo(pos); if (d < bd && this.inZone(it.pos, -4)) { bd = d; best = it; } } return best; }
+  itemName(k) { const ja = getLang() === 'ja'; return k.type === 'core' ? (ja ? `${elName(k.el)}の核` : `${ELEMENTS[k.el].name} Core`) : k.type === 'relic' ? PASSIVES[k.id][ja ? 'ja' : 'en'] : POTIONS[k.id][ja ? 'ja' : 'en']; }
+  itemDesc(k) {
+    const ja = getLang() === 'ja';
+    if (k.type === 'core') return ja ? `${elName(k.el)}魔法のダメージ+20%` : `+20% ${ELEMENTS[k.el].name.toLowerCase()} spell damage`;
+    if (k.type === 'relic') return PASSIVES[k.id].desc[ja ? 1 : 0];
+    return ja ? `[${POTIONS[k.id].key}] で使用` : `press ${POTIONS[k.id].key} to drink`;
+  }
+  grant(c, k) {
+    if (k.type === 'core') c.affinity[k.el] = Math.min(0.8, (c.affinity[k.el] || 0) + 0.2);
+    else if (k.type === 'relic') {
+      c.relics[k.id] = (c.relics[k.id] || 0) + 1;
+      if (k.id === 'font') c.manaRegen += 0.4;
+      if (k.id === 'vessel') { c.maxMana += 30; c.mana += 30; }
+      if (k.id === 'heart') { c.maxHp += 150; c.hp += 150; }
+      if (k.id === 'boots') c.speedMult += 0.12;
+      if (k.id === 'focus') c.costBonus *= 0.88;
+    } else c.inv[k.id] = Math.min(5, (c.inv[k.id] || 0) + 1);
+  }
+  pickup(c, it) {
+    const g = this.g, col = this.colorOf(it.kind);
+    this.grant(c, it.kind);
+    g.fx.ring(it.pos.clone().setY(it.pos.y + 0.1), new THREE.Color(col), 2.5, 0.4);
+    for (let i = 0; i < 14; i++) g.fx.glow.emit({ x: it.pos.x, y: it.pos.y + 1, z: it.pos.z, vx: rand(-2, 2), vy: rand(1, 5), vz: rand(-2, 2), life: rand(0.4, 0.8), size: 0.18, size1: 0.02, color: new THREE.Color(col), alpha: 1, drag: 1.5, frame: 1 });
+    if (c === g.player) {
+      g.audio.pickup?.(it.kind.type);
+      g.hud.feed(`<b style="color:${hex(col)}">${this.itemName(it.kind)}</b> <span style="opacity:.75">${this.itemDesc(it.kind)}</span>`);
+      g.hud.popup?.(it.pos.clone().setY(it.pos.y + 1.6), this.itemName(it.kind), 'react', hex(col));
+      this.updateHud(true);
+    }
+    this.removeItem(it);
+  }
+  // potions: 1 heal · 2 mana · 3 shield
+  drink(c, id) {
+    const g = this.g;
+    if (!c.alive || !(c.inv?.[id] > 0)) return false;
+    c.inv[id]--;
+    if (id === 'hp') { const n = 220; c.heal(n); g.onHeal?.(c, n); }
+    if (id === 'mana') c.mana = Math.min(c.maxMana, c.mana + 90);
+    if (id === 'shield') { c.addShield(160, 20, 'light'); g.onShield?.(c); }
+    const col = new THREE.Color(POTIONS[id].color);
+    g.fx.ring(c.pos.clone().setY(c.pos.y + 0.2), col, 3.5, 0.5);
+    for (let i = 0; i < 18; i++) { const a = rand(0, TAU); g.fx.glow.emit({ x: c.pos.x + Math.cos(a) * 0.7, y: c.pos.y + rand(0, 0.4), z: c.pos.z + Math.sin(a) * 0.7, vy: rand(2, 4.5), life: 0.9, size: 0.2, size1: 0.03, color: col, alpha: 1, drag: 0.6, frame: 1 }); }
+    g.audio.drink?.(id, c === g.player ? null : c.pos);
+    if (c === g.player) this.updateHud(true);
+    return true;
+  }
+  // ------------------------------------------------------------ storm
+  pickNext() {
+    const Z = this.zone, P = PHASES[Z.phase];
+    const room = Math.max(0, Z.r - P.r) * 0.85, a = rand(0, TAU), d = Math.sqrt(Math.random()) * room;
+    let nx = Z.cx + Math.cos(a) * d, nz = Z.cz + Math.sin(a) * d;
+    const lim = ARENA_R - P.r - 4; const L = Math.hypot(nx, nz); if (L > lim && L > 0) { nx *= Math.max(0, lim) / L; nz *= Math.max(0, lim) / L; }
+    Object.assign(Z, { nx, nz, nr: P.r, dps: Z.phase ? PHASES[Z.phase - 1].dps : 3 });
+  }
+  inZone(p, margin = 0) { const Z = this.zone; return Math.hypot(p.x - Z.cx, p.z - Z.cz) < Z.r + margin; }
+  updateZone(dt) {
+    const Z = this.zone; Z.st += dt;
+    const P = PHASES[Math.min(Z.phase, PHASES.length - 1)];
+    if (Z.state === 'wait' && Z.st >= P.wait) { Z.state = 'shrink'; Z.st = 0; Object.assign(Z, { fromX: Z.cx, fromZ: Z.cz, fromR: Z.r }); this.g.hud.banner('', t('royale.closing'), 2.5); this.g.audio.stormWarn?.(); }
+    else if (Z.state === 'shrink') {
+      const k = clamp(Z.st / P.shrink), e = k * k * (3 - 2 * k);
+      Z.cx = Z.fromX + (Z.nx - Z.fromX) * e; Z.cz = Z.fromZ + (Z.nz - Z.fromZ) * e; Z.r = Z.fromR + (Z.nr - Z.fromR) * e; Z.dps = P.dps;
+      if (k >= 1) { Z.phase++; Z.st = 0; Z.state = Z.phase < PHASES.length ? 'wait' : 'final'; if (Z.phase < PHASES.length) this.pickNext(); }
+    }
+    this.wall.position.set(Z.cx, -20, Z.cz); this.wall.scale.set(Math.max(0.5, Z.r), 160, Math.max(0.5, Z.r));
+    this.nextRing.visible = Z.state !== 'final';
+    this.nextRing.position.set(Z.nx, this.g.world.heightAt(Z.nx, Z.nz) + 0.4, Z.nz); this.nextRing.scale.setScalar(Math.max(0.5, Z.nr));
+    // the storm burns anyone outside it (damage grows every phase)
+    this.tick -= dt;
+    if (this.tick <= 0) {
+      this.tick = 0.5;
+      for (const c of this.g.combatants) {
+        if (!c.alive || c.decoy || this.inZone(c.pos)) continue;
+        applyHit(this.g, c, { dmg: Z.dps * 0.5, el: null, src: null, point: c.center(), dot: true, dotEl: 'darkness' });
+        this.g.fx.element('darkness', c.center(), { count: 3, speed: 1, size: 0.3 });
+      }
+    }
+    const p = this.g.player, out = p && p.alive && !this.inZone(p.pos);
+    document.body.classList.toggle('storm-out', !!out);
+    if (out && Math.random() < dt * 2) this.g.fx.bolt(p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 20, rand(-15, 15))), p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 0, rand(-15, 15))), new THREE.Color(0xc070ff), { width: 0.2, dur: 0.2, branches: 2 });
+  }
+  // ------------------------------------------------------------ per frame
+  update(dt) {
+    const g = this.g;
+    this.t += dt;
+    if (!this.over) this.updateZone(dt);
+    // drop phase: slow magical descent with strong air control; a burst on landing
+    for (const c of g.combatants) {
+      if (!c.dropping) continue;
+      if (c.grounded || c.pos.y - g.world.heightAt(c.pos.x, c.pos.z) < 0.3) {
+        c.dropping = false;
+        g.fx.shockwave(c.center(), 6, 1, 0.4); g.fx.ring(c.pos.clone().setY(c.pos.y + 0.2), new THREE.Color(0xf0d592), 6, 0.5);
+        for (let i = 0; i < 10; i++) g.fx.puff(c.pos.clone().add(new THREE.Vector3(rand(-1, 1), 0.2, rand(-1, 1))), { color: new THREE.Color(0xcdbb96), size: 1, life: 1.2, alpha: 0.6, rise: 0.6 });
+        g.audio.impact('earth', 0.35, c.pos);
+      } else if (Math.random() < 0.4) g.fx.glow.emit({ x: c.pos.x + rand(-0.4, 0.4), y: c.pos.y + 1.8, z: c.pos.z + rand(-0.4, 0.4), vy: 6, life: 0.4, size: 0.15, size1: 0.02, color: new THREE.Color(0xfff0c0), alpha: 1, drag: 0.5, frame: 1 });
+    }
+    // loot: bob, spin, beams; auto pickup
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i]; it.age += dt;
+      if (it.vel) { it.vel.y -= 18 * dt; it.pos.addScaledVector(it.vel, dt); const gy = g.world.groundAt(it.pos.x, it.pos.z, it.pos.y + 1); if (it.pos.y <= gy) { it.pos.y = gy; it.vel = null; } }
+      const bob = 0.9 + Math.sin(this.t * 2 + it.seed) * 0.15;
+      it.grp.position.set(it.pos.x, it.pos.y + bob, it.pos.z); it.body.rotation.y += dt * 1.6; it.body.rotation.x = Math.sin(this.t + it.seed) * 0.2;
+      it.halo.position.set(it.pos.x, it.pos.y + 0.06, it.pos.z); it.halo.scale.setScalar(1 + Math.sin(this.t * 3 + it.seed) * 0.08);
+      it.beam.position.set(it.pos.x, it.pos.y, it.pos.z);
+      if (it.age < 0.6) continue;
+      for (const c of g.combatants) {
+        if (!c.alive || c.decoy || !c.inv || c.dropping) continue;
+        if (Math.hypot(c.pos.x - it.pos.x, c.pos.z - it.pos.z) < 1.7 && Math.abs(c.pos.y - it.pos.y) < 2.5) { this.pickup(c, it); break; }
+      }
+    }
+    // bots drink when hurt / dry
+    for (const b of g.bots) {
+      if (!b.alive || !b.inv) continue;
+      b.potT = (b.potT || rand(0, 1)) - dt; if (b.potT > 0) continue; b.potT = 1;
+      if (b.hp < b.maxHp * 0.4 && this.drink(b, 'hp')) continue;
+      if (b.mana < 30 && this.drink(b, 'mana')) continue;
+      if (b.hp < b.maxHp * 0.6 && b.shield <= 0) this.drink(b, 'shield');
+    }
+    // spectate: once the player is out, follow whoever is still fighting
+    const p = g.player;
+    if (p && !p.alive && this.deadT !== undefined) {
+      this.deadT += dt;
+      if (this.deadT > 2.5) {
+        let s = this.spec; if (!s?.alive) s = this.spec = this.alive().sort((a, b) => b.kills - a.kills)[0];
+        if (s) { const f = s.forward(new THREE.Vector3()).setY(0).normalize(); const cp = s.pos.clone().addScaledVector(f, -7).setY(s.pos.y + 4); g.debugCam = { pos: cp.toArray(), target: [s.pos.x, s.pos.y + 1.4, s.pos.z] }; }
+      }
+    }
+    this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
+  }
+  alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
+  onDeath(target, killer) {
+    if (target.decoy || this.over) return;
+    const g = this.g, left = this.alive().length; // target already flagged dead
+    target.place = left + 1;
+    // the fallen drop their potions and a relic
+    const at = target.pos.clone();
+    for (const [id, n] of Object.entries(target.inv || {})) for (let i = 0; i < n; i++) this.dropItem(at, { type: 'potion', id }, true);
+    this.dropItem(at, this.randomKind(), true);
+    if (target === g.player) {
+      this.deadT = 0;
+      g.hud.banner(`#${target.place}`, killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm'), 5);
+      g.audio.ui('defeat');
+    } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
+    if (left <= 1) this.finish(this.alive()[0]);
+    this.updateHud(true);
+  }
+  finish(winner) {
+    if (this.over) return;
+    this.over = true;
+    const g = this.g, won = winner === g.player;
+    g.slowmo = 1.2;
+    g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
+    g.audio.ui(won ? 'victory' : 'defeat');
+    if (won) for (let i = 0; i < 6; i++) setTimeout(() => { if (g.player) g.fx.explosion(pick(ELEMENT_KEYS), g.player.center().add(new THREE.Vector3(rand(-6, 6), rand(4, 9), rand(-6, 6))), 2, 0.6); }, i * 350);
+    setTimeout(() => { if (g.royale === this) g.endToMenu(); }, 9000);
+  }
+  updateHud(force = false) {
+    const g = this.g, p = g.player; this.hudT = 0.25;
+    if (!p) return;
+    const Z = this.zone, P = PHASES[Math.min(Z.phase, PHASES.length - 1)];
+    const left = Z.state === 'wait' ? Math.ceil(P.wait - Z.st) : Z.state === 'shrink' ? Math.ceil(P.shrink - Z.st) : 0;
+    const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    const zoneTxt = Z.state === 'wait' ? t('royale.zoneWait', { t: mm }) : Z.state === 'shrink' ? t('royale.zoneShrink', { t: mm }) : t('royale.zoneFinal');
+    g.hud.round(`✦ ${this.alive().length} ${t('royale.alive')} · ⚔ ${p.kills} · ${zoneTxt}`);
+    const box = document.getElementById('br-inv'); if (!box) return;
+    const key = JSON.stringify([p.inv, p.affinity, p.relics]);
+    if (!force && key === this._invKey) return; this._invKey = key;
+    const pots = Object.entries(POTIONS).map(([id, P2]) => `<div class="br-pot${p.inv?.[id] ? '' : ' empty'}" style="--c:${hex(P2.color)}"><kbd>${P2.key}</kbd><span>${P2.icon}</span><b>${p.inv?.[id] || 0}</b></div>`).join('');
+    const cores = Object.entries(p.affinity || {}).map(([el, v]) => `<span class="br-chip" style="--c:${hex(ELEMENTS[el].color)}">${ELEMENTS[el].glyph} +${Math.round(v * 100)}%</span>`).join('');
+    const relics = Object.entries(p.relics || {}).map(([id, n]) => `<span class="br-chip" style="--c:${hex(PASSIVES[id].color)}" title="${PASSIVES[id].desc[0]}">${PASSIVES[id].icon}${n > 1 ? '×' + n : ''}</span>`).join('');
+    box.innerHTML = `<div class="br-pots">${pots}</div><div class="br-chips">${cores}${relics}</div>`;
+  }
+  // minimap overlay: current storm edge + next circle (hud.drawMinimap calls this inside its rotated frame)
+  drawMinimap(g2, p, scale) {
+    const Z = this.zone;
+    g2.save();
+    g2.fillStyle = 'rgba(150,60,255,0.28)'; g2.beginPath(); g2.rect(-400, -400, 800, 800); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU, true); g2.fill();
+    g2.strokeStyle = 'rgba(210,140,255,0.95)'; g2.lineWidth = 2; g2.beginPath(); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU); g2.stroke();
+    if (Z.state !== 'final') { g2.strokeStyle = 'rgba(255,255,255,0.85)'; g2.setLineDash([4, 4]); g2.beginPath(); g2.arc((Z.nx - p.pos.x) * scale, (Z.nz - p.pos.z) * scale, Z.nr * scale, 0, TAU); g2.stroke(); g2.setLineDash([]); }
+    for (const it of this.items) { const x = (it.pos.x - p.pos.x) * scale, y = (it.pos.z - p.pos.z) * scale; if (x * x + y * y > 8100) continue; g2.fillStyle = hex(this.colorOf(it.kind)); g2.beginPath(); g2.arc(x, y, 2.2, 0, TAU); g2.fill(); }
+    g2.restore();
+  }
+  // bot helper: where to walk when nobody is in sight
+  roamTarget(c) {
+    const Z = this.zone;
+    if (c.dropping && c.brain?.dropTo) return c.brain.dropTo;
+    const dz = Math.hypot(c.pos.x - Z.nx, c.pos.z - Z.nz);
+    if (!this.inZone(c.pos, -6) || (Z.state === 'shrink' && dz > Z.nr - 4)) return new THREE.Vector3(Z.nx, 0, Z.nz);
+    const it = this.nearestItem(c.pos, 45); if (it) return it.pos;
+    return new THREE.Vector3(Z.nx, 0, Z.nz);
+  }
+  dispose() {
+    const s = this.g.scene;
+    for (const it of [...this.items]) this.removeItem(it);
+    s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
+    for (const m of this.mats.values()) m.dispose();
+    document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden');
+    if (this.g.debugCam && this.deadT !== undefined) this.g.debugCam = null;
+  }
+}
