@@ -57,6 +57,11 @@ export class BotBrain {
       if (to.lengthSq() > 1) wish.copy(to.normalize());
       if (!c.dropping) { const d = wish.lengthSq() ? wish : this.aimDir; c.yaw = Math.atan2(-d.x, -d.z); c.pitch = 0; }
       this.jumpT -= dt; if (!c.dropping && this.jumpT <= 0) { jump = true; this.jumpT = rand(2.5, 6); }
+      // alone in the storm: chant a rush toward the circle
+      this.castCd -= dt;
+      if (this.chant) this.updateChant(dt, c);
+      else if (R && !c.dropping && c.canAct() && this.castCd <= 0 && Math.hypot(c.pos.x - R.zone.cx, c.pos.z - R.zone.cz) > R.zone.r + 8) this.startChant(c, c.hp / c.maxHp);
+      if (this.forceAim) { this.aimPoint.copy(this.forceAim); this.aimDir.subVectors(this.aimPoint, c.eye(new THREE.Vector3())).normalize(); }
       return { wish, jump: c.dropping ? false : jump, speed: this.d.speed * 1.1 };
     }
     if (!tgt) return { wish, jump };
@@ -67,6 +72,7 @@ export class BotBrain {
     const lead = tgt.vel.clone().setY(0).multiplyScalar(dist / 40);
     const err = new THREE.Vector3(rand(-1, 1), rand(-0.5, 0.5), rand(-1, 1)).multiplyScalar(this.d.aim * (0.3 + dist / 40));
     this.aimPoint.lerp(tc.clone().add(lead).add(err), Math.min(1, dt * 5));
+    if (this.forceAim) this.aimPoint.copy(this.forceAim); // a movement spell aimed at safety, not at the foe
     this.aimDir.subVectors(this.aimPoint, eye).normalize();
     c.yaw = Math.atan2(-this.aimDir.x, -this.aimDir.z); c.pitch = Math.asin(clamp(this.aimDir.y, -1, 1));
     // ---------- movement: keep preferred range, strafe, dodge
@@ -130,6 +136,10 @@ export class BotBrain {
     let element, shape;
     const aura = tgt.aura?.el;
     const dist = tgt.pos && c.pos ? tgt.pos.distanceTo(c.pos) : 20;
+    const R = this.royale, Z = R?.zone;
+    this.forceAim = null;
+    if (R && !R.inZone(c.pos, -2) && Math.hypot(c.pos.x - Z.cx, c.pos.z - Z.cz) > Z.r + 8) { shape = 'rush'; element = pick(ELEMENT_KEYS); this.forceAim = new THREE.Vector3(Z.cx, c.pos.y + 1.2, Z.cz); } // caught in the storm: dash for the circle
+    else
     if (hpFrac < 0.35 && c.shield <= 0 && Math.random() < 0.5) { shape = Math.random() < 0.3 ? 'decoy' : Math.random() < 0.3 ? 'drain' : 'ward'; element = pick(['light', 'nature', 'water', 'earth', 'darkness']); }
     else if (tgt.chanting && Math.random() < 0.12) { shape = 'halo'; element = pick(ELEMENT_KEYS); }
     else if (tgt.chanting && dist < 40 && Math.random() < 0.18) { shape = pick(['prison', 'mark']); element = pick(ELEMENT_KEYS); } // lock down / punish a chanting foe
@@ -182,7 +192,7 @@ export class BotBrain {
         c.model.castAnim = 1;
       }
       this.castCd = rand(...this.d.cd) + spec.mag * 1.5;
-      this.chant = null; c.chanting = false; c.chantText = '';
+      this.chant = null; c.chanting = false; c.chantText = ''; this.forceAim = null;
     }
   }
   cancelChant() {
