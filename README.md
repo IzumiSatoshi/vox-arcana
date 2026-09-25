@@ -234,6 +234,7 @@ element reacts with it:
     - Element cores give +20% damage for that element and stack.
     - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed) and Sage Focus (cheaper spells).
     - Potions go into slots **1** (heal), **2** (mana) and **3** (shield).
+  - **Mana shrines**: four stone circles, one in each quarter, restore mana and health while you stand inside. Rivals fight over them.
   - **Caches**: once per storm phase an arcane cache falls inside the next circle. It always contains a rare relic, either the Archmage Crown (+15% all damage) or the Phoenix Feather (revive once), plus extra loot.
   - **The storm**: a violet storm wall shrinks in five phases, and its damage grows each phase. The final storm keeps getting stronger until one mage is left.
   - **Bots** loot first, then fight whoever is nearest. They drink potions, run from the storm and drop their loot when eliminated.
