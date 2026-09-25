@@ -33,6 +33,8 @@ export class BotBrain {
       const d = (o.pos && c.pos ? o.pos.distanceTo(c.pos) : 0) + (o.cloak > 0 ? 200 : 0) + (o === this.focus ? -8 : 0);
       if (d < bs && d < (this.sight || Infinity)) { bs = d; best = o; }
     }
+    // battle royale opening: loot first, only fight what is close or what hit us
+    if (best && this.royale && this.royale.t < 55 && bs > 18 && performance.now() - (c.lastHit || 0) > 4000) return null;
     if (best && best !== this.focus && (!this.focus?.alive || Math.random() < 0.02)) this.focus = best;
     return best;
   }

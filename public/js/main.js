@@ -268,7 +268,7 @@ class Game {
     this.hud.clearSpellInfo?.();
     const p = this.createPlayer();
     this.spawnAt(p, Math.PI * 0.5);
-    this.score = { me: 0, foe: 0 }; this.roundOver = false;
+    this.score = { me: 0, foe: 0 }; this.roundOver = false; this.stats = { dmg: 0 };
     if (mode === 'duel') {
       const d = this.settings.diff;
       const b = this.createBot(t(d === 'hard' ? 'bot.hard' : d === 'easy' ? 'bot.easy' : 'bot.rival'), d);
@@ -532,6 +532,8 @@ class Game {
     if (c !== this.player && this.hud.cardTimer < 3 && !spec.basic) this.hud.spellCard(spec, c.name);
   }
   onDamage(target, res, pos, el, hit) {
+    target.lastHit = performance.now();
+    if (hit.src === this.player && target !== this.player && this.stats) this.stats.dmg += res.dmg;
     if (res.absorbed > 1 && performance.now() - (this._shT || 0) > 120) { this._shT = performance.now(); audio.shieldHit(pos); }
     if (res.dmg < 0.5 && !res.reaction) return;
     this.hud.damage(pos, res.dmg, el, res.reaction);
@@ -602,6 +604,8 @@ class Game {
   onShield(c) { this.hud.popup(c.center().add(new THREE.Vector3(0, 1.2, 0)), t('st.shield'), 'react', '#ffd46a'); }
   onBotChant(c, text, onFinish) {
     if (this.mode === 'menu' || !this.settings.botVoice || !window.speechSynthesis) return;
+    // a crowded battle royale: only the nearest chanting rival speaks, and never over another one
+    if (this.royale && (!this.player || c.pos.distanceTo(this.player.pos) > 38 || speechSynthesis.speaking)) return false;
     const ja = getLang() === 'ja';
     const u = new SpeechSynthesisUtterance(text);
     u.lang = ja ? 'ja-JP' : 'en-US'; u.pitch = ja ? 0.8 : 0.6; u.rate = ja ? 1.1 : 1.05; u.volume = 0.9 * this.settings.vol;
@@ -622,6 +626,7 @@ class Game {
   onDeath(target, killer) {
     if (!target.alive) return;
     if (target.decoy) { target.alive = false; return; } // an illusion: its spell pops it
+    if (this.royale?.tryRevive(target)) return;
     target.alive = false; target.deaths++; if (killer && killer !== target) killer.kills++;
     if (target !== this.player) audio.elimination(target.center());
     target.chanting = false;

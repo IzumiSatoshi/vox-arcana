@@ -16,7 +16,11 @@ const PASSIVES = {
   heart: { en: 'Troll Heart', ja: '巨人の心臓', desc: ['+150 max HP', '最大HP+150'], color: 0xff5a6a, icon: '♥' },
   boots: { en: 'Windstep Boots', ja: '疾風の靴', desc: ['+12% move speed', '移動速度+12%'], color: 0x6affc8, icon: '➶' },
   focus: { en: 'Sage Focus', ja: '賢者の宝珠', desc: ['-12% spell cost', '詠唱コスト-12%'], color: 0xffd46a, icon: '◈' },
+  // rare: mostly found in arcane caches that fall from the sky each storm phase
+  crown: { en: 'Archmage Crown', ja: '大魔導の冠', desc: ['+15% damage with every element', '全属性ダメージ+15%'], color: 0xffe066, icon: '♛', rare: true },
+  phoenix: { en: 'Phoenix Feather', ja: '不死鳥の羽', desc: ['Rise again once with half HP', '一度だけHP半分で復活'], color: 0xff7a2a, icon: '❂', rare: true },
 };
+const COMMON_RELICS = Object.keys(PASSIVES).filter((k) => !PASSIVES[k].rare), RARE_RELICS = Object.keys(PASSIVES).filter((k) => PASSIVES[k].rare);
 const POTIONS = {
   hp: { en: 'Healing Draught', ja: '回復薬', key: '1', color: 0xff4a5a, icon: '✚' },
   mana: { en: 'Mana Draught', ja: 'マナ薬', key: '2', color: 0x3a8aff, icon: '◆' },
@@ -110,7 +114,8 @@ export class Royale {
   randomKind() {
     const r = Math.random();
     if (r < 0.4) return { type: 'core', el: pick(ELEMENT_KEYS) };
-    if (r < 0.65) return { type: 'relic', id: pick(Object.keys(PASSIVES)) };
+    if (r < 0.63) return { type: 'relic', id: pick(COMMON_RELICS) };
+    if (r < 0.66) return { type: 'relic', id: pick(RARE_RELICS) };
     return { type: 'potion', id: Math.random() < 0.5 ? 'hp' : Math.random() < 0.55 ? 'mana' : 'shield' };
   }
   colorOf(k) { return k.type === 'core' ? ELEMENTS[k.el].color : k.type === 'relic' ? PASSIVES[k.id].color : POTIONS[k.id].color; }
@@ -156,6 +161,7 @@ export class Royale {
       if (k.id === 'heart') { c.maxHp += 150; c.hp += 150; }
       if (k.id === 'boots') c.speedMult += 0.12;
       if (k.id === 'focus') c.costBonus *= 0.88;
+      if (k.id === 'crown') c.allDmg = (c.allDmg || 1) + 0.15;
     } else c.inv[k.id] = Math.min(5, (c.inv[k.id] || 0) + 1);
   }
   pickup(c, it) {
@@ -198,12 +204,14 @@ export class Royale {
   updateZone(dt) {
     const Z = this.zone; Z.st += dt;
     const P = PHASES[Math.min(Z.phase, PHASES.length - 1)];
-    if (Z.state === 'wait' && Z.st >= P.wait) { Z.state = 'shrink'; Z.st = 0; Object.assign(Z, { fromX: Z.cx, fromZ: Z.cz, fromR: Z.r }); this.g.hud.banner('', t('royale.closing'), 2.5); this.g.audio.stormWarn?.(); }
+    if (Z.state === 'wait' && !Z.cached && Z.st >= P.wait * 0.35 && Z.phase < 4) { Z.cached = true; this.dropCache(); }
+    if (Z.state === 'wait' && Z.st >= P.wait) { Z.cached = false; Z.state = 'shrink'; Z.st = 0; Object.assign(Z, { fromX: Z.cx, fromZ: Z.cz, fromR: Z.r }); this.g.hud.banner('', t('royale.closing'), 2.5); this.g.audio.stormWarn?.(); }
     else if (Z.state === 'shrink') {
       const k = clamp(Z.st / P.shrink), e = k * k * (3 - 2 * k);
       Z.cx = Z.fromX + (Z.nx - Z.fromX) * e; Z.cz = Z.fromZ + (Z.nz - Z.fromZ) * e; Z.r = Z.fromR + (Z.nr - Z.fromR) * e; Z.dps = P.dps;
       if (k >= 1) { Z.phase++; Z.st = 0; Z.state = Z.phase < PHASES.length ? 'wait' : 'final'; if (Z.phase < PHASES.length) this.pickNext(); }
     }
+    if (Z.state === 'final') Z.dps += dt * 2.5; // sudden death: the last storm keeps getting hungrier
     this.wall.position.set(Z.cx, -20, Z.cz); this.wall.scale.set(Math.max(0.5, Z.r), 160, Math.max(0.5, Z.r));
     this.nextRing.visible = Z.state !== 'final';
     this.nextRing.position.set(Z.nx, this.g.world.heightAt(Z.nx, Z.nz) + 0.4, Z.nz); this.nextRing.scale.setScalar(Math.max(0.5, Z.nr));
@@ -226,6 +234,7 @@ export class Royale {
     const g = this.g;
     this.t += dt;
     if (!this.over) this.updateZone(dt);
+    this.updateFalling(dt);
     // drop phase: slow magical descent with strong air control; a burst on landing
     for (const c of g.combatants) {
       if (!c.dropping) continue;
@@ -270,6 +279,46 @@ export class Royale {
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
   alive() { return this.g.combatants.filter((c) => c.alive && !c.decoy); }
+  // an arcane cache: a meteor of crystal that falls inside the next circle and bursts into a rare relic + loot
+  dropCache() {
+    const g = this.g, Z = this.zone, a = rand(0, TAU), d = Math.sqrt(Math.random()) * Math.max(4, Z.nr * 0.7);
+    const x = Z.nx + Math.cos(a) * d, z = Z.nz + Math.sin(a) * d, gy = g.world.groundAt(x, z, 200);
+    const mesh = new THREE.Mesh(GEM, this.mat('cache', () => crystalMaterial({ color: new THREE.Color(0xfff0c0), glow: new THREE.Color(0xffc040), emissive: 2.2, crack: 0.5 })));
+    mesh.scale.set(2.2, 3.2, 2.2); mesh.position.set(x, gy + 90, z); g.scene.add(mesh);
+    const beam = new THREE.Mesh(BEAM, this.mat('cachebeam', () => flowMaterial({ color: new THREE.Color(0xffc040), core: 0xffffff, intensity: 1.6, scroll: -3, stripes: 3, opacity: 0.6 })));
+    beam.scale.set(4, 90, 4); beam.position.set(x, gy, z); g.scene.add(beam);
+    this.falling = this.falling || []; this.falling.push({ mesh, beam, x, z, gy, vy: 18 });
+    g.hud.banner('', t('royale.cache'), 2.5); g.hud.feed('<b style="color:#ffd46a">✦ ' + t('royale.cache') + '</b>'); g.audio.swordFall?.(null, 1);
+    this.cacheMark = { x, z };
+  }
+  updateFalling(dt) {
+    const g = this.g;
+    for (let i = (this.falling || []).length - 1; i >= 0; i--) {
+      const F = this.falling[i]; F.vy += 30 * dt; F.mesh.position.y -= F.vy * dt; F.mesh.rotation.y += dt * 3;
+      g.fx.glow.emit({ x: F.x + rand(-0.8, 0.8), y: F.mesh.position.y + 2, z: F.z + rand(-0.8, 0.8), vy: 8, life: 0.6, size: 0.6, size1: 0.1, color: new THREE.Color(0xffd070), alpha: 1, drag: 0.5, frame: 1 });
+      g.fx.lights.request(F.mesh.position, new THREE.Color(0xffc040), 300, 30);
+      if (F.mesh.position.y <= F.gy + 1) {
+        const p = new THREE.Vector3(F.x, F.gy + 0.5, F.z);
+        g.fx.explosion('light', p, 4, 1, null, {}); g.fx.shockwave(p, 14, 1.6, 0.6); g.fx.ring(p, new THREE.Color(0xffd46a), 12, 0.8); g.fx.addShake(0.4, p);
+        g.audio.impact('earth', 1, p); g.audio.impact('light', 0.7, p);
+        for (const c of g.combatants) if (c.alive && c.distTo(p) < 4) applyHit(g, c, { dmg: 60, el: null, src: null, point: c.center(), knock: c.pos.clone().sub(p).setY(0).setLength(10).setY(6) });
+        this.dropItem(p, { type: 'relic', id: pick(RARE_RELICS) }, true);
+        for (let k = 0; k < 3; k++) this.dropItem(p, this.randomKind(), true);
+        g.scene.remove(F.mesh, F.beam); this.falling.splice(i, 1); this.cacheMark = null;
+      }
+    }
+  }
+  // Phoenix Feather: cheat death once
+  tryRevive(c) {
+    if (this.over || !(c.relics?.phoenix > 0)) return false;
+    c.relics.phoenix--; c.hp = c.maxHp * 0.5; c.addShield(120, 4, 'fire'); c.dots.length = 0; c.frozen = 0; c.stun = 0;
+    const g = this.g, p = c.center();
+    g.fx.explosion('fire', p, 3.5, 1, null, { noDecal: true }); g.fx.ring(c.pos.clone().setY(c.pos.y + 0.2), new THREE.Color(0xff7a2a), 8, 0.7); g.fx.shockwave(p, 10, 1.4, 0.5);
+    for (let i = 0; i < 40; i++) g.fx.flame(p.clone().add(new THREE.Vector3(rand(-1, 1), rand(-1, 1.5), rand(-1, 1))), { color: new THREE.Color(0xff8a2a), size: rand(0.4, 0.9), life: 1, rise: 4 });
+    g.audio.roar?.('fire', 0.8, c.pos); g.hud.feed('<b style="color:#ff7a2a">❂ ' + t('royale.revive', { who: c === g.player ? t('you') : c.name }) + '</b>');
+    if (c === g.player) { g.screenFlash?.('#ff9a4a', 0.4); this.updateHud(true); }
+    return true;
+  }
   onDeath(target, killer) {
     if (target.decoy || this.over) return;
     const g = this.g, left = this.alive().length; // target already flagged dead
@@ -280,7 +329,7 @@ export class Royale {
     this.dropItem(at, this.randomKind(), true);
     if (target === g.player) {
       this.deadT = 0;
-      g.hud.banner(`#${target.place}`, killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm'), 5);
+      g.hud.banner(`#${target.place}`, (killer && killer !== target ? t('royale.elim', { who: killer.name }) : t('royale.elimStorm')) + ' · ⚔ ' + target.kills + ' · ' + Math.round(g.stats?.dmg || 0) + ' ' + t('damage'), 6);
       g.audio.ui('defeat');
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
     if (left <= 1) this.finish(this.alive()[0]);
@@ -291,7 +340,7 @@ export class Royale {
     this.over = true;
     const g = this.g, won = winner === g.player;
     g.slowmo = 1.2;
-    g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
+    g.hud.banner(t(won ? 'royale.win' : 'royale.lose'), won ? t('royale.win2', { k: g.player.kills, d: Math.round(g.stats?.dmg || 0) }) : t('royale.lose2', { who: winner?.name || '—' }), 6);
     g.audio.ui(won ? 'victory' : 'defeat');
     if (won) for (let i = 0; i < 6; i++) setTimeout(() => { if (g.player) g.fx.explosion(pick(ELEMENT_KEYS), g.player.center().add(new THREE.Vector3(rand(-6, 6), rand(4, 9), rand(-6, 6))), 2, 0.6); }, i * 350);
     setTimeout(() => { if (g.royale === this) g.endToMenu(); }, 9000);
@@ -319,6 +368,9 @@ export class Royale {
     g2.fillStyle = 'rgba(150,60,255,0.28)'; g2.beginPath(); g2.rect(-400, -400, 800, 800); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU, true); g2.fill();
     g2.strokeStyle = 'rgba(210,140,255,0.95)'; g2.lineWidth = 2; g2.beginPath(); g2.arc((Z.cx - p.pos.x) * scale, (Z.cz - p.pos.z) * scale, Z.r * scale, 0, TAU); g2.stroke();
     if (Z.state !== 'final') { g2.strokeStyle = 'rgba(255,255,255,0.85)'; g2.setLineDash([4, 4]); g2.beginPath(); g2.arc((Z.nx - p.pos.x) * scale, (Z.nz - p.pos.z) * scale, Z.nr * scale, 0, TAU); g2.stroke(); g2.setLineDash([]); }
+    const zx = (Z.nx - p.pos.x) * scale, zy = (Z.nz - p.pos.z) * scale, zl = Math.hypot(zx, zy);
+    if (zl > 78) { const ux = zx / zl, uy = zy / zl; g2.save(); g2.translate(ux * 74, uy * 74); g2.rotate(Math.atan2(uy, ux)); g2.fillStyle = '#fff'; g2.shadowColor = '#a040ff'; g2.shadowBlur = 8; g2.beginPath(); g2.moveTo(9, 0); g2.lineTo(-6, -6); g2.lineTo(-3, 0); g2.lineTo(-6, 6); g2.closePath(); g2.fill(); g2.restore(); }
+    if (this.cacheMark) { const x = (this.cacheMark.x - p.pos.x) * scale, y = (this.cacheMark.z - p.pos.z) * scale, l = Math.hypot(x, y), k = l > 80 ? 80 / l : 1; g2.fillStyle = '#ffd46a'; g2.shadowColor = '#ffb000'; g2.shadowBlur = 10; g2.beginPath(); g2.arc(x * k, y * k, 5, 0, TAU); g2.fill(); g2.shadowBlur = 0; }
     for (const it of this.items) { const x = (it.pos.x - p.pos.x) * scale, y = (it.pos.z - p.pos.z) * scale; if (x * x + y * y > 8100) continue; g2.fillStyle = hex(this.colorOf(it.kind)); g2.beginPath(); g2.arc(x, y, 2.2, 0, TAU); g2.fill(); }
     g2.restore();
   }
@@ -334,6 +386,7 @@ export class Royale {
   dispose() {
     const s = this.g.scene;
     for (const it of [...this.items]) this.removeItem(it);
+    for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden');

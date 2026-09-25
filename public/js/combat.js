@@ -163,6 +163,7 @@ export function applyHit(game, target, hit) {
     }
   }
   if (el && !hit.dot && hit.src?.affinity?.[el]) mult *= 1 + hit.src.affinity[el]; // battle royale element cores
+  if (!hit.dot && hit.src?.allDmg) mult *= hit.src.allDmg;
   if (hit.src?.enhP?.('poison') != null && !hit.dot && hit.src !== target) addDot(target, 'poison', 6 + 10 * hit.src.enhP('poison'), 4, hit.src);
   if (!hit.dot || hit.dotEl) mult *= target.incoming();
   let dmg = Math.max(0, hit.dmg * mult);
