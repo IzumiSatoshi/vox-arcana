@@ -87,7 +87,13 @@ class WhipSpell extends Spell {
     this.tip = this.trail(this.pal.color, this.pal.core, this.r0 * 2.2, 18, 1.6 + this.m);
     this.hitSets = Array.from({ length: this.lashes }, () => new Set());
     this.cracked = -1; this.hist = [];
-    this.vertical = L.sy > 1.25; // tall looks slam overhead, others sweep side to side
+    this.vertical = L.sy > 1.25;
+    // sharp / solid matter grows thorns along the lash (briar, ice, flint); charged matter crawls with arcs
+    if (L.g.sharpness > 0.6 || solidKit(this)) {
+      this.thornMat = crystalMaterial({ color: this.kit.body.clone().lerp(this.kit.hi, 0.3), glow: this.pal.color, emissive: 0.7 + this.kit.heat, crack: 0.2 });
+      this.thorns = new THREE.InstancedMesh(new THREE.ConeGeometry(0.5, 1, 5), this.thornMat, 24); this.thorns.frustumCulled = false; this.thorns.geometry.translate(0, 0.5, 0);
+      this.add(this.thorns); this._o = new THREE.Object3D();
+    } // tall looks slam overhead, others sweep side to side
     this.g.audio.whoosh(0.6 + this.m * 0.4);
   }
   frame(u, li) {
@@ -99,7 +105,7 @@ class WhipSpell extends Spell {
   update(dt) {
     this.t += dt;
     const s = this.spec, li = Math.floor(this.t / this.dur);
-    if (li >= this.lashes) { this.done = true; this.tube.mesh.visible = false; if (this.glow) this.glow.mesh.visible = false; this.tip.dead = true; this.updateCommon(dt); return !this.finished(); }
+    if (li >= this.lashes) { this.done = true; this.tube.mesh.visible = false; if (this.thorns) this.thorns.visible = false; if (this.glow) this.glow.mesh.visible = false; this.tip.dead = true; this.updateCommon(dt); return !this.finished(); }
     const u = (this.t % this.dur) / this.dur, { f, axis, side } = this.frame(u, li);
     const origin = this.sys.castOrigin(this.caster).clone();
     const ext = smooth(u / 0.18) * (1 - smooth((u - 0.8) / 0.2) * 0.9);
@@ -120,6 +126,16 @@ class WhipSpell extends Spell {
     this.tube.mesh.material.uniforms.uFade.value = fade; if (this.glow) this.glow.mesh.material.uniforms.uFade.value = fade;
     const tip = P[this.N - 1];
     this.tip.push(tip);
+    if (this.thorns) {
+      for (let k = 0; k < 24; k++) {
+        const i = 3 + Math.floor(k * (this.N - 5) / 24), q = i / (this.N - 1), t = _v.subVectors(P[i + 1], P[i - 1]).normalize();
+        const side = _w.crossVectors(t, _up).normalize().applyAxisAngle(t, k * 2.4);
+        const o = this._o, r = rad(q); o.position.copy(P[i]).addScaledVector(side, r * 0.8); o.quaternion.setFromUnitVectors(_up, side.clone().addScaledVector(t, -0.6).normalize());
+        o.scale.set(r * 0.45, r * 1.6, r * 0.45); o.updateMatrix(); this.thorns.setMatrixAt(k, o.matrix);
+      }
+      this.thorns.instanceMatrix.needsUpdate = true;
+    }
+    if ((this.el === 'lightning' || this.look.g.temperature > 0.93) && Math.random() < 0.6) { const i = Math.floor(rand(4, this.N - 6)); this.g.fx.bolt(P[i].clone(), P[i + 5].clone().add(new THREE.Vector3(rand(-0.5, 0.5), rand(-0.5, 0.5), rand(-0.5, 0.5))), this.pal.core, { look: this.look, width: 0.04, dur: 0.07, jag: 0.4, branches: 0, flicker: false }); }
     // tip speed peaks mid-swing: the crack
     if (u > 0.42 && this.cracked < li) { this.cracked = li; this.g.audio.crack?.(this.m, tip); this.g.fx.starburst(tip, this.pal.core, 1.2 + this.m, 6, 0.12); this.g.fx.shockwave(tip, 2.5, 0.8, 0.25); }
     for (let k = 0; k < 3; k++) { const p = P[Math.floor(rand(4, this.N))]; this.emit(p, 1, r0 * 1.4, 0.8); }
@@ -141,6 +157,7 @@ class WhipSpell extends Spell {
     return !this.finished();
   }
   threats() { return [{ pos: this.caster.pos, vel: new THREE.Vector3(), radius: this.reach * 0.8, area: true }]; }
+  dispose() { super.dispose(); this.thornMat?.dispose(); this.thorns?.geometry.dispose(); }
 }
 
 // ============================================================ 2. PRISON — a cage of matter erupts around the target
@@ -194,7 +211,7 @@ class PrisonSpell extends Spell {
       const u = bar.userData, k = easeOut((this.t - u.delay) / 0.22);
       const over = k < 1 ? 1 + Math.sin(k * Math.PI) * 0.12 : 1;
       bar.scale.set(u.w * (1 - out * 0.7), Math.max(0.01, u.h * k * over * (1 - out)), u.w * (1 - out * 0.7));
-      if (!u.burst && k > 0.05) { u.burst = true; const bp = bar.position.clone().setY(bar.position.y + 0.4); fx.element(this.el, bp, { count: 6, speed: 3, size: u.w * 2.5, palette: this.pal, look: this.look }); fx.puff(bp, { color: new THREE.Color(0x8a7a60).lerp(this.kit.body, 0.5), size: 1, life: 1.2, alpha: 0.5, rise: 1.2 }); }
+      if (!u.burst && k > 0.05) { u.burst = true; const bp = bar.position.clone().setY(bar.position.y + 0.4); fx.element(this.el, bp, { count: 4, speed: 3, size: Math.min(0.5, u.w * 2), palette: this.pal, look: this.look }); if (this.solid) fx.puff(bp, { color: new THREE.Color(0x8a7a60).lerp(this.kit.body, 0.5), size: 0.8, life: 1, alpha: 0.4, rise: 1.2 }); }
       if (this.mat.uniforms?.uFade) this.mat.uniforms.uFade.value = 1 - out;
     }
     const topY = c.y + this.H * 0.93;
@@ -510,7 +527,7 @@ class HaloSpell extends Spell {
     this.orbit = [];
     for (let i = 0; i < this.n; i++) {
       let m;
-      if (solid) { m = new THREE.Group(); const sh = new THREE.Mesh(OCTA, crystalMaterial({ color: this.kit.body.clone().lerp(new THREE.Color(0xffffff), 0.2), glow: this.pal.color, emissive: 1 + this.kit.heat, crack: 0.3 })); sh.scale.set(0.16, 0.16, 0.62); m.add(sh); }
+      if (solid) { m = new THREE.Group(); const sh = new THREE.Mesh(OCTA, crystalMaterial({ color: this.kit.body.clone().lerp(new THREE.Color(0xffffff), 0.2), glow: this.pal.color, emissive: 1 + this.kit.heat, crack: 0.3 })); sh.scale.set(0.26, 0.26, 0.95); m.add(sh); }
       else if (sharp) { m = new THREE.Group(); const b = new THREE.Mesh(BLADE_GEO, crystalMaterial({ color: this.pal.color.clone().lerp(this.kit.hi, 0.4), glow: this.pal.color, emissive: 1.6, crack: 0.1 })); b.scale.setScalar(0.55); m.add(b); const h = new THREE.Mesh(SPHERE_LO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.2, noiseAmp: 0.2, opacity: 0.35 })); h.scale.set(0.15, 0.4, 0.9); m.add(h); }
       else m = coreMesh(this.el, this.pal, 0.24 + s.size * 0.08, s, this.look);
       m.userData.baseS = m.scale.clone();
@@ -518,6 +535,9 @@ class HaloSpell extends Spell {
       this.orbit.push({ m, a: (i / this.n) * TAU, alive: true, tr: this.trail(this.pal.color, this.pal.core, 0.14 + s.size * 0.06, 12, 1.2 + this.m) });
     }
     this.cd = new Map();
+    // the orbit itself: a faint band of the element so the ring reads even between blades
+    this.band = this.add(new THREE.Mesh(new THREE.TorusGeometry(1, 0.012, 6, 96), energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.3, noiseAmp: 0.1, opacity: 0.55 })));
+    this.band.userData.ownGeo = true; this.band.rotation.x = Math.PI / 2;
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: this.R * 1.1, intensity: 1.2 });
     this.mc.group.rotation.x = -Math.PI / 2; this.add(this.mc.group);
     this.g.fx.ring(this.caster.pos.clone().setY(this.caster.pos.y + 1), this.pal.color, this.R * 2.5, 0.5);
@@ -530,6 +550,7 @@ class HaloSpell extends Spell {
     const grow = easeOut(this.t / 0.35), out = clamp((this.t - this.life) / 0.5);
     this.mc.group.position.copy(c.pos).y += 0.1; this.mc.update(dt); this.mc.target = this.t < 0.8 ? 1 : 0;
     const R = this.R * grow * (1 + out * 2.5), tilt = Math.sin(this.t * 0.7) * 0.18;
+    this.band.position.set(cc.x, cc.y + 0.1, cc.z); this.band.scale.set(Math.max(0.01, R), Math.max(0.01, R), 1 + (1 - out) * 3); this.band.rotation.y = tilt * 0.3; this.band.visible = out < 0.95 && !this.done;
     for (const b of this.orbit) {
       if (!b.alive) continue;
       b.a += dt * this.spin;
@@ -755,7 +776,8 @@ class TotemSpell extends Spell {
     const baseM = stoneMaterial(0xb8a888, { moss: 0.3, joint: 0.9 });
     const cryM = crystalMaterial({ color: this.kit.body.clone().lerp(new THREE.Color(0xffffff), 0.25), glow: this.pal.color, emissive: 1.3 + this.kit.heat, crack: 0.3 });
     this.mats = [baseM, cryM];
-    this.base = this.add(new THREE.Mesh(TOTEM_BASE, baseM)); this.base.position.copy(this.at); this.base.castShadow = this.base.receiveShadow = true;
+    const bg = TOTEM_BASE.clone(); bg.setAttribute('aGround', new THREE.Float32BufferAttribute(new Float32Array(bg.attributes.position.count).fill(this.at.y), 1)); // stone shader grime reads height above the ground
+    this.base = this.add(new THREE.Mesh(bg, baseM)); this.base.userData.ownGeo = true; this.base.position.copy(this.at); this.base.castShadow = this.base.receiveShadow = true;
     this.cry = this.add(new THREE.Mesh(OCTA, cryM)); this.cry.castShadow = true;
     if (!solidKit(this)) { const sh = surfaceMaterial({ ...this.kit, opacity: 0.6 }, { spin: 1.5, twist: 1, bulge: 0.12 }); sh.uniforms.uTopFade.value = 0; this.shell = new THREE.Mesh(SMOOTH, sh); this.shell.scale.set(0.8, 0.55, 0.8); this.shell.renderOrder = 3; this.cry.add(this.shell); this.mats.push(sh); }
     this.rings = [0, 1].map((i) => { const r = new THREE.Mesh(TORUS_GEO, energyMaterial({ color: this.pal.color, core: this.pal.core, intensity: 1.4, noiseAmp: 0.05, opacity: 0.85 })); this.add(r); return r; });
