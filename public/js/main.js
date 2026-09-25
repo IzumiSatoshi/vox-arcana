@@ -2,7 +2,7 @@ import './style.js'; // global art direction: must patch shader chunks before an
 import * as THREE from 'three';
 import { TIME } from './shaders.js';
 import { bindVoiceDownload } from './voice-download.js';
-import { World } from './world.js';
+import { World, SEA_Y } from './world.js';
 import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
@@ -998,7 +998,7 @@ class Game {
       if (this.mouse.lmb) this.fireBolt();
       this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded, voiceLevel: this.chanting ? this.voice.level : 0 });
       this.viewModel.group.visible = p.alive;
-      if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(onStone, sprint); } }
+      if (p.grounded && hs > 3) { this.footT -= dt; if (this.footT <= 0) { this.footT = sprint ? 0.32 : 0.45; audio.footstep(onStone, sprint, p.pos.y < SEA_Y + 0.35); } }
     }
     for (const b of this.bots) {
       const out = b.brain.update(dt);

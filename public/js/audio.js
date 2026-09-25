@@ -340,9 +340,14 @@ export class AudioEngine {
     else if (kind === 'weave') for (let i = 0; i < 4; i++) this.tone(o, { f0: 600 + i * 150, dur: 0.15, gain: 0.06, delay: i * 0.05 });
     else if (kind === 'hover') this.tone(o, { type: 'sine', f0: 1320, f1: 1480, dur: 0.05, a: 0.002, gain: 0.06 });
   }
-  footstep(stone = false, sprint = false) {
+  footstep(stone = false, sprint = false, wet = false) {
     if (!this.enabled) return;
     const o = this.out(null, sprint ? 0.16 : 0.12, 0.02);
+    if (wet) { // wading through the shallows: a slosh and a few droplets
+      this.noise(o, { type: 'pink', f: 'bandpass', f0: rand(700, 1100), f1: 400, Q: 1.2, dur: 0.18, a: 0.01, gain: 1.4 });
+      for (let i = 0; i < 3; i++) this.tone(o, { f0: rand(500, 900), f1: rand(1200, 1800), dur: 0.05, gain: 0.25, delay: rand(0.03, 0.15) });
+      return;
+    }
     this.noise(o, { type: 'brown', f0: rand(500, 800), dur: 0.08, gain: 0.8 });
     if (stone) this.noise(o, { f: 'bandpass', f0: rand(2500, 3800), Q: 3, dur: 0.025, a: 0.001, gain: 0.35 });
     else this.noise(o, { type: 'pink', f: 'highpass', f0: rand(3000, 5000), dur: 0.09, a: 0.01, gain: 0.3 });
