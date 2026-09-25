@@ -703,7 +703,7 @@ class SwordSpell extends Spell {
         this.y = this.at.y - Ls * 0.22 + Ls; this.phase = 'stuck'; this.pt = 0;
         const c = this.at.clone().setY(this.at.y + 0.6);
         if (this.target?.alive && Math.hypot(this.target.pos.x - this.at.x, this.target.pos.z - this.at.z) < 1.4 + Ls * 0.06) this.hit(this.target, 70, this.target.center(), { stun: 0.4, shatter: true });
-        this.explode(c, this.R, 62, { knock: 12 + s.weight * 8, lift: 7, falloff: 0.5 });
+        this.explode(c, this.R, this.minor ? 22 : 62, { knock: (12 + s.weight * 8) * (this.minor ? 0.5 : 1), lift: 7, falloff: 0.5 });
         fx.decal(this.at.clone().setY(this.at.y + 0.05), this.R * 1.6, this.el, this.pal.color);
         fx.shockWall?.(this.at, this.R * 1.4, this.look, this.el, 0.7, 1.1);
         fx.ring(this.at.clone().setY(this.at.y + 0.2), this.pal.core, this.R * 3, 0.6); fx.shockwave(c, this.R * 4, 1.6, 0.5);
