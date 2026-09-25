@@ -304,15 +304,39 @@ export class AudioEngine {
     notes.forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 0.5, gain: 0.12, delay: i * 0.05 }));
     this.noise(o, { f: 'highpass', f0: 4000, dur: 0.3, gain: 0.3 });
   }
-  hitmarker() { if (!this.enabled) return; const o = this.out(null, 0.35, 0); this.tone(o, { type: 'square', f0: 1800, f1: 1400, dur: 0.05, gain: 0.2 }); }
-  hurt() { if (!this.enabled) return; const o = this.out(null, 0.6, 0.1); this.noise(o, { type: 'brown', f0: 600, f1: 80, dur: 0.25, gain: 1.2 }); this.tone(o, { f0: 90, f1: 50, dur: 0.2, gain: 0.5 }); }
+  // hit confirm: a crisp two-partial tick with a tiny body thump, pitched up a little on rapid repeats
+  hitmarker() {
+    if (!this.enabled) return;
+    const now = performance.now(), fast = now - (this._hmT || 0) < 250; this._hmT = now; this._hmN = fast ? Math.min(6, (this._hmN || 0) + 1) : 0;
+    const o = this.out(null, 1.1, 0), k = 1 + this._hmN * 0.04;
+    this.tone(o, { type: 'triangle', f0: 2100 * k, f1: 1500 * k, dur: 0.045, a: 0.001, gain: 0.22 });
+    this.tone(o, { f0: 3150 * k, dur: 0.03, a: 0.001, gain: 0.08 });
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 900, Q: 1.5, dur: 0.04, a: 0.001, gain: 0.3 });
+  }
+  // taking damage: a muffled body blow with a short ringing ear-tone for heavy hits
+  hurt(heavy = 0) {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.6, 0.1);
+    this.noise(o, { type: 'brown', f0: 600, f1: 80, dur: 0.25, gain: 1.2 });
+    this.tone(o, { f0: 90, f1: 50, dur: 0.2, gain: 0.5 });
+    this.noise(o, { type: 'pink', f: 'lowpass', f0: 1400, f1: 300, dur: 0.18, a: 0.002, gain: 0.5 });
+    if (heavy > 0.5) this.tone(o, { f0: 3800, dur: 0.9, a: 0.02, gain: 0.025 * heavy });
+  }
   ui(kind = 'click') {
     if (!this.enabled) return;
     const o = this.out(null, 0.4, 0.2);
     if (kind === 'click') this.tone(o, { type: 'triangle', f0: 880, f1: 1320, dur: 0.08, gain: 0.2 });
     else if (kind === 'fizzle') { this.tone(o, { f0: 400, f1: 120, dur: 0.3, gain: 0.2 }); this.noise(o, { f0: 1200, f1: 200, dur: 0.3, gain: 0.3 }); }
-    else if (kind === 'victory') [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(o, { type: 'triangle', f0: f, dur: 1.2, gain: 0.15, delay: i * 0.12 }));
-    else if (kind === 'defeat') [392, 349, 311, 262].forEach((f, i) => this.tone(o, { type: 'sine', f0: f, dur: 1.2, gain: 0.18, delay: i * 0.25 }));
+    else if (kind === 'victory') { // a short brass fanfare: pickup triplet, held tonic chord, bell sparkle and a timpani roll
+      const brass = (f, d, dur, g = 0.1) => { const w = this.distort(o, 0.35); for (const dt of [-6, 6]) this.tone(w, { type: 'sawtooth', f0: f, dur, a: 0.03, gain: g, delay: d, detune: dt }); };
+      [[392, 0, 0.14], [392, 0.15, 0.14], [392, 0.3, 0.14], [523, 0.45, 1.5], [659, 0.45, 1.5], [784, 0.45, 1.5]].forEach(([f, d, dur]) => brass(f, d, dur));
+      [1568, 2093, 2637].forEach((f, i) => this.tone(o, { f0: f, dur: 1.2, a: 0.002, gain: 0.05, delay: 0.5 + i * 0.07 }));
+      for (let i = 0; i < 10; i++) this.tone(o, { f0: 98, f1: 80, dur: 0.18, a: 0.002, gain: 0.25 * (i / 10), delay: 0.45 + i * 0.03 });
+    } else if (kind === 'defeat') { // falling minor line over a low drum, fading into the storm
+      [392, 349, 311, 262].forEach((f, i) => { this.tone(o, { type: 'triangle', f0: f, dur: 1.2, gain: 0.14, delay: i * 0.28 }); this.tone(o, { f0: f / 2, dur: 1.2, gain: 0.08, delay: i * 0.28 }); });
+      this.tone(o, { f0: 65, f1: 40, dur: 1.4, a: 0.004, gain: 0.5, delay: 1.1 });
+      this.noise(o, { type: 'brown', f0: 300, f1: 60, dur: 2.2, a: 0.3, gain: 0.5, delay: 0.9 });
+    }
     else if (kind === 'weave') for (let i = 0; i < 4; i++) this.tone(o, { f0: 600 + i * 150, dur: 0.15, gain: 0.06, delay: i * 0.05 });
     else if (kind === 'hover') this.tone(o, { type: 'sine', f0: 1320, f1: 1480, dur: 0.05, a: 0.002, gain: 0.06 });
   }
