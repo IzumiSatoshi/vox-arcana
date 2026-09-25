@@ -8,30 +8,10 @@ import { ARENA_R, SEA_Y, MESAS } from './world.js';
 import { applyHit } from './combat.js';
 import { t, getLang } from './i18n.js';
 import { MagicCircle } from './magicCircle.js';
+import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, equip, grant } from './royale-rules.js';
 import { rand, pick, clamp, TAU } from './util.js';
 
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
-const PASSIVES = {
-  font: { en: 'Mana Font', ja: '魔力の泉', desc: ['+40% mana regen', 'マナ回復+40%'], color: 0x5ab8ff, icon: '✦' },
-  vessel: { en: 'Arcane Vessel', ja: '魔力の器', desc: ['+30 max mana', '最大マナ+30'], color: 0x8a7aff, icon: '⬢' },
-  heart: { en: 'Troll Heart', ja: '巨人の心臓', desc: ['+150 max HP', '最大HP+150'], color: 0xff5a6a, icon: '♥' },
-  boots: { en: 'Windstep Boots', ja: '疾風の靴', desc: ['+12% move speed', '移動速度+12%'], color: 0x6affc8, icon: '➶' },
-  focus: { en: 'Sage Focus', ja: '賢者の宝珠', desc: ['-12% spell cost', '詠唱コスト-12%'], color: 0xffd46a, icon: '◈' },
-  // rare: mostly found in arcane caches that fall from the sky each storm phase
-  crown: { en: 'Archmage Crown', ja: '大魔導の冠', desc: ['+15% damage with every element', '全属性ダメージ+15%'], color: 0xffe066, icon: '♛', rare: true },
-  phoenix: { en: 'Phoenix Feather', ja: '不死鳥の羽', desc: ['Rise again once with half HP', '一度だけHP半分で復活'], color: 0xff7a2a, icon: '❂', rare: true },
-};
-const COMMON_RELICS = Object.keys(PASSIVES).filter((k) => !PASSIVES[k].rare), RARE_RELICS = Object.keys(PASSIVES).filter((k) => PASSIVES[k].rare);
-const POTIONS = {
-  hp: { en: 'Healing Draught', ja: '回復薬', key: '1', color: 0xff4a5a, icon: '✚' },
-  mana: { en: 'Mana Draught', ja: 'マナ薬', key: '2', color: 0x3a8aff, icon: '◆' },
-  shield: { en: 'Aegis Draught', ja: '守護薬', key: '3', color: 0xffc83a, icon: '⛨' },
-};
-// storm phases: seconds waiting, seconds shrinking, target radius, damage per second outside
-const PHASES = [
-  { wait: 45, shrink: 25, r: 72, dps: 5 }, { wait: 30, shrink: 22, r: 46, dps: 8 }, { wait: 25, shrink: 18, r: 26, dps: 12 },
-  { wait: 20, shrink: 15, r: 11, dps: 18 }, { wait: 15, shrink: 14, r: 0, dps: 28 },
-];
 const NAMES = ['Vel', 'Rhea', 'Morrow', 'Isolde', 'Kael', 'Nyx', 'Oren', 'Sable', 'Thane', 'Lyra', 'Corvin', 'Ember', 'Wren', 'Ash'];
 const NAMES_JA = ['ヴェル', 'レア', 'モロウ', 'イゾルデ', 'カエル', 'ニクス', 'オーレン', 'セーブル', 'セイン', 'ライラ', 'コルヴィン', 'エンバー', 'レン', 'アッシュ'];
 const ROBES = [[0x5a1a2a, 0xff4a6a], [0x1a4a2a, 0x7dff8a], [0x3a1a5a, 0xc07aff], [0x5a3a10, 0xffb040], [0x0a3a4a, 0x40e0ff], [0x4a4a4a, 0xf0f0f0], [0x2a1a10, 0xff7a30], [0x10204a, 0x7aa0ff]];
@@ -169,10 +149,7 @@ export class Royale {
     if (k > 1.2) { this.g.scene.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => { m.geometry?.dispose(); }); this.ship = null; }
   }
   boarding() { return this.g.combatants.some((c) => c.onShip); }
-  equip(c) {
-    c.inv = { hp: 1, mana: 0, shield: 0 }; c.affinity = {}; c.relics = {};
-    c.manaRegen = 1; c.speedMult = 1; c.costBonus = 1; c.maxHp = 600; c.maxMana = 120; c.hp = 600; c.mana = 120;
-  }
+  equip(c) { equip(c); }
   // ------------------------------------------------------------ loot
   randomSpot() {
     const W = this.g.world;
@@ -233,18 +210,7 @@ export class Royale {
     if (k.type === 'relic') return PASSIVES[k.id].desc[ja ? 1 : 0];
     return ja ? `[${POTIONS[k.id].key}] で使用` : `press ${POTIONS[k.id].key} to drink`;
   }
-  grant(c, k) {
-    if (k.type === 'core') c.affinity[k.el] = Math.min(0.8, (c.affinity[k.el] || 0) + 0.2);
-    else if (k.type === 'relic') {
-      c.relics[k.id] = (c.relics[k.id] || 0) + 1;
-      if (k.id === 'font') c.manaRegen += 0.4;
-      if (k.id === 'vessel') { c.maxMana += 30; c.mana += 30; }
-      if (k.id === 'heart') { c.maxHp += 150; c.hp += 150; }
-      if (k.id === 'boots') c.speedMult += 0.12;
-      if (k.id === 'focus') c.costBonus *= 0.88;
-      if (k.id === 'crown') c.allDmg = (c.allDmg || 1) + 0.15;
-    } else c.inv[k.id] = Math.min(5, (c.inv[k.id] || 0) + 1);
-  }
+  grant(c, k) { grant(c, k); }
   pickup(c, it) {
     const g = this.g, col = this.colorOf(it.kind);
     this.grant(c, it.kind);
@@ -263,9 +229,9 @@ export class Royale {
     const g = this.g;
     if (!c.alive || !(c.inv?.[id] > 0)) return false;
     c.inv[id]--;
-    if (id === 'hp') { const n = 220; c.heal(n); g.onHeal?.(c, n); }
-    if (id === 'mana') c.mana = Math.min(c.maxMana, c.mana + 90);
-    if (id === 'shield') { c.addShield(160, 20, 'light'); g.onShield?.(c); }
+    if (id === 'hp') { const n = POTION_EFFECT.hp; c.heal(n); g.onHeal?.(c, n); }
+    if (id === 'mana') c.mana = Math.min(c.maxMana, c.mana + POTION_EFFECT.mana);
+    if (id === 'shield') { c.addShield(POTION_EFFECT.shield, 20, 'light'); g.onShield?.(c); }
     const col = new THREE.Color(POTIONS[id].color);
     g.fx.ring(c.pos.clone().setY(c.pos.y + 0.2), col, 3.5, 0.5);
     for (let i = 0; i < 18; i++) { const a = rand(0, TAU); g.fx.glow.emit({ x: c.pos.x + Math.cos(a) * 0.7, y: c.pos.y + rand(0, 0.4), z: c.pos.z + Math.sin(a) * 0.7, vy: rand(2, 4.5), life: 0.9, size: 0.2, size1: 0.03, color: col, alpha: 1, drag: 0.6, frame: 1 }); }
