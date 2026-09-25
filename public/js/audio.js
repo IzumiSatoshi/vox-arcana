@@ -442,6 +442,13 @@ export class AudioEngine {
     this.tone(o, { f0: 120, f1: 35, dur: 0.5, a: 0.005, gain: 0.8 });
     this.noise(o, { f: 'highpass', f0: 2500, dur: 0.03, a: 0.001, gain: 0.8 });
   }
+  // something big flying past your head: a band of wind sweeping from high to low (a poor man's doppler)
+  passby(pos = null, m = 0.5) {
+    if (!this.enabled) return;
+    const o = this.out(pos, 0.8 + m * 0.4, 0.25);
+    this.noise(o, { type: 'pink', f: 'bandpass', f0: 2600, f1: 500, Q: 2.5, dur: 0.55, a: 0.12, gain: 1.4 });
+    this.noise(o, { type: 'brown', f0: 500, f1: 120, dur: 0.6, a: 0.1, gain: 0.8 });
+  }
   // totem shot
   zap(el = 'arcane', pos = null) {
     if (!this.enabled) return;

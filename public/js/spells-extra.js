@@ -571,6 +571,7 @@ class BeastSpell extends Spell {
     });
     for (let k = 0; k < 2; k++) { const p = this.pts[Math.floor(rand(2, this.N - 4))]; this.emit(p, 1, r * 0.9, 0.6); }
     if (this.state !== 'gone') { this.light(this.pos, 120, 8); this.loopSnd?.set(this.pos); }
+    const camD = this.pos.distanceTo(this.g.camera.position); if (camD < 7 && (this.camD ?? 99) >= 7) this.g.audio.passby?.(this.pos, this.m); this.camD = camD; // it swept past your head
     if (this.state === 'gone' && this.stT > 0.4) this.done = true;
     this.updateCommon(dt);
     return !this.finished() || this.mc.opacity > 0.02;
@@ -823,6 +824,7 @@ class RushSpell extends Spell {
       if (c.grounded && c.pos.distanceTo(this.lastMark || _w.set(1e9, 0, 0)) > 1.6) { this.lastMark = c.pos.clone(); fx.decal(c.pos.clone().setY(c.pos.y + 0.05), 0.9 + this.m * 0.3, this.el, this.pal.color); } // a scorched track behind the charge
       this.tr.push(cc);
       this.light(cc, 200, 10);
+      if (!c.isPlayer) { const camD = cc.distanceTo(this.g.camera.position); if (camD < 6 && (this.camD ?? 99) >= 6) this.g.audio.passby?.(cc, this.m); this.camD = camD; }
       if (c.isPlayer) this.g.fovKick = 16; // the world stretches past you
     } else if (!this.burst) {
       this.burst = true; c.vel.multiplyScalar(0.25);
