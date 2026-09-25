@@ -55,8 +55,8 @@ const stormMat = () => new THREE.ShaderMaterial({
 
 // ------------------------------------------------------------ loot meshes (shared geometry + per-kind materials)
 const BOTTLE = (() => { const pts = [[0, 0], [0.2, 0.02], [0.26, 0.12], [0.26, 0.3], [0.2, 0.42], [0.08, 0.5], [0.08, 0.62], [0.11, 0.66], [0, 0.68]].map(([r, y]) => new THREE.Vector2(r, y)); const g = new THREE.LatheGeometry(pts, 20); g.translate(0, -0.34, 0); return g; })();
-const GEM = new THREE.OctahedronGeometry(0.32, 0);
-const RELIC = new THREE.IcosahedronGeometry(0.3, 0);
+const GEM = new THREE.OctahedronGeometry(0.44, 0);
+const RELIC = new THREE.IcosahedronGeometry(0.4, 0);
 const BEAM = (() => { const g = new THREE.CylinderGeometry(0.12, 0.3, 1, 12, 1, true); g.translate(0, 0.5, 0); return g; })();
 const RING = (() => { const g = new THREE.RingGeometry(0.55, 0.75, 40); g.rotateX(-Math.PI / 2); return g; })();
 
@@ -84,7 +84,8 @@ export class Royale {
   start() {
     const g = this.g, p = g.player, ja = getLang() === 'ja';
     const names = [...(ja ? NAMES_JA : NAMES)].sort(() => Math.random() - 0.5);
-    const diffs = ['easy', 'normal', 'normal', 'normal', 'hard', 'normal', 'easy'];
+    // the rival difficulty setting shifts the lobby's mix
+    const diffs = { easy: ['easy', 'easy', 'easy', 'normal', 'easy', 'normal', 'easy'], normal: ['easy', 'normal', 'normal', 'normal', 'hard', 'normal', 'easy'], hard: ['normal', 'hard', 'hard', 'normal', 'hard', 'hard', 'normal'] }[g.settings.diff] || ['normal', 'normal', 'normal', 'normal', 'normal', 'normal', 'normal'];
     for (let i = 0; i < 7; i++) {
       const [robe, accent] = ROBES[i % ROBES.length];
       const b = g.createBot(names[i], diffs[i], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
@@ -116,7 +117,9 @@ export class Royale {
     for (let k = 0; k < 40; k++) {
       const a = rand(0, TAU), r = Math.sqrt(Math.random()) * (ARENA_R - 8), x = Math.cos(a) * r, z = Math.sin(a) * r, h = W.heightAt(x, z);
       if (h < SEA_Y + 1.2 || W.normalAt(x, z).y < 0.85 || W.onRamp?.(x, z)) continue;
-      return new THREE.Vector3(x, W.groundAt(x, z, h + 3), z);
+      const p = new THREE.Vector3(x, W.groundAt(x, z, h + 3), z), q = p.clone(); q.y += 1; W.collideBody(q, 0.9);
+      if (Math.hypot(q.x - p.x, q.z - p.z) > 0.01 || W.solid(q)) continue; // not inside ruins, trees or rocks
+      return p;
     }
     return new THREE.Vector3(rand(-20, 20), 0.5, rand(-20, 20));
   }
@@ -141,7 +144,7 @@ export class Royale {
       const glass = new THREE.Mesh(BOTTLE, this.mat('glass', () => new THREE.MeshStandardMaterial({ color: 0xdff4ff, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.45, depthWrite: false })));
       const liquid = new THREE.Mesh(BOTTLE, this.mat(key, () => new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.8, roughness: 0.3 }))); liquid.scale.set(0.82, 0.7, 0.82); liquid.position.y = -0.06;
       const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.065, 0.1, 10), this.mat('cork', () => new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.9 }))); cork.position.y = 0.36; cork.userData.ownGeo = true;
-      body.add(liquid, glass, cork); body.scale.setScalar(1.4);
+      body.add(liquid, glass, cork); body.scale.setScalar(1.9);
     }
     grp.add(body);
     const halo = new THREE.Mesh(RING, this.mat('ring' + key, () => new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false })));
@@ -262,7 +265,7 @@ export class Royale {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i]; it.age += dt;
       if (it.vel) { it.vel.y -= 18 * dt; it.pos.addScaledVector(it.vel, dt); const gy = g.world.groundAt(it.pos.x, it.pos.z, it.pos.y + 1); if (it.pos.y <= gy) { it.pos.y = gy; it.vel = null; } }
-      const bob = 0.9 + Math.sin(this.t * 2 + it.seed) * 0.15;
+      const bob = 1.15 + Math.sin(this.t * 2 + it.seed) * 0.15;
       it.grp.position.set(it.pos.x, it.pos.y + bob, it.pos.z); it.body.rotation.y += dt * 1.6; it.body.rotation.x = Math.sin(this.t + it.seed) * 0.2;
       it.halo.position.set(it.pos.x, it.pos.y + 0.06, it.pos.z); it.halo.scale.setScalar(1 + Math.sin(this.t * 3 + it.seed) * 0.08);
       it.beam.position.set(it.pos.x, it.pos.y, it.pos.z);
