@@ -388,7 +388,8 @@ export class Hud {
     if (spec.luminosity != null) P.push(['p.glow', spec.luminosity]);
     const box = $('sc-params');
     box.innerHTML = P.map(([k, v]) => `<div class="sp"><span class="sp-k">${t(k)}</span><span class="sp-n">${Math.round(v * 100)}</span><span class="pb"><i style="width:0"></i></span></div>`).join('');
-    requestAnimationFrame(() => box.querySelectorAll('i').forEach((i, n) => (i.style.width = Math.round(P[n][1] * 100) + '%')));
+    const bars = [...box.querySelectorAll('i')]; // bind now: a second card in the same frame must not mix bar lists
+    requestAnimationFrame(() => bars.forEach((i, n) => (i.style.width = Math.round(P[n][1] * 100) + '%')));
     $('sc-cost').innerHTML = `<span class="sc-mana"><b>${spec.cost}</b> ${t('mana')}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}${this.bonusTag(spec, casterName)}`;
     this.cardTimer = this.g.mode === 'practice' && !casterName ? Infinity : 6;
   }

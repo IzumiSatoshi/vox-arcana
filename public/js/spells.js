@@ -2107,7 +2107,7 @@ function runPayload(sp, pos, R, target, dmg, frac = 1, vel = null, forced = null
     }
     case 'implode': {
       fx.ring(pos, sp.pal.color, R * 3, 0.5); let t = 0;
-      g.audio.cast('darkness', 0.4, pos, this.look);
+      g.audio.cast('darkness', 0.4, pos, sp.look);
       fx.add((dt) => {
         t += dt;
         fx.attractors.push({ x: pos.x, y: pos.y, z: pos.z, r2: (R * 4) ** 2, k: 60, swirl: 2 });
