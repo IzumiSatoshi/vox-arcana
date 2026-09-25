@@ -13,6 +13,17 @@ import { PASSIVES, COMMON_RELICS, RARE_RELICS, POTIONS, PHASES, POTION_EFFECT, e
 import { rand, pick, clamp, TAU } from './util.js';
 
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
+// named places, announced as you enter them
+const MESA_NAMES = [['Sunspire Mesa', '陽塔の卓状台地'], ['Hollow Mesa', '虚ろの卓状台地'], ['Titan Mesa', '巨神の卓状台地'], ['Ember Mesa', '熾火の卓状台地'], ['Wren Rock', '鷦鷯の岩'], ['Moon Rock', '月の岩']];
+const QUARTERS = [['Whispering Ruins', '囁きの遺跡'], ['Bloomfield', '花咲く野'], ['Old Arches', '古き門'], ['Mistwood', '霧の森']];
+function regionOf(world, x, z) {
+  const r = Math.hypot(x, z), h = world.heightAt(x, z);
+  if (r < 12) return ['Azure Dais', '蒼の祭壇'];
+  for (let i = 0; i < MESAS.length; i++) { const m = MESAS[i]; if (Math.hypot(x - m.x, z - m.z) < m.R) return MESA_NAMES[i]; }
+  if (h < SEA_Y + 1) return ['Tidewash Shore', '潮騒の浜'];
+  if (r > 78) return ['Outer Terrace', '外縁の段丘'];
+  return QUARTERS[Math.floor(((Math.atan2(z, x) + Math.PI * 1.25) % TAU) / (TAU / 4)) % 4];
+}
 const NAMES = ['Vel', 'Rhea', 'Morrow', 'Isolde', 'Kael', 'Nyx', 'Oren', 'Sable', 'Thane', 'Lyra', 'Corvin', 'Ember', 'Wren', 'Ash'];
 const NAMES_JA = ['ヴェル', 'レア', 'モロウ', 'イゾルデ', 'カエル', 'ニクス', 'オーレン', 'セーブル', 'セイン', 'ライラ', 'コルヴィン', 'エンバー', 'レン', 'アッシュ'];
 const ROBES = [[0x5a1a2a, 0xff4a6a], [0x1a4a2a, 0x7dff8a], [0x3a1a5a, 0xc07aff], [0x5a3a10, 0xffb040], [0x0a3a4a, 0x40e0ff], [0x4a4a4a, 0xf0f0f0], [0x2a1a10, 0xff7a30], [0x10204a, 0x7aa0ff]];
@@ -352,6 +363,11 @@ export class Royale {
       const V = this.victory; V.t += dt; const a = V.t * 0.45, r = 6 + Math.min(4, V.t * 0.8), p = g.player;
       g.debugCam = { pos: [V.at.x + Math.cos(a) * r, V.at.y + 2.2 + V.t * 0.25, V.at.z + Math.sin(a) * r], target: [V.at.x, V.at.y + 1.3, V.at.z] };
       p.yaw = Math.atan2(p.pos.x - g.debugCam.pos[0], p.pos.z - g.debugCam.pos[2]) + Math.sin(V.t * 2) * 0.3; p.chanting = V.t % 3 < 1.5; // turn toward the lens, staff raised
+    }
+    // announce the place you walk into
+    if (p?.alive && !p.onShip && !p.dropping) {
+      const reg = regionOf(g.world, p.pos.x, p.pos.z)[getLang() === 'ja' ? 1 : 0];
+      if (reg !== this.region) { this.region = reg; const el = document.getElementById('br-region'); if (el) { el.textContent = reg; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); } }
     }
     this.hudT -= dt; if (this.hudT <= 0) this.updateHud();
   }
