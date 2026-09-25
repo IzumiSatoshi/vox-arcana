@@ -78,6 +78,9 @@ export class Royale {
     this.howl = game.audio.loop('darkness', new THREE.Vector3(), 0, null, { spin: 0.9 });
     this.windSnd = game.audio.loop('wind', null, 0, null, { spin: 0.5 });
     this.shrineSnd = game.audio.loop('light', new THREE.Vector3(), 0);
+    // where you will land: a ring on the ground under you while you fall
+    this.landMark = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.15, 40), new THREE.MeshBasicMaterial({ color: 0xffd46a, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+    this.landMark.rotation.x = -Math.PI / 2; this.landMark.renderOrder = 6; this.landMark.visible = false; game.scene.add(this.landMark);
   }
   // ------------------------------------------------------------ setup
   start() {
@@ -313,7 +316,9 @@ export class Royale {
     const g = this.g;
     this.t += dt;
     this.updateShip(dt);
-    const pl = g.player; this.windSnd?.set(null, pl?.onShip ? 0.25 : pl?.dropping ? clamp(-pl.vel.y / 22) * 0.9 : 0);
+    const pl = g.player;
+    if (pl) { const lm = this.landMark, on = pl.dropping && pl.alive; lm.visible = on; if (on) { const gy = g.world.groundAt(pl.pos.x, pl.pos.z, pl.pos.y); lm.position.set(pl.pos.x, gy + 0.15, pl.pos.z); lm.scale.setScalar(1 + (pl.pos.y - gy) * 0.06 + Math.sin(this.t * 6) * 0.08); } }
+    this.windSnd?.set(null, pl?.onShip ? 0.25 : pl?.dropping ? clamp(-pl.vel.y / 22) * 0.9 : 0);
     if (!this.over) this.updateZone(dt);
     this.updateFalling(dt);
     this.updateShrines(dt);
@@ -554,7 +559,7 @@ export class Royale {
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
     for (const c of this.g.combatants) c.onShip = false;
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
-    s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
+    s.remove(this.wall, this.nextRing, this.landMark); this.landMark.geometry.dispose(); this.landMark.material.dispose(); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
     if (this.g.debugCam && (this.deadT !== undefined || this.victory)) this.g.debugCam = null;
