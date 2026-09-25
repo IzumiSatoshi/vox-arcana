@@ -8,6 +8,28 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
 > "Summoning the spirit of fire, gathering the power of the earth, here I will cast the ultimate fireball!" →
 > a Legendary **Stone-Fireball**: a gathered sun of flame with a sigil, 2.5× damage and a huge blast.
 
+## What's new
+
+- **10 new spell forms** (33 in total). Jev understands all of them in English and Japanese, and so do the keyword parser and the rival AI:
+  - **whip** (鞭) and **prison** (牢獄)
+  - **decoy** (分身): doubles that fake-cast
+  - **drain** (吸収), which can hit up to three foes
+  - **beast** (召喚獣): a serpent dragon, or twin dragons at a high count
+  - **halo** (円環): its blades intercept incoming shots
+  - **sword** (大剣): at a high count, a ring of swords falls
+  - **rush** (突進), **totem** (祭壇) and **mark** (刻印)
+- **Battle Royale**:
+  - 4, 8 or 12 mages ride a floating sky ferry and jump when they like.
+  - Loot element cores, relics and potions. Mesa tops hold extra relics, and a rare cache falls once per storm phase.
+  - Survive a five-phase violet storm that ends in sudden death.
+  - The radar only shows foes that are close or chanting. After you fall you can spectate, and a standings panel shows the results.
+- **Sound**:
+  - Distance filtering: air absorption and a delay before far sounds arrive.
+  - A hall reverb and a voice budget, so dense fights stay clear. Per-element loudness is balanced.
+  - A choir under the chant, and music that ducks while you speak.
+  - New effects: form sweeteners (whip crack, dragon roar, rune ticks, sword whistle, shatter), footsteps on grass or stone, landings, a heartbeat at low HP, a victory fanfare, kill-streak stings, a storm howl, and birds and wind.
+- **Performance**: mage models use distance LOD down to a five-mesh impostor, so large lobbies stay smooth.
+
 ## Run
 
 ```bash
