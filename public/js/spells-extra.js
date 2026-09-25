@@ -178,7 +178,8 @@ class PrisonSpell extends Spell {
     this.life = 2.4 + s.duration * 2.6 + this.m;
     this.n = 9 + Math.round(s.size * 5 + this.level * 2);
     this.solid = solidKit(this);
-    this.mat = this.solid ? crystalMaterial({ color: this.kit.body.clone().lerp(new THREE.Color(0xffffff), 0.15), glow: this.pal.color, emissive: 1.1 + this.kit.heat * 1.5, crack: 0.35 + this.kit.heat * 0.4 })
+    this.rough = this.solid && L.g.sharpness < 0.6; // blunt matter is rough-hewn stone (thick, grey, few veins), sharp matter clean crystal
+    this.mat = this.solid ? crystalMaterial({ color: this.rough ? this.kit.body.clone().lerp(new THREE.Color(0x8a8278), 0.5) : this.kit.body.clone().lerp(new THREE.Color(0xffffff), 0.15), glow: this.pal.color, emissive: (this.rough ? 0.5 : 1.1) + this.kit.heat * 1.5, crack: (this.rough ? 0.12 : 0.35) + this.kit.heat * 0.5, rough: this.rough })
       : tubeMat(this.kit, { flow: 2.5, topFade: 1 });
     if (!this.solid) { this.mat.uniforms.uCrest.value = 0.5; this.glowMat = this.kit.energy > 0.25 ? tubeMat(this.kit, { flow: 3, energyOnly: true }) : null; }
     this.bars = [];
@@ -192,7 +193,7 @@ class PrisonSpell extends Spell {
       // lean the bar in toward the axis so the cage closes like a claw
       const top = this.center.clone().setY(p.y + this.H).addScaledVector(_v.set(Math.cos(a), 0, Math.sin(a)), this.R * 0.45);
       bar.position.copy(p); bar.quaternion.setFromUnitVectors(_up, top.clone().sub(p).normalize());
-      const w = (0.16 + s.size * 0.08 + this.m * 0.05) * (this.solid ? 1 : 1.5) * rand(0.85, 1.15);
+      const w = (0.16 + s.size * 0.08 + this.m * 0.05) * (this.rough ? 1.3 : this.solid ? 1 : 1.5) * rand(0.85, 1.15);
       bar.userData = { w, h: top.distanceTo(p) * rand(0.9, 1.08), delay: (i % 2) * 0.05 + rand(0, 0.06), a };
       bar.scale.set(w, 0.01, w); this.add(bar); this.bars.push(bar);
     }
