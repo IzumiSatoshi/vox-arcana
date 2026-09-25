@@ -51,3 +51,8 @@ test('the rival generates incantations for the new forms that parse back to the 
     assert.equal(localParse(text).shape, form, `${lang}: ${text}`);
   }
 });
+
+test('every form has a How-to guide line in English and Japanese', async () => {
+  const { FORM_GUIDE } = await import('../public/js/form-guide.js');
+  for (const k of Object.keys(SHAPES)) { assert.ok(FORM_GUIDE[k]?.[0] && FORM_GUIDE[k]?.[1], k); }
+});
