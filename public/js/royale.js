@@ -265,7 +265,8 @@ export class Royale {
       g.hud.popup?.(it.pos.clone().setY(it.pos.y + 1.6), this.itemName(it.kind), 'react', hex(col));
       this.updateHud(true);
     }
-    this.removeItem(it);
+    // the relic flies into its new owner: beam and halo vanish now, the body follows the mage for a moment
+    this.g.scene.remove(it.halo, it.beam); this.items.splice(this.items.indexOf(it), 1); (this.flyers ||= []).push({ it, c, t: 0 });
   }
   // potions: 1 heal · 2 mana · 3 shield
   drink(c, id) {
@@ -347,6 +348,11 @@ export class Royale {
     this.updateFalling(dt);
     this.updateShrines(dt);
     this.updateWisps(dt);
+    for (let i = (this.flyers || []).length - 1; i >= 0; i--) {
+      const F = this.flyers[i]; F.t += dt; const k = Math.min(1, F.t / 0.3);
+      F.it.grp.position.lerp(F.c.center(), Math.min(1, dt * 14)); F.it.grp.scale.setScalar(Math.max(0.01, 1 - k)); F.it.body.rotation.y += dt * 12;
+      if (k >= 1) { this.g.scene.remove(F.it.grp); F.it.grp.traverse((m) => m.userData.ownGeo && m.geometry.dispose()); this.flyers.splice(i, 1); }
+    }
     // drop phase: slow magical descent with strong air control; a burst on landing
     for (const c of g.combatants) {
       if (!c.dropping) continue;
@@ -640,6 +646,7 @@ export class Royale {
     const s = this.g.scene;
     for (const S of this.shrines || []) { s.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => m.geometry?.dispose()); }
     for (const it of [...this.items]) this.removeItem(it);
+    for (const F of this.flyers || []) s.remove(F.it.grp);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     for (const W of this.wisps || []) s.remove(W.orb, W.ring);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); this.ship.grp.traverse((m) => m.geometry?.dispose()); }
