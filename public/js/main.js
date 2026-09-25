@@ -6,6 +6,7 @@ import { World } from './world.js';
 import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
+import './spells-extra.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
 import { MagicCircle } from './magicCircle.js';
@@ -196,6 +197,7 @@ class Game {
   // ------------------------------------------------------------ combatants
   makeCombatant(opts, colors) {
     const c = new Combatant(opts);
+    c.colors = colors || null;
     if (colors) {
       c.model = new MageModel(colors); this.scene.add(c.model.root);
       c.castOrigin = () => c.model.handWorld(c._ho || (c._ho = new THREE.Vector3()));
@@ -239,7 +241,7 @@ class Game {
   }
   focusEnemy() {
     if (!this.player) return null;
-    const others = this.combatants.filter((c) => c !== this.player && c.alive);
+    const others = this.combatants.filter((c) => c !== this.player && c.alive && c.owner !== this.player);
     if (!others.length) return null;
     const f = this.camera.getWorldDirection(new THREE.Vector3());
     let best = null, bs = -Infinity;
@@ -613,6 +615,7 @@ class Game {
   onBotChantCancel() { if (this.mode !== 'menu') window.speechSynthesis?.cancel(); }
   onDeath(target, killer) {
     if (!target.alive) return;
+    if (target.decoy) { target.alive = false; return; } // an illusion: its spell pops it
     target.alive = false; target.deaths++; if (killer && killer !== target) killer.kills++;
     target.chanting = false;
     const c = target.center();
@@ -903,7 +906,7 @@ class Game {
       const rc = this.world.raycast(this.camera.position, dir, 90, 0.5);
       let dist = rc.dist;
       for (const o of this.combatants) {
-        if (o === p || !o.alive) continue;
+        if (o === p || !o.alive || o.owner === p) continue;
         const c = o.center(); const along = c.clone().sub(this.camera.position).dot(dir);
         if (along < 0 || along > dist) continue;
         const closest = this.camera.position.clone().addScaledVector(dir, along);
@@ -1014,7 +1017,7 @@ window.VA = {
     this.step(0.2);
     const spec = typeof what === 'string' ? this.chant(what) : this.test(what.shape, what.element, what) && null;
     const S = spec || g.spells.active.at(-1)?.spec, sh = S?.shape;
-    const T = at ?? ({ orb: 0.3, barrage: 0.45, crescent: 0.28, funnels: 1.2, beam: 0.7, tornado: 1.3, meteor: 1.5, nova: 0.25, spikes: 0.55, wall: 0.8, barrier: 0.8, vortex: 1.2, chain: 0.12, storm: 1.8, ward: 0.6, field: 1.2, wave: 0.9, enhance: 0.8, hand: 1.0 }[sh] ?? 0.6);
+    const T = at ?? ({ orb: 0.3, barrage: 0.45, crescent: 0.28, funnels: 1.2, beam: 0.7, tornado: 1.3, meteor: 1.5, nova: 0.25, spikes: 0.55, wall: 0.8, barrier: 0.8, vortex: 1.2, chain: 0.12, storm: 1.8, ward: 0.6, field: 1.2, wave: 0.9, enhance: 0.8, hand: 1.0, whip: 0.3, prison: 0.6, decoy: 0.8, drain: 0.8, beast: 1.6, halo: 1.0, sword: 0.5, rush: 0.2, totem: 1.5, mark: 1.0 }[sh] ?? 0.6);
     this.step(T);
     // frame: the newest spell's focus point (moving volumes, projectiles or the caster for self forms)
     const sp = g.spells.active.at(-1);

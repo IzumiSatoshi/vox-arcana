@@ -34,6 +34,16 @@ export const SHAPES = {
   leap: 'Launch the caster high into the air in one magical jump.',
   flight: 'Let the caster fly, levitate or hover for a while.',
   blink: 'Teleport, warp, dash through space or blink the caster to another spot.',
+  whip: 'A long lashing whip, tendril or chain of the element swung from the hand that sweeps in front and drags struck enemies closer (whip, lash, scourge, 鞭).',
+  prison: 'A cage or prison of bars that erupts around the enemy and traps them inside for a while (prison, cage, imprison, 牢獄, 檻).',
+  decoy: 'Illusory copies / clones / mirror images of the caster that run around and draw enemy fire (decoy, clone, 分身, 幻影).',
+  drain: 'A siphon tether that drains the enemy life and heals the caster over time (drain, siphon, life steal, 吸収, ドレイン).',
+  beast: 'Summon a serpent, dragon or beast made of the element that flies at the enemy and bites it (summon a dragon, serpent, 召喚獣, 龍).',
+  halo: 'A ring of blades or orbs that orbits around the caster, cutting nearby enemies and blocking incoming projectiles (halo, orbiting blades, 円環).',
+  sword: 'A colossal sword of the element forms in the sky above the enemy and plunges down (giant sword from the heavens, holy sword, 大剣, 聖剣).',
+  rush: 'The caster charges forward wrapped in the element like a comet, ramming everything in the way (charge, rush, tackle, 突進).',
+  totem: 'Plant a totem, turret or obelisk on the ground that keeps shooting nearby enemies by itself (totem, turret, obelisk, 祭壇, 砲台).',
+  mark: 'Brand a rune mark or curse sigil on the enemy that detonates after a short delay (mark, brand, death mark, 刻印, 呪印).',
   construct: 'Build a solid physical structure to stand on or hide behind: platform, floor, bridge, stairs, box, pillar, tower, fortress rampart.',
 };
 export const TRAITS = {

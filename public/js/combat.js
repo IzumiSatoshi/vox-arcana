@@ -28,7 +28,7 @@ export class Combatant {
     this.shield = 0; this.shieldTime = 0; this.shieldEl = null;
     this.aura = null;
     this.frozen = 0; this.stun = 0; this.defDown = 0; this.mud = 0; this.weaken = 0; this.curse = 0; this.dots = [];
-    this.enh = {}; this.haste = 0; this.flying = 0;
+    this.enh = {}; this.haste = 0; this.flying = 0; this.cloak = 0;
     this.hist = []; this.chain = { src: null, n: 0, t: 0, last: null };
     this.alive = true; this.chanting = false; this.chantText = '';
     this.model = null; this.kills = 0; this.deaths = 0;
@@ -70,7 +70,7 @@ export class Combatant {
   resetStats() {
     this.hp = this.maxHp; this.mana = this.maxMana; this.stamina = 100; this.shield = 0; this.aura = null;
     this.frozen = 0; this.stun = 0; this.defDown = 0; this.mud = 0; this.weaken = 0; this.curse = 0; this.dots.length = 0;
-    this.enh = {}; this.haste = 0; this.flying = 0; this.hist = []; this.alive = true; this.vel.set(0, 0, 0);
+    this.enh = {}; this.haste = 0; this.flying = 0; this.cloak = 0; this.hist = []; this.alive = true; this.vel.set(0, 0, 0);
   }
   updateStatus(dt, game) {
     if (!this.alive) return;
@@ -78,7 +78,7 @@ export class Combatant {
     this.stamina = Math.min(100, this.stamina + dt * 22);
     if (this.aura) { this.aura.t -= dt; if (this.aura.t <= 0) this.aura = null; }
     if (this.frozen > 0) { this.frozen -= dt; if (this.frozen <= 0 && this.model) game.fx.explosion('ice', this.center(), 1.2, 0.2, null, { noDecal: true }); }
-    for (const k of ['stun', 'defDown', 'mud', 'weaken', 'curse', 'haste', 'flying']) this[k] = Math.max(0, this[k] - dt);
+    for (const k of ['stun', 'defDown', 'mud', 'weaken', 'curse', 'haste', 'flying', 'cloak']) this[k] = Math.max(0, this[k] - dt);
     if (this.shieldTime > 0) { this.shieldTime -= dt; if (this.shieldTime <= 0) this.shield = 0; }
     // enhancements
     for (const [el, e] of Object.entries(this.enh)) {

@@ -84,9 +84,19 @@ export const SHAPES = {
   leap: { name: 'Leap', nameJa: '跳躍', nounsJa: ['跳躍', '天翔', '天駆'], icon: '⤒', nouns: ['Leap', 'Skybound', 'Ascent'] },
   flight: { name: 'Flight', nameJa: '飛行', nounsJa: ['浮遊', '飛翔', '天翼'], icon: '✈', nouns: ['Float', 'Flight', 'Wings'] },
   blink: { name: 'Blink', nameJa: '転移', nounsJa: ['転移', '瞬歩', '次元跳躍'], icon: '⇥', nouns: ['Blink', 'Rift Step', 'Phase Shift'] },
+  whip: { name: 'Whip', nameJa: '鞭', nounsJa: ['鞭', '大鞭', '龍鞭'], icon: '〰', nouns: ['Lash', 'Whip', 'Scourge'] },
+  prison: { name: 'Prison', nameJa: '牢獄', nounsJa: ['檻', '牢獄', '封獄'], icon: '⌗', nouns: ['Cage', 'Prison', 'Oubliette'] },
+  decoy: { name: 'Decoy', nameJa: '分身', nounsJa: ['幻影', '分身', '影分身'], icon: '👥', nouns: ['Mirage', 'Doubles', 'Phantasm'] },
+  drain: { name: 'Drain', nameJa: '吸収', nounsJa: ['吸収', '吸命', '魂喰らい'], icon: '⥂', nouns: ['Siphon', 'Drain', 'Soul Leech'] },
+  beast: { name: 'Beast', nameJa: '召喚獣', nounsJa: ['蛇', '龍', '神龍'], icon: '🐉', nouns: ['Serpent', 'Dragon', 'Wyrm Lord'] },
+  halo: { name: 'Halo', nameJa: '円環', nounsJa: ['円環', '刃輪', '天輪'], icon: '◌', nouns: ['Halo', 'Blade Ring', 'Orbit'] },
+  sword: { name: 'Sword', nameJa: '大剣', nounsJa: ['剣', '大剣', '神剣'], icon: '🗡', nouns: ['Blade', 'Greatsword', 'Excalibur'] },
+  rush: { name: 'Rush', nameJa: '突進', nounsJa: ['突進', '突撃', '彗星突'], icon: '➠', nouns: ['Charge', 'Rush', 'Comet Ram'] },
+  totem: { name: 'Totem', nameJa: '祭壇', nounsJa: ['祭壇', '砲塔', '神柱'], icon: '♜', nouns: ['Totem', 'Obelisk', 'Monolith'] },
+  mark: { name: 'Mark', nameJa: '刻印', nounsJa: ['刻印', '呪印', '死の刻印'], icon: '✠', nouns: ['Mark', 'Brand', 'Death Sigil'] },
   construct: { name: 'Construct', nameJa: '建造', nounsJa: ['足場', '階段', '城塞'], icon: '▦', nouns: ['Platform', 'Stairway', 'Fortress'] },
 };
-export const SELF_FORMS = ['ward', 'enhance', 'hand', 'leap', 'flight', 'blink', 'construct'];
+export const SELF_FORMS = ['ward', 'enhance', 'hand', 'leap', 'flight', 'blink', 'construct', 'decoy', 'halo', 'rush', 'totem'];
 export const UTILITY_FORMS = ['leap', 'flight', 'blink', 'construct'];
 export const SHAPE_KEYS = Object.keys(SHAPES);
 

@@ -96,7 +96,7 @@ export class Hud {
     for (const c of this.g.combatants) {
       if (c === p || !c.alive) continue;
       const x = (c.pos.x - p.pos.x) * scale, y = (c.pos.z - p.pos.z) * scale;
-      g.save(); g.translate(x, y); g.rotate(-p.yaw + Math.PI / 4); g.fillStyle = c.chanting ? '#ff9ae0' : '#ff4a4a'; g.shadowColor = '#f00'; g.shadowBlur = 6; g.fillRect(-4, -4, 8, 8); g.restore();
+      g.save(); g.translate(x, y); g.rotate(-p.yaw + Math.PI / 4); g.fillStyle = c.owner === p ? '#7fd0ff' : c.chanting ? '#ff9ae0' : '#ff4a4a'; g.shadowColor = c.owner === p ? '#08f' : '#f00'; g.shadowBlur = 6; g.fillRect(-4, -4, 8, 8); g.restore();
     }
     g.restore();
     g.fillStyle = '#fff'; g.shadowColor = '#000'; g.shadowBlur = 4;

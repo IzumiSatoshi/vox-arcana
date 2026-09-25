@@ -13,7 +13,7 @@ const DIFF = {
 };
 // which element to throw at an enemy wearing a given aura
 const COUNTER = { poison: ['fire', 'light', 'wind'], water: ['ice', 'lightning', 'fire'], fire: ['water', 'lightning', 'wind'], ice: ['fire', 'lightning', 'earth'], lightning: ['fire', 'water', 'ice'], nature: ['fire', 'water'], darkness: ['light'], light: ['darkness', 'fire'] };
-const SHAPE_POOL = ['orb', 'orb', 'orb', 'barrage', 'funnels', 'beam', 'tornado', 'meteor', 'spikes', 'chain', 'storm', 'crescent', 'vortex', 'nova', 'field', 'wave', 'hand'];
+const SHAPE_POOL = ['orb', 'orb', 'orb', 'barrage', 'funnels', 'beam', 'tornado', 'meteor', 'spikes', 'chain', 'storm', 'crescent', 'vortex', 'nova', 'field', 'wave', 'hand', 'whip', 'prison', 'drain', 'beast', 'sword', 'mark', 'totem'];
 
 export class BotBrain {
   constructor(game, c, difficulty = 'normal', dummy = false) {
@@ -25,7 +25,17 @@ export class BotBrain {
     this.jumpT = rand(2, 5);
     c.getAim = () => ({ origin: c.eye(new THREE.Vector3()), dir: this.aimDir, point: this.aimPoint });
   }
-  target() { return this.g.combatants.find((o) => o !== this.c && o.alive); }
+  // nearest foe (battle royale has many); a cloaked caster is only chosen when nothing else is left
+  target() {
+    const c = this.c; let best = null, bs = Infinity;
+    for (const o of this.g.combatants) {
+      if (o === c || !o.alive || (o.decoy && o.owner === c) || (c.team && o.team === c.team)) continue;
+      const d = (o.pos && c.pos ? o.pos.distanceTo(c.pos) : 0) + (o.cloak > 0 ? 200 : 0) + (o === this.focus ? -8 : 0);
+      if (d < bs && d < (this.sight || Infinity)) { bs = d; best = o; }
+    }
+    if (best && best !== this.focus && (!this.focus?.alive || Math.random() < 0.02)) this.focus = best;
+    return best;
+  }
   update(dt) {
     const c = this.c, g = this.g;
     if (!c.alive) { this.cancelChant(); return { wish: new THREE.Vector3(), jump: false }; }
@@ -107,7 +117,9 @@ export class BotBrain {
     const c = this.c, d = this.d;
     let element, shape;
     const aura = tgt.aura?.el;
-    if (hpFrac < 0.35 && c.shield <= 0 && Math.random() < 0.5) { shape = 'ward'; element = pick(['light', 'nature', 'water', 'earth']); }
+    const dist = tgt.pos && c.pos ? tgt.pos.distanceTo(c.pos) : 20;
+    if (hpFrac < 0.35 && c.shield <= 0 && Math.random() < 0.5) { shape = Math.random() < 0.3 ? 'decoy' : Math.random() < 0.3 ? 'drain' : 'ward'; element = pick(['light', 'nature', 'water', 'earth', 'darkness']); }
+    else if (tgt.chanting && Math.random() < 0.12) { shape = 'halo'; element = pick(ELEMENT_KEYS); }
     else if (tgt.chanting && Math.random() < 0.3) { if (Math.random() < 0.65) { shape = 'barrier'; element = pick(['light', 'arcane', 'water', 'lightning']); } else { shape = 'wall'; element = pick(['earth', 'ice', 'fire']); } }
     else {
       element = aura && COUNTER[aura] && Math.random() < 0.75 ? pick(COUNTER[aura]) : pick(ELEMENT_KEYS);
@@ -115,6 +127,8 @@ export class BotBrain {
       if (element === 'lightning' && Math.random() < 0.3) shape = 'chain';
       if (element === 'wind' && Math.random() < 0.4) shape = pick(['tornado', 'crescent']);
       if (c.hp / c.maxHp > 0.7 && !Object.keys(c.enh).length && Math.random() < 0.08) shape = 'enhance';
+      if (shape === 'whip' && dist > 13) shape = dist > 22 ? 'rush' : 'orb';
+      if (shape === 'drain' && dist > 32) shape = 'mark';
     }
     this.favEl = element;
     c.model?.setElement(element);

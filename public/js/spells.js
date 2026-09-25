@@ -171,7 +171,7 @@ class Spell {
   add(o) { this.g.scene.add(o); this.objs.push(o); return o; }
   remove(o) { this.g.scene.remove(o); disposeObj(o); const i = this.objs.indexOf(o); if (i >= 0) this.objs.splice(i, 1); }
   trail(color, core, width, max, intensity) { const t = new Trail(this, color, core, width, max, intensity); this.trails.push(t); return t; }
-  targets() { return this.g.combatants.filter((c) => c.alive && c !== this.caster); }
+  targets() { return this.g.combatants.filter((c) => c.alive && c !== this.caster && !(c.decoy && c.owner === this.caster)); }
   nearestTarget(from, dir = null, cone = 0.6, range = 80) {
     let best = null, bd = Infinity;
     for (const t of this.targets()) {
@@ -241,6 +241,7 @@ class Projectile {
     this.wseed = Math.random() * 100;
   }
   update(dt) {
+    if (!this.alive) return false;
     const sp = this.spell, g = sp.g;
     this.age += dt; this.prev.copy(this.pos);
     if (this.homing > 0) {
@@ -1991,6 +1992,7 @@ class Missile {
     if (!s.basic && this.index % 3 === 0) sp.g.audio.cast(sp.el, s.basic ? 0.05 : Math.min(0.5, 0.15 + sp.m * 0.3), this.pos, s.basic ? null : sp.look);
   }
   update(dt) {
+    if (!this.alive) return false;
     const sp = this.sp, s = sp.spec, g = sp.g;
     this.age += dt;
     if (this.age < 0) return true;
@@ -2758,7 +2760,11 @@ class ConstructSpell extends Spell {
   dispose() { super.dispose(); for (const { box } of this.parts) this.g.world.removeBox(box); this.mats.forEach((m) => m.dispose()); }
 }
 
-const SHAPE_CLASS = { orb: MissileSpell, barrage: MissileSpell, field: FieldSpell, wave: WaveSpell, enhance: EnhanceSpell, hand: HandSpell, leap: LeapSpell, flight: FlightSpell, blink: BlinkSpell, construct: ConstructSpell, funnels: FunnelSpell, beam: BeamSpell, tornado: TornadoSpell, meteor: MeteorSpell, nova: NovaSpell, spikes: SpikeSpell, wall: WallSpell, barrier: BarrierSpell, vortex: VortexSpell, chain: ChainSpell, storm: StormSpell, crescent: CrescentSpell, ward: WardSpell };
+export const SHAPE_CLASS = { orb: MissileSpell, barrage: MissileSpell, field: FieldSpell, wave: WaveSpell, enhance: EnhanceSpell, hand: HandSpell, leap: LeapSpell, flight: FlightSpell, blink: BlinkSpell, construct: ConstructSpell, funnels: FunnelSpell, beam: BeamSpell, tornado: TornadoSpell, meteor: MeteorSpell, nova: NovaSpell, spikes: SpikeSpell, wall: WallSpell, barrier: BarrierSpell, vortex: VortexSpell, chain: ChainSpell, storm: StormSpell, crescent: CrescentSpell, ward: WardSpell };
+
+// Extra forms live in their own modules and register here (keeps this file from importing them back).
+export function registerShape(key, Cls) { SHAPE_CLASS[key] = Cls; }
+export { Spell, Trail, SPHERE, SPHERE_LO, OCTA, SMOOTH, ROCK, FLECK, COMET, SPIKE_GEOS, TORUS_GEO, BLADE_GEO, STAR_GEO, CAPS, disposeObj, coreMesh, escalateImpact, runPayload, bladeGeo, crescentMat, glintTex, handMesh };
 
 // ------------------------------------------------------------ system
 export class SpellSystem {

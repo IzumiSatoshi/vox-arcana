@@ -18,6 +18,9 @@ const SHAPE_EXAMPLES = {
   crescent: 'flying blade slash|飛ぶ斬撃', ward: 'heal me|protect me|回復|私を癒せ', field: 'poison pool|毒の沼',
   wave: 'tidal wave|津波', enhance: 'strengthen my body|身体強化', hand: 'summon a giant fist|巨大な拳を召喚',
   leap: 'jump high|高く跳べ', flight: 'let me fly|空を飛ぶ', blink: 'teleport|瞬間移動', construct: 'build stairs|階段を作る',
+  whip: 'fire whip|lash|炎の鞭', prison: 'cage the enemy|prison of ice|氷の牢獄|檻', decoy: 'create clones of me|分身|幻影', drain: 'drain their life|吸収|ドレイン',
+  beast: 'summon a fire dragon|serpent|炎の龍|召喚獣', halo: 'blades orbiting around me|光の円環', sword: 'giant sword from the sky|聖剣|天の大剣',
+  rush: 'charge forward|突進|体当たり', totem: 'turret that shoots|totem|祭壇|砲台', mark: 'death mark|curse brand|呪印|刻印',
 };
 const TRAIT_DEFAULTS = { trajectory: 'straight', pattern: 'single', payload: 'explode', morph: 'orb', substance: 'native', construct: 'platform' };
 
