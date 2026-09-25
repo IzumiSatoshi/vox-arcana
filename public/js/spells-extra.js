@@ -877,7 +877,8 @@ class TotemSpell extends Spell {
     this.reach.userData.ownGeo = true; this.reach.rotation.x = -Math.PI / 2; this.reach.position.copy(this.at).y += 0.15; this.reach.renderOrder = 4;
     this.loopSnd = this.g.audio.loop(this.el, this.at.clone().setY(this.at.y + 2.4), 0.1, this.look);
     this.g.audio.impact('earth', 0.35, this.at, this.look); this.g.audio.cast(this.el, this.m * 0.8, this.at, this.look);
-    this.g.fx.explosion('earth', this.at.clone().setY(this.at.y + 0.3), 1.4, 0.2, null, { noDecal: true });
+    this.g.fx.ring(this.at.clone().setY(this.at.y + 0.15), this.pal.color, 4 * this.S, 0.45); this.g.fx.shockwave(this.at.clone().setY(this.at.y + 1), 5, 0.8, 0.35);
+    this.g.fx.element(this.el, this.at.clone().setY(this.at.y + 0.6), { count: 8, speed: 3, size: 0.35, palette: this.pal, look: this.look }); // planted with a clean pulse, no lingering dust
   }
   fire(tg, from) {
     const fx = this.g.fx, to = tg.center(), bh = this.barrierHit(from, to);
