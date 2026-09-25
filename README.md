@@ -232,6 +232,7 @@ element reacts with it:
 - **Training Grounds**: a regenerating golem to test spells on.
 - **Battle Royale** (`public/js/royale.js`): 4, 8 or 12 mages board a floating sky ferry that crosses the island.
   - Play **Solo** or **Duos**. In Duos you and an AI ally (blue ◆ nameplate) take on pairs of mages. There's no friendly fire, the ally follows you and jumps with you, and the last team standing wins.
+    A fallen teammate leaves a soul wisp for 30 s. Stand beside it for 4 s to revive them at 30% HP. Your ally will come and revive you too.
   - Press **Space** to jump off wherever you like. Bots leave near the spot they want to land, and anyone still aboard is thrown off at the end of the line.
   - Steer the fall with WASD and hold Space to slow it.
   - The minimap shows rivals within 40 m, or within 80 m while they chant.

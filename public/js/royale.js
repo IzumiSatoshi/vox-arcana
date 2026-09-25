@@ -333,6 +333,7 @@ export class Royale {
     if (!this.over) this.updateZone(dt);
     this.updateFalling(dt);
     this.updateShrines(dt);
+    this.updateWisps(dt);
     // drop phase: slow magical descent with strong air control; a burst on landing
     for (const c of g.combatants) {
       if (!c.dropping) continue;
@@ -455,6 +456,8 @@ export class Royale {
     target.place = (this.duos ? teams : left) + 1; target.killedBy = killer && killer !== target ? killer.name : null;
     // the fallen drop their potions and a relic
     const at = target.pos.clone();
+    // duos: the fallen leave a soul wisp their teammate can stand beside to revive them
+    if (this.duos && target.team && this.alive().some((c) => c.team === target.team)) this.addWisp(target);
     for (const [id, n] of Object.entries(target.inv || {})) for (let i = 0; i < n; i++) this.dropItem(at, { type: 'potion', id }, true);
     this.dropItem(at, this.randomKind(), true);
     if (target === g.player) {
@@ -464,6 +467,37 @@ export class Royale {
     } else if (killer === g.player) g.hud.popup?.(target.center().add(new THREE.Vector3(0, 1.5, 0)), t('royale.kill'), 'react', '#ffd46a');
     if (teams <= 1) this.finish(this.alive().find((c) => c === g.player) || this.alive().find((c) => c.team && c.team === g.player?.team) || this.alive()[0]);
     else if (target === g.player) setTimeout(() => { if (g.royale === this && !this.over) this.showResults(); }, 3000);
+    this.updateHud(true);
+  }
+  addWisp(c) {
+    const g = this.g, pos = c.pos.clone(); pos.y = g.world.groundAt(pos.x, pos.z, pos.y + 1);
+    const orb = new THREE.Mesh(GEM, this.mat('wisp', () => energyMaterial({ color: new THREE.Color(0x7fd0ff), core: 0xffffff, intensity: 2, noiseAmp: 0.2, opacity: 0.9 })));
+    const ring = new THREE.Mesh(RING, this.mat('wispRing', () => new THREE.MeshBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })));
+    ring.scale.setScalar(3.2); g.scene.add(orb, ring);
+    (this.wisps ||= []).push({ c, pos, t: 30, prog: 0, orb, ring });
+  }
+  updateWisps(dt) {
+    const g = this.g;
+    for (let i = (this.wisps || []).length - 1; i >= 0; i--) {
+      const W = this.wisps[i]; W.t -= dt;
+      W.orb.position.set(W.pos.x, W.pos.y + 1.2 + Math.sin(this.t * 3) * 0.15, W.pos.z); W.orb.rotation.y += dt * 2; W.ring.position.set(W.pos.x, W.pos.y + 0.08, W.pos.z);
+      const helper = g.combatants.find((o) => o.alive && !o.decoy && o.team === W.c.team && o !== W.c && Math.hypot(o.pos.x - W.pos.x, o.pos.z - W.pos.z) < 2.6);
+      W.prog = helper ? W.prog + dt : Math.max(0, W.prog - dt * 0.5);
+      W.ring.material.opacity = 0.4 + 0.5 * (W.prog / 4);
+      if (helper && Math.random() < 0.5) g.fx.glow.emit({ x: W.pos.x + rand(-1, 1), y: W.pos.y + 0.2, z: W.pos.z + rand(-1, 1), vy: 3, life: 0.8, size: 0.16, size1: 0.03, color: new THREE.Color(0x9fe8ff), alpha: 1, drag: 0.4, frame: 1 });
+      if (helper === g.player || W.c === g.player) { const lk = document.getElementById('br-look'); if (lk && helper) { lk.innerHTML = '<b style="color:#7fd0ff">' + t('royale.reviving', { who: W.c === g.player ? t('you') : W.c.name }) + ' ' + Math.round((W.prog / 4) * 100) + '%</b>'; lk.classList.add('show'); this.looked = null; } }
+      const done = W.prog >= 4;
+      if (done) this.revive(W.c, W.pos);
+      if (done || W.t <= 0 || this.over || !this.alive().some((o) => o.team === W.c.team)) { g.scene.remove(W.orb, W.ring); this.wisps.splice(i, 1); }
+    }
+  }
+  revive(c, pos) {
+    const g = this.g;
+    c.alive = true; c.hp = c.maxHp * 0.3; c.dots.length = 0; c.frozen = 0; c.stun = 0; c.pos.copy(pos); c.vel.set(0, 0, 0); c.place = null; c.killedBy = null;
+    if (c.model) c.model.root.visible = true;
+    g.fx.ring(pos.clone().setY(pos.y + 0.2), new THREE.Color(0x7fd0ff), 6, 0.6); g.fx.shockwave(c.center(), 7, 1, 0.4); g.audio.pickup?.('relic');
+    g.hud.feed('<b style="color:#7fd0ff">✚ ' + t('royale.revived', { who: c === g.player ? t('you') : c.name }) + '</b>');
+    if (c === g.player) { this.deadT = undefined; this.spec = null; g.debugCam = null; document.getElementById('br-results')?.classList.add('hidden'); document.getElementById('br-spec')?.classList.add('hidden'); g.hud.banner('', t('royale.revived', { who: t('you') }), 2); }
     this.updateHud(true);
   }
   // standings: survivors first, then the fallen by placement
@@ -532,6 +566,7 @@ export class Royale {
   roamTarget(c) {
     const Z = this.zone;
     if (c.dropping && c.brain?.dropTo) return c.brain.dropTo;
+    const wisp = this.wisps?.find((w) => w.c.team && w.c.team === c.team && w.c !== c && this.inZone(w.pos, -2)); if (wisp) return wisp.pos; // go revive your teammate
     const dz = Math.hypot(c.pos.x - Z.nx, c.pos.z - Z.nz);
     if (!this.inZone(c.pos, -6) || (Z.state === 'shrink' && dz > Z.nr - 4)) return new THREE.Vector3(Z.nx, 0, Z.nz);
     if (c.mana < c.maxMana * 0.35 || c.hp < c.maxHp * 0.5) { const sh = this.nearestShrine(c.pos, 60); if (sh) return sh.pos; } // go recover at a shrine
@@ -582,6 +617,7 @@ export class Royale {
     for (const S of this.shrines || []) { s.remove(S.grp); S.mc.dispose(); S.grp.traverse((m) => m.geometry?.dispose()); }
     for (const it of [...this.items]) this.removeItem(it);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
+    for (const W of this.wisps || []) s.remove(W.orb, W.ring);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); this.ship.grp.traverse((m) => m.geometry?.dispose()); }
     for (const c of this.g.combatants) c.onShip = false;
     this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop(); this.rainSnd?.stop();
