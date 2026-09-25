@@ -871,6 +871,9 @@ class Game {
     if (this.mode === 'menu') this.updateMenuCam(raw);
     if (dt > 0) this.tick(dt, raw);
     audio.updateListener(this.camera);
+    // music gets out of the way of your voice while chanting, dips on pause, and muffles as you near death
+    const pl = this.player, hpF = pl ? pl.hp / pl.maxHp : 1;
+    audio.musicMix(this.paused ? 0.45 : this.chanting ? 0.4 : 1, pl && this.mode !== 'menu' ? (!pl.alive ? 0.8 : hpF < 0.3 ? 0.35 + (0.3 - hpF) * 1.5 : 0) : 0);
     const u = this.post.uniforms, p = this.player;
     u.uCA.value = this.fx.shake * 3 + this.hud.hurt * 2 + (p?.frozen > 0 ? 1 : 0);
     this.domainT = Math.max(0, (this.domainT || 0) - raw);

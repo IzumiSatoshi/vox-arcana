@@ -18,7 +18,9 @@ export class AudioEngine {
     // Keep music outside the spell compressor: a dense impact must not duck it for seconds.
     this.musicBus = ctx.createGain(); this.musicBus.gain.value = this.musicVolume;
     this.musicMaster = ctx.createGain(); this.musicMaster.gain.value = this.volume;
-    this.musicBus.connect(this.musicMaster); this.musicMaster.connect(ctx.destination);
+    // music mix state: a duck gain (chanting, pause) and a lowpass (near death) between the bus and the master
+    this.musicDuck = ctx.createGain(); this.musicTone = ctx.createBiquadFilter(); this.musicTone.type = 'lowpass'; this.musicTone.frequency.value = 20000; this.musicTone.Q.value = 0.7;
+    this.musicBus.connect(this.musicDuck); this.musicDuck.connect(this.musicTone); this.musicTone.connect(this.musicMaster); this.musicMaster.connect(ctx.destination);
     this.reverb = ctx.createConvolver(); this.reverb.buffer = this.impulse(3.2, 2.6);
     this.reverbIn = ctx.createGain(); this.reverbIn.gain.value = 0.35;
     this.reverbIn.connect(this.reverb); this.reverb.connect(this.master);
@@ -57,6 +59,13 @@ export class AudioEngine {
   }
   setVolume(v) { this.volume = v; if (this.master) this.master.gain.value = v; if (this.musicMaster) this.musicMaster.gain.value = v; }
   setMusic(v) { this.musicVolume = v; if (this.musicBus) this.musicBus.gain.value = v; }
+  // duck 0..1 (1 = full), muffle 0..1 (1 = heavily low-passed); smoothed so state changes never click
+  musicMix(duck = 1, muffle = 0) {
+    if (!this.musicDuck) return;
+    const t = this.ctx.currentTime;
+    if (Math.abs((this._duck ?? 1) - duck) > 0.01) { this._duck = duck; this.musicDuck.gain.setTargetAtTime(duck, t, 0.25); }
+    if (Math.abs((this._muffle ?? 0) - muffle) > 0.01) { this._muffle = muffle; this.musicTone.frequency.setTargetAtTime(20000 * Math.pow(0.03, muffle), t, 0.3); }
+  }
 
   updateListener(cam) {
     if (!this.ctx) return;
