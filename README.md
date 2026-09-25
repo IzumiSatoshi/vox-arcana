@@ -34,7 +34,7 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
   - A choir under the chant. Late storm phases bring rain.
   - The music ducks while you speak, muffles near death, and presses on when three mages remain.
   - New effects: form sweeteners (whip crack, dragon roar, rune ticks, sword whistle, shatter), footsteps on grass or stone, landings, a heartbeat at low HP, a victory fanfare, kill-streak stings, a storm howl, and birds and wind.
-- **Game feel**: a damage-direction indicator around the crosshair, hit-stop on heavy hits, kill-streak banners, and example chants that rotate in the training grounds.
+- **Game feel**: a damage-direction indicator around the crosshair, hit-stop on heavy hits, kill-streak banners, and example chants that rotate in the training grounds. A Reduce motion setting tones down shake and flashes.
 - **Performance**: mage models use distance LOD down to a five-mesh impostor, so large lobbies stay smooth.
 
 ## Run
