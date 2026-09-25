@@ -630,6 +630,10 @@ class Game {
     if (this.royale?.tryRevive(target)) return;
     target.alive = false; target.deaths++; if (killer && killer !== target) killer.kills++;
     if (target !== this.player) audio.elimination(target.center());
+    if (killer === this.player && target !== this.player) { // kill streaks: kills chained within 12 s
+      const now = performance.now(); this.streak = now - (this.streakT || 0) < 12000 ? (this.streak || 1) + 1 : 1; this.streakT = now;
+      if (this.streak >= 2) { this.hud.banner(t('streak.' + Math.min(5, this.streak)), '', 1.8); audio.streak(this.streak); }
+    }
     target.chanting = false;
     const c = target.center();
     this.fx.explosion('arcane', c, 3, 1, null, {});

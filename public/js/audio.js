@@ -238,6 +238,10 @@ export class AudioEngine {
     // universal body
     this.noise(o, { type: 'brown', f0: 1200 + m * 1500, f1: 60, dur: L, gain: 0.9 + m });
     this.tone(o, { f0: 110 - m * 40, f1: 28, dur: L * 0.8, gain: 0.5 + m * 0.5 });
+    if (m > 0.95) {
+      this.noise(o, { type: 'brown', f0: 220, f1: 35, dur: 2.2 + m, a: 0.06, gain: 0.7 * m });
+      for (let i = 0; i < 8; i++) this.noise(o, { f: 'bandpass', f0: rand(900, 2600), Q: 2, dur: rand(0.03, 0.07), a: 0.001, gain: rand(0.15, 0.3), delay: rand(0.4, 1.8) });
+    }
     switch (el) {
       case 'fire':
         this.noise(o, { type: 'pink', f0: 4000, f1: 300, dur: L, gain: 0.8 });
@@ -445,6 +449,13 @@ export class AudioEngine {
     if (!this.enabled) return;
     const o = this.out(pos, 1.1, 0.4);
     this.tone(o, { type: 'triangle', f0: 1760, f1: 1320, dur: 0.25, a: 0.001, gain: 0.18 }); this.tone(o, { f0: 2640, dur: 0.15, a: 0.001, gain: 0.07 });
+  }
+  // kill streak fanfare: brass-like stacked fifths, climbing with the streak
+  streak(n = 2) {
+    if (!this.enabled) return;
+    const o = this.out(null, 0.6, 0.6), root = 196 * Math.pow(2, Math.min(4, n - 2) / 6);
+    [1, 1.5, 2, 2.5].forEach((r, i) => { const d = this.distort(o, 0.25); this.tone(d, { type: 'sawtooth', f0: root * r, dur: 0.9, a: 0.03, gain: 0.08, delay: i * 0.06 }); });
+    this.noise(o, { f: 'highpass', f0: 5000, dur: 0.6, a: 0.05, gain: 0.25 });
   }
   elimination(pos = null) {
     if (!this.enabled) return;
