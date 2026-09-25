@@ -546,6 +546,7 @@ class Game {
     if (res.dmg < 0.5 && !res.reaction) return;
     this.hud.damage(pos, res.dmg, el, res.reaction);
     if (target === this.player) {
+      if (hit.src && hit.src !== target) this.hud.hitFrom(hit.src, res.dmg);
       this.hud.hurt = Math.min(0.8, this.hud.hurt + res.dmg / 150); audio.hurt(Math.min(1, res.dmg / 120)); this.fx.addShake(Math.min(0.5, res.dmg / 200));
       if (this.chanting && res.dmg > 60 && p0EarthFree(target) && Math.random() < 0.5) { this.voice.cancelChant(); this.chanting = false; this.player.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
     }

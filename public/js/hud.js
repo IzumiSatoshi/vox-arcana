@@ -144,6 +144,7 @@ export class Hud {
     setStyle($('hurt-vignette'), 'opacity', Math.max(this.hurt, low));
     setStyle($('frost-overlay'), 'opacity', p.frozen > 0 ? 1 : 0);
     this.hitm = Math.max(0, this.hitm - dt * 5); setStyle($('hitmarker'), 'opacity', this.hitm);
+    this.updateDirs(dt);
     this.updateCompass(p);
     if ((this._mmT = (this._mmT || 0) + 1) % 2 === 0) this.drawMinimap(p); // 30 Hz is plenty
     this.updatePlates(cam);
@@ -240,6 +241,24 @@ export class Hud {
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
   hintHTML(html) { $('chant-hint-txt').innerHTML = html; }
+  // a red arc around the crosshair pointing at whoever hit you (merged per attacker, fades out)
+  hitFrom(src, amount) {
+    if (!src?.pos || !this.g.player) return;
+    this.dirs ||= new Map();
+    let d = this.dirs.get(src);
+    if (!d) { const el = document.createElement('div'); el.className = 'dmg-dir'; $('dmg-dirs').appendChild(el); d = { el, t: 0, src }; this.dirs.set(src, d); }
+    d.t = 1.4; d.k = Math.min(1, 0.45 + amount / 80);
+  }
+  updateDirs(dt) {
+    if (!this.dirs) return;
+    const p = this.g.player;
+    for (const [src, d] of this.dirs) {
+      d.t -= dt;
+      if (d.t <= 0 || !p) { d.el.remove(); this.dirs.delete(src); continue; }
+      const a = Math.atan2(src.pos.x - p.pos.x, src.pos.z - p.pos.z) - Math.atan2(-Math.sin(p.yaw), -Math.cos(p.yaw)); // bearing relative to where you look
+      d.el.style.transform = `translate(-50%,-50%) rotate(${-a}rad)`; d.el.style.opacity = Math.min(1, d.t / 0.5) * d.k;
+    }
+  }
   micState(on) { this.micOn = on; }
 
   // ---------------- voice waveform: the one indicator for mic level + chant state

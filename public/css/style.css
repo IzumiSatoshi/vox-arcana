@@ -253,3 +253,6 @@ body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-
 #br-region { position: absolute; top: 72px; left: 0; right: 0; text-align: center; font-family: var(--f-title); font-weight: 700; font-size: 22px; letter-spacing: 6px; color: #fff4d6; text-shadow: 0 0 14px rgba(0,0,0,.8), 0 2px 4px #000; opacity: 0; pointer-events: none; }
 #br-region.show { animation: regionIn 3.2s ease-out forwards; }
 @keyframes regionIn { 0% { opacity: 0; transform: translateY(-6px); letter-spacing: 12px; } 15% { opacity: 1; transform: none; letter-spacing: 6px; } 75% { opacity: 1; } 100% { opacity: 0; } }
+
+#dmg-dirs { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.dmg-dir { position: absolute; left: 0; top: 0; width: 230px; height: 230px; border-radius: 50%; border: 5px solid transparent; border-top-color: rgba(255, 60, 50, 0.95); filter: drop-shadow(0 0 6px rgba(255, 40, 30, .8)); -webkit-mask-image: radial-gradient(circle, transparent 60%, #000 61%); mask-image: radial-gradient(circle, transparent 60%, #000 61%); }
