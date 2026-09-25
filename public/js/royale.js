@@ -300,7 +300,7 @@ export class Royale {
     else if (Z.state === 'shrink') {
       const k = clamp(Z.st / P.shrink), e = k * k * (3 - 2 * k);
       Z.cx = Z.fromX + (Z.nx - Z.fromX) * e; Z.cz = Z.fromZ + (Z.nz - Z.fromZ) * e; Z.r = Z.fromR + (Z.nr - Z.fromR) * e; Z.dps = P.dps;
-      if (k >= 1) { Z.phase++; Z.st = 0; Z.state = Z.phase < PHASES.length ? 'wait' : 'final'; if (Z.phase < PHASES.length) this.pickNext(); }
+      if (k >= 1) { Z.phase++; Z.st = 0; Z.state = Z.phase < PHASES.length ? 'wait' : 'final'; if (Z.phase < PHASES.length) this.pickNext(); else { this.g.hud.banner(t('royale.sudden'), t('royale.sudden2'), 3); this.g.audio.stormWarn?.(); } }
     }
     if (Z.state === 'final') Z.dps += dt * 2.5; // sudden death: the last storm keeps getting hungrier
     this.wall.position.set(Z.cx, -20, Z.cz); this.wall.scale.set(Math.max(0.5, Z.r), 160, Math.max(0.5, Z.r));
