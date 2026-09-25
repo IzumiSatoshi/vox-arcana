@@ -116,7 +116,8 @@ export class Hud {
       if (c === p || !c.alive || this.hiddenFoe(c, p)) continue;
       const b = (Math.atan2(c.pos.x - p.pos.x, -(c.pos.z - p.pos.z)) * 180) / Math.PI;
       let rel = ((b - heading + 540) % 360) - 180;
-      if (Math.abs(rel) < 80) h += `<i style="left:${W / 2 + rel * this.ppd}px"></i>`;
+      const mate = c.owner === p || (p.team && c.team === p.team);
+      if (Math.abs(rel) < 80) h += `<i style="left:${W / 2 + rel * this.ppd}px${mate ? ';background:#7fd0ff;box-shadow:0 0 6px #08f' : ''}"></i>`;
     }
     setHTML($('compass-marks'), h);
   }
