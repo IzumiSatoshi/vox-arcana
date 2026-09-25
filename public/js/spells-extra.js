@@ -304,7 +304,8 @@ class DecoySpell extends Spell {
     g.fx.explosion(this.el, p, 1.8 + this.m * 0.6, 0.5, this.pal, { look: this.look, noDecal: true });
     for (let k = 0; k < 8; k++) g.fx.puff(p.clone().add(new THREE.Vector3(rand(-0.6, 0.6), rand(-0.8, 0.8), rand(-0.6, 0.6))), { color: this.pal.color.clone().lerp(new THREE.Color(0xffffff), 0.5), size: 0.8, life: 0.8, alpha: 0.6, rise: 1, soft: true });
     if (dmg) this.aoe(p, 2.8 + this.m, dmg, { knock: 6, lift: 3 });
-    g.audio.impact(this.el, 0.4, p, this.look);
+    g.audio.impact(this.el, 0.3, p, this.look); g.audio.shatter?.(p, 0.4);
+    for (let k = 0; k < 18; k++) g.fx.glow.emit({ x: p.x + rand(-0.3, 0.3), y: p.y + rand(-0.8, 0.8), z: p.z + rand(-0.3, 0.3), vx: rand(-5, 5), vy: rand(0, 6), vz: rand(-5, 5), life: rand(0.5, 0.9), size: 0.2, size1: 0.04, color: this.pal.core, color1: this.pal.color, alpha: 1, drag: 1.2, grav: 9, frame: 4, spin: rand(-8, 8) }); // the illusion shatters like glass
     if (d.alive) { d.alive = false; }
     g.removeCombatant?.(d);
   }
