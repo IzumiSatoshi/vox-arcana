@@ -341,11 +341,12 @@ class DecoySpell extends Spell {
       }
       if (Math.random() < 0.15) g.fx.element(this.el, d.center(), { count: 1, speed: 0.4, size: 0.18, palette: this.pal, life: 0.5 });
     }
+    this.caster.decoyN = this.decoys.filter((d) => !d.gone).length; // HUD status
     if (this.decoys.every((d) => d.gone)) this.done = true;
     this.updateCommon(dt);
     return !this.finished();
   }
-  dispose() { super.dispose(); for (const d of this.decoys) if (!d.gone) { d.gone = true; d.alive = false; this.g.removeCombatant?.(d); } }
+  dispose() { super.dispose(); this.caster.decoyN = 0; for (const d of this.decoys) if (!d.gone) { d.gone = true; d.alive = false; this.g.removeCombatant?.(d); } }
 }
 
 // ============================================================ 4. DRAIN — a siphon tether that pulls life back to the caster
@@ -659,12 +660,14 @@ class HaloSpell extends Spell {
       }
     }
     this.loopSnd?.set(cc);
+    c.haloN = this.done ? 0 : this.orbit.filter((b) => b.alive).length; // HUD status
     if (this.t > this.life + 0.5 || !this.orbit.some((b) => b.alive) || !c.alive) {
       if (!this.done) { this.done = true; this.loopSnd?.stop(); this.loopSnd = null; for (const b of this.orbit) { b.tr.dead = true; if (b.alive) b.m.visible = false; } }
     }
     this.updateCommon(dt);
     return !this.finished() || this.mc.opacity > 0.02;
   }
+  dispose() { super.dispose(); this.caster.haloN = 0; }
 }
 
 // ============================================================ 7. SWORD — a colossal blade forms in the sky and plunges down

@@ -209,6 +209,8 @@ export class Hud {
     if (c.weaken > 0) s += `<span class="status-tag" style="color:#b0a0c0">${t('st.weak')}</span>`;
     if (c.curse > 0) s += `<span class="status-tag" style="color:#c22cff">${t('st.curse')}</span>`;
     if (c.flying > 0) s += `<span class="status-tag" style="color:#bff0ff">${t('st.fly')} ${Math.ceil(c.flying)}</span>`;
+    if (c.haloN > 0) s += `<span class="status-tag" style="color:#ffe6a0">◌ ${t('st.halo')} ×${c.haloN}</span>`;
+    if (c.decoyN > 0 && c === this.g.player) s += `<span class="status-tag" style="color:#d8b8ff">⚇ ${t('st.decoy')} ×${c.decoyN}</span>`;
     for (const [e, v] of Object.entries(c.enh || {})) s += `<span class="status-tag" style="color:${hex(ELEMENTS[e].color)}">${elIcon(e, 11)} ${Math.ceil(v.t)}</span>`;
     return s;
   }
