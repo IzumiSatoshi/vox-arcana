@@ -760,6 +760,7 @@ class SwordSpell extends Spell {
         if (this.el === 'earth' || this.el === 'ice') this.sys.spikeRing(this, this.at, this.R * 0.8);
         if (!this.minor) escalateImpact(this, c, this.R * 0.8, this.target);
         this.g.audio.impact('earth', (0.8 + this.m * 0.4) * (this.minor ? 0.5 : 1), c, this.look);
+        if (!this.minor) this.g.audio.clang?.(c); // the blade rings as it bites into the ground
       }
     } else if (this.phase === 'stuck') {
       const pulse = 1 + Math.sin(this.pt * 14) * 0.06;
