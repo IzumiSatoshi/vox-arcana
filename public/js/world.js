@@ -129,7 +129,7 @@ export const ARENA_R = 112;
 const TERRACE_R = 80, TERRACE_H = 7;
 // cliff-sided tablelands between the dirt paths: polar angle a, distance r, radius R, height h, and the ramp's heading
 // (0 = descending toward the arena centre, radians of turn off that)
-const MESAS = [
+export const MESAS = [
   { a: 0.79, r: 52, R: 11, h: 4.5, ramp: 0.5 },
   { a: 2.3, r: 48, R: 8.5, h: 3.4, ramp: -0.6 },
   { a: 3.95, r: 54, R: 12, h: 6, ramp: 0.35 },

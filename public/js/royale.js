@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { ELEMENTS, ELEMENT_KEYS, elName } from './elements.js';
 import { energyMaterial, crystalMaterial, flowMaterial, TIME, NOISE } from './shaders.js';
-import { ARENA_R, SEA_Y } from './world.js';
+import { ARENA_R, SEA_Y, MESAS } from './world.js';
 import { applyHit } from './combat.js';
 import { t, getLang } from './i18n.js';
 import { rand, pick, clamp, TAU } from './util.js';
@@ -103,7 +103,7 @@ export class Royale {
       if (c.brain) { const la = rand(0, TAU), lr = rand(10, 90); c.brain.dropTo = new THREE.Vector3(Math.cos(la) * lr, 0, Math.sin(la) * lr); }
       if (c.model) c.model.root.visible = true;
     });
-    this.spawnLoot(56);
+    this.spawnLoot(48);
     document.getElementById('br-inv')?.classList.remove('hidden');
     g.hud.banner(t('ban.royale'), t('ban.royale2'), 3.5);
     g.hud.hint?.('hint.royale');
@@ -134,7 +134,14 @@ export class Royale {
   }
   colorOf(k) { return k.type === 'core' ? ELEMENTS[k.el].color : k.type === 'relic' ? PASSIVES[k.id].color : POTIONS[k.id].color; }
   mat(key, make) { if (!this.mats.has(key)) this.mats.set(key, make()); return this.mats.get(key); }
-  spawnLoot(n) { for (let i = 0; i < n; i++) this.dropItem(this.randomSpot(), this.randomKind()); }
+  spawnLoot(n) {
+    for (let i = 0; i < n; i++) this.dropItem(this.randomSpot(), this.randomKind());
+    // high ground pays: every mesa top holds a relic and one more find
+    for (const m of MESAS) for (let k = 0; k < 2; k++) {
+      const a = rand(0, TAU), d = rand(0, m.R * 0.45), x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
+      this.dropItem(new THREE.Vector3(x, this.g.world.groundAt(x, z, 50), z), k ? this.randomKind() : { type: 'relic', id: pick(COMMON_RELICS) });
+    }
+  }
   dropItem(pos, kind, pop = false) {
     const g = this.g, col = this.colorOf(kind), key = kind.type + (kind.el || kind.id);
     const grp = new THREE.Group();
