@@ -371,7 +371,7 @@ export class FX {
     this.decals.length = 0; this.shake = 0;
   }
   addShake(amount, pos) {
-    let a = amount;
+    let a = amount * (this.calm ? 0.3 : 1);
     if (pos) a *= clamp(1.2 - this.camera.position.distanceTo(pos) / 60, 0, 1);
     this.shake = Math.min(1.2, this.shake + a);
   }

@@ -563,7 +563,7 @@ class Game {
       this.hud.hurt = Math.min(0.8, this.hud.hurt + res.dmg / 150); audio.hurt(Math.min(1, res.dmg / 120)); this.fx.addShake(Math.min(0.5, res.dmg / 200));
       if (this.chanting && res.dmg > 60 && p0EarthFree(target) && Math.random() < 0.5) { this.voice.cancelChant(); this.chanting = false; this.player.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
     }
-    if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); if (res.dmg > 70 && !hit.dot && this.slowmo <= 0) this.timeScale = Math.min(this.timeScale, 0.2); } // hit-stop: heavy hits bite time for a beat
+    if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); if (res.dmg > 70 && !hit.dot && this.slowmo <= 0 && !this.settings.calm) this.timeScale = Math.min(this.timeScale, 0.2); } // hit-stop: heavy hits bite time for a beat
     if (target.brain?.chant && res.dmg > 70 && Math.random() < 0.4) target.brain.cancelChant();
   }
   // Ultimate domain: sky, sunlight, fog and grade shift to the element for a few seconds; a colossal sigil opens overhead.
@@ -818,6 +818,8 @@ class Game {
     });
     $('set-chantsize-value').textContent = `${s.chantSize} px`;
     bind('set-sens', 'sens', Number);
+    bind('set-calm', 'calm', Boolean, 'checked', () => { this.fx.calm = s.calm; });
+    this.fx.calm = !!s.calm;
     bind('set-vol', 'vol', Number, 'value', () => audio.setVolume(s.vol));
     bind('set-music', 'music', Number, 'value', () => audio.setMusic(s.music));
     bind('set-provider', 'spellProvider', String, 'value', () => {
@@ -965,7 +967,7 @@ class Game {
       const sh = this.fx.shake * this.fx.shake;
       this.camera.rotation.set(p.pitch + (Math.random() - 0.5) * sh * 0.08, p.yaw + (Math.random() - 0.5) * sh * 0.08, this.roll + (Math.random() - 0.5) * sh * 0.05 + (p.alive ? 0 : 0.4));
       this.fovKick = Math.max(0, (this.fovKick || 0) - dt * 30);
-      const fovT = 78 + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4 + this.fovKick;
+      const fovT = 78 + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4 + (this.settings.calm ? 0 : this.fovKick);
       if (Math.abs(this.camera.fov - fovT) > 0.05) { this.camera.fov += (fovT - this.camera.fov) * Math.min(1, dt * 6); this.camera.updateProjectionMatrix(); }
       // aim ray incl. enemies
       const dir = this.camera.getWorldDirection(new THREE.Vector3());
