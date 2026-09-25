@@ -111,6 +111,7 @@ export class AudioEngine {
     if (this.busy(gain)) return null;
     this.voices = (this.voices || 0) + 1;
     if (this.mod) { f0 *= this.mod.b; if (f1) f1 *= this.mod.b; delay += Math.random() * this.mod.j * 0.05; rate *= this.mod.p; }
+    if (this.vary) { f0 *= this.vary; if (f1) f1 *= this.vary; rate *= this.vary; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const src = ctx.createBufferSource(); src.buffer = this[type]; src.loop = true; src.playbackRate.value = rate;
     const fl = ctx.createBiquadFilter(); fl.type = f; fl.Q.value = Q; fl.frequency.setValueAtTime(f0, t);
@@ -125,6 +126,7 @@ export class AudioEngine {
     if (this.busy(gain)) return null;
     this.voices = (this.voices || 0) + 1;
     if (this.mod) { f0 *= this.mod.p; if (f1) f1 *= this.mod.p; detune += (Math.random() - 0.5) * this.mod.j * 60; }
+    if (this.vary) { f0 *= this.vary; if (f1) f1 *= this.vary; }
     const ctx = this.ctx, t = ctx.currentTime + delay;
     const o = ctx.createOscillator(); o.type = type; o.detune.value = detune; o.frequency.setValueAtTime(f0, t);
     if (f1) curve === 'exp' ? o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur) : o.frequency.linearRampToValueAtTime(f1, t + dur);
@@ -140,8 +142,10 @@ export class AudioEngine {
   }
 
   // ---------------------------------------------------------------- spell casts
+  varied(fn) { const v = this.vary; this.vary = rand(0.93, 1.07); try { fn(); } finally { this.vary = v; } }
   cast(el, m = 0.5, pos = null, look = null) {
     if (!this.enabled) return;
+    if (!this.vary) return this.varied(() => this.cast(el, m, pos, look));
     if (look && !this.mod) return this.withLook(look, () => this.cast(el, m, pos, look));
     const o = this.out(pos, 0.55 + m * 0.4, 0.25 + m * 0.3);
     const L = 0.3 + m * 0.6;
@@ -214,6 +218,7 @@ export class AudioEngine {
 
   impact(el, m = 0.5, pos = null, look = null) {
     if (!this.enabled) return;
+    if (!this.vary) return this.varied(() => this.impact(el, m, pos, look));
     if (look && !this.mod) return this.withLook(look, () => this.impact(el, m, pos, look));
     const o = this.out(pos, 0.6 + m * 0.6, 0.35 + m * 0.4);
     const L = 0.35 + m * 1.2;

@@ -132,6 +132,25 @@ export class MageModel {
     this.chantOrb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 3), energyMaterial({ color: accent, intensity: 2.2, noiseAmp: 0.03, flow: 4 }));
     this.chantOrb.visible = false; body.add(this.chantOrb);
     root.traverse((m) => { if (m.isMesh && m.material.type === 'MeshToonMaterial') { m.castShadow = true; m.receiveShadow = true; } });
+    // distance LOD: outline hulls go first, then shadows and the small trinkets (buttons, buckles, gems)
+    this.lodOutlines = []; this.lodShadow = []; this.lodSmall = []; this.lodLevel = 0;
+    root.traverse((m) => {
+      if (!m.isMesh) return;
+      if (m.material.type === 'ShaderMaterial' && m.material.side === THREE.BackSide && m.userData.noAO) { this.lodOutlines.push(m); return; }
+      if (m.castShadow) this.lodShadow.push(m);
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      const s = Math.max(m.scale.x, m.scale.y, m.scale.z);
+      if (m.material.type === 'MeshToonMaterial' && m.geometry.boundingSphere.radius * s < 0.05) this.lodSmall.push(m);
+    });
+    // far impostor: the same silhouette in five meshes (coat cone, head, brim, hat cone, glowing staff tip)
+    const proxy = (this.proxy = new THREE.Group()); proxy.visible = false; root.add(proxy);
+    const coatP = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.45, 10, 1, true), coat); coatP.position.y = 0.75; coatP.userData.ownGeo = true;
+    const headP = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), voidM); headP.position.y = 1.6;
+    const brimP = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.03, 12), hood); brimP.position.y = 1.72;
+    const hatP = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.62, 10), hood); hatP.position.set(0, 2.02, 0.04); hatP.rotation.x = -0.25;
+    const tipP = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), this.glowMat); tipP.position.set(0.32, 1.75, -0.1);
+    for (const m of [coatP, headP, brimP, hatP]) { m.castShadow = true; proxy.add(m); }
+    proxy.add(tipP);
     this.walk = 0; this.castAnim = 0; this.chant = 0;
     // status aura: a thin capsule of the afflicting / empowering element hugging the body (burning, poisoned, charged…)
     const ap = []; for (let k = 0; k <= 16; k++) { const t = k / 16; ap.push(new THREE.Vector2(0.32 + Math.sin(Math.pow(t, 0.8) * Math.PI) * 0.26 - t * 0.12, t * 1.95)); }
@@ -147,6 +166,14 @@ export class MageModel {
     }
     this.statusMesh.visible = this.statusK > 0.02 && !!this.statusEl;
     if (this.statusMesh.visible) { this.statusMesh.material.uniforms.uFade.value = this.statusK; this.statusMesh.rotation.y += dt * 1.5; }
+  }
+  lod(level) {
+    if (level === this.lodLevel) return;
+    this.lodLevel = level;
+    for (const m of this.lodOutlines) m.visible = level < 1;
+    for (const m of this.lodShadow) m.castShadow = level < 2;
+    for (const m of this.lodSmall) m.visible = level < 2;
+    this.body.visible = level < 3; this.proxy.visible = level >= 3;
   }
   setElement(el) { const c = new THREE.Color(ELEMENTS[el]?.color ?? 0xffffff); this.glowMat.color.copy(c).multiplyScalar(3.5); this.chantOrb.material.uniforms.uColor.value.copy(c); }
   handWorld(out = new THREE.Vector3()) { return (this.chant > 0.3 ? this.chantOrb : this.staffTip || this.handGem).getWorldPosition(out); }
