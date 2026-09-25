@@ -7,7 +7,7 @@ import { FX } from './fx.js';
 import { PostFX } from './postfx.js';
 import { SpellSystem } from './spells.js';
 import './spells-extra.js';
-import { Royale } from './royale.js';
+import { Royale, royaleGuide } from './royale.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
 import { MagicCircle } from './magicCircle.js';
@@ -726,6 +726,7 @@ class Game {
     $('howto-elements').innerHTML = ELEMENT_KEYS.map((k) => `<span class="chip">${elChip(k)} ${elName(k)}</span>`).join('');
     $('howto-shapes').innerHTML = Object.keys(SHAPES).map((k) => `<span class="chip">${SHAPES[k].icon} ${shapeName(k)}</span>`).join('');
     const ja = ui === 'ja';
+    $('howto-royale').innerHTML = royaleGuide(ja);
     $('howto-reactions').innerHTML = REACTIONS.map(([n, c, en, jp]) => `<li><b style="color:${c}">${reactName(n)}</b> ${ja ? jp : en}</li>`).join('');
     if (this.player && this.player.name && !this.settings.name) { this.player.name = t('you'); $('self-name').textContent = this.player.name; }
   }

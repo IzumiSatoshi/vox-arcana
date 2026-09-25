@@ -60,6 +60,14 @@ const RELIC = new THREE.IcosahedronGeometry(0.3, 0);
 const BEAM = (() => { const g = new THREE.CylinderGeometry(0.12, 0.3, 1, 12, 1, true); g.translate(0, 0.5, 0); return g; })();
 const RING = (() => { const g = new THREE.RingGeometry(0.55, 0.75, 40); g.rotateX(-Math.PI / 2); return g; })();
 
+// How-to page list of every relic and potion (name · effect)
+export function royaleGuide(ja) {
+  const core = ja ? ['元素の核', '対応する属性の魔法ダメージ+20%（重複可）'] : ['Element Core', '+20% damage for that element (stacks)'];
+  const rows = [[core[0], core[1], 0xffc444], ...Object.values(PASSIVES).map((p) => [p[ja ? 'ja' : 'en'] + (p.rare ? ' ★' : ''), p.desc[ja ? 1 : 0], p.color]),
+    ...Object.values(POTIONS).map((p) => ['[' + p.key + '] ' + p[ja ? 'ja' : 'en'], ja ? { '1': 'HP+220', '2': 'マナ+90', '3': 'シールド+160' }[p.key] : { '1': '+220 HP', '2': '+90 mana', '3': '+160 shield' }[p.key], p.color])];
+  return rows.map(([n, d, c]) => '<li><b style="color:' + hex(c) + '">' + n + '</b> ' + d + '</li>').join('');
+}
+
 export class Royale {
   constructor(game) {
     this.g = game; this.items = []; this.mats = new Map(); this.t = 0; this.over = false;
@@ -70,6 +78,7 @@ export class Royale {
     const nextRing = (this.nextRing = new THREE.Mesh(new THREE.RingGeometry(0.985, 1, 160), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide })));
     nextRing.rotation.x = -Math.PI / 2; nextRing.renderOrder = 5; game.scene.add(nextRing);
     this.tick = 0; this.hudT = 0; this.placements = [];
+    this.howl = game.audio.loop('darkness', new THREE.Vector3(), 0, null, { spin: 0.9 });
   }
   // ------------------------------------------------------------ setup
   start() {
@@ -226,6 +235,10 @@ export class Royale {
       }
     }
     const p = this.g.player, out = p && p.alive && !this.inZone(p.pos);
+    if (p) { // the wall howls from its nearest point; loud when you are close to (or inside) it
+      const dx = p.pos.x - Z.cx, dz = p.pos.z - Z.cz, d = Math.hypot(dx, dz) || 1, edge = Math.abs(d - Z.r);
+      this.howl.set(new THREE.Vector3(Z.cx + dx / d * Z.r, p.pos.y + 2, Z.cz + dz / d * Z.r), clamp(1 - edge / 30) * 0.7 + (out ? 0.3 : 0));
+    }
     document.body.classList.toggle('storm-out', !!out);
     if (out && Math.random() < dt * 2) this.g.fx.bolt(p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 20, rand(-15, 15))), p.pos.clone().add(new THREE.Vector3(rand(-15, 15), 0, rand(-15, 15))), new THREE.Color(0xc070ff), { width: 0.2, dur: 0.2, branches: 2 });
   }
@@ -387,6 +400,7 @@ export class Royale {
     const s = this.g.scene;
     for (const it of [...this.items]) this.removeItem(it);
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
+    this.howl?.stop();
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden');
