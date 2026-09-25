@@ -545,7 +545,13 @@ class BeastSpell extends Spell {
       }
     }
     if (this.state !== 'gone') {
+      const prev = this.pos.clone();
       this.pos.addScaledVector(this.vel, dt);
+      const bh = this.sys.barriers.length && this.barrierHit(prev, this.pos);
+      if (bh) { // it slams into an enemy barrier and bursts
+        this.pos.lerpVectors(prev, this.pos, bh.t); bh.bar.damage(50 * this.dmgK * this.spec.dmgMult, this.pos);
+        this.explode(this.pos.clone(), 2 + this.m, 20 * this.dmgK, { knock: 6, lift: 3 }); this.state = 'gone'; this.stT = 0; this.loopSnd?.stop(); this.loopSnd = null;
+      }
       const gy = groundY(this.g, this.pos) + 0.6; if (this.state !== 'dive' && this.pos.y < gy) { this.pos.y = gy; this.vel.y = Math.abs(this.vel.y) * 0.5; }
       if (this.hist[0].distanceTo(this.pos) > this.r * 0.4) { this.hist.unshift(this.pos.clone()); if (this.hist.length > 400) this.hist.pop(); }
       else this.hist[0].copy(this.pos);
