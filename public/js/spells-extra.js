@@ -339,11 +339,17 @@ class DecoySpell extends Spell {
 
 // ============================================================ 4. DRAIN — a siphon tether that pulls life back to the caster
 class DrainSpell extends Spell {
-  constructor(...a) {
-    super(...a);
+  constructor(sys, spec, caster, aim0, opts = {}) {
+    super(sys, spec, caster, aim0);
     const s = this.spec, aim = this.caster.getAim();
     this.kit = kitOf(this.el, this.look);
-    this.target = this.nearestTarget(this.sys.castOrigin(this.caster), aim.dir, 0.75, 38);
+    this.target = opts.target || this.nearestTarget(this.sys.castOrigin(this.caster), aim.dir, 0.75, 38);
+    // the count axis splits the siphon across more victims nearby
+    if (!opts.target && this.target && s.count > 0.5) {
+      const extra = s.count > 0.8 ? 2 : 1, from = this.caster.pos;
+      this.targets().filter((o) => o !== this.target && o.pos.distanceTo(from) < 30).sort((x, y) => x.pos.distanceTo(from) - y.pos.distanceTo(from)).slice(0, extra)
+        .forEach((o) => this.sys.active.push(new DrainSpell(sys, { ...s, count: 0 }, caster, aim0, { target: o })));
+    }
     this.life = this.target ? 2.2 + s.duration * 2 + this.m * 0.6 : 0.45;
     this.r0 = (0.17 + s.size * 0.12) * (0.7 + this.m * 0.4);
     this.N = 30; this.pts = ptArray(this.N);
