@@ -550,7 +550,7 @@ class Game {
       this.hud.hurt = Math.min(0.8, this.hud.hurt + res.dmg / 150); audio.hurt(Math.min(1, res.dmg / 120)); this.fx.addShake(Math.min(0.5, res.dmg / 200));
       if (this.chanting && res.dmg > 60 && p0EarthFree(target) && Math.random() < 0.5) { this.voice.cancelChant(); this.chanting = false; this.player.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
     }
-    if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); }
+    if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); if (res.dmg > 70 && !hit.dot && this.slowmo <= 0) this.timeScale = Math.min(this.timeScale, 0.2); } // hit-stop: heavy hits bite time for a beat
     if (target.brain?.chant && res.dmg > 70 && Math.random() < 0.4) target.brain.cancelChant();
   }
   // Ultimate domain: sky, sunlight, fog and grade shift to the element for a few seconds; a colossal sigil opens overhead.
