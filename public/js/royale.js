@@ -109,7 +109,7 @@ export class Royale {
       // duos: the first bot is your ally (team 1, your colours); the rest pair up and share a robe
       const team = this.duos ? 1 + Math.ceil(i / 2) : 0, [robe, accent] = this.duos && team === 1 ? [0x1f2f6a, 0x6fd8ff] : ROBES[(this.duos ? team : i) % ROBES.length];
       const b = g.createBot(names[i % names.length] + (i >= names.length ? ' II' : ''), diffs[i % diffs.length], false, { robe, trim: 0xe0b95a, accent, hat: new THREE.Color(robe).multiplyScalar(0.6).getHex() });
-      b.brain.sight = 55; b.brain.royale = this; b.team = team;
+      b.brain.sight = rand(42, 70); b.brain.lootFirst = rand(25, 75); b.brain.royale = this; b.team = team; // personalities: sharp-eyed brawlers to patient looters
       if (team === 1) b.ally = p;
     }
     // everyone boards a floating sky-island that ferries them across the map; each mage picks the moment to jump
