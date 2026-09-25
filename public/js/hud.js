@@ -232,6 +232,7 @@ export class Hud {
     setHTML(pv, `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${spec.cost} ${t('mana')}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`);
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
+  hintHTML(html) { $('chant-hint-txt').innerHTML = html; }
   micState(on) { this.micOn = on; }
 
   // ---------------- voice waveform: the one indicator for mic level + chant state

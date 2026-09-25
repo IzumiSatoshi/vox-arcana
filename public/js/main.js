@@ -69,6 +69,13 @@ const REACTIONS = [
 ];
 
 const DUST = new THREE.Color(0xcdbb96);
+// training-ground prompts: example chants that show off the forms (rotated under the chant hint)
+const TRY = {
+  en: ['Fire whip, lash them!', 'Imprison him in a cage of ice', 'Summon a thunder dragon', 'Holy sword, descend upon them', 'Brand a death mark of shadow', 'Blades of wind, orbit around me',
+    'Drain his life', 'Charge forward wrapped in flame', 'Raise a crystal totem', 'Create illusions of myself', 'Ultimate fireball!', 'Tidal wave', 'Poison swamp', 'Let me fly'],
+  ja: ['炎の鞭よ、薙ぎ払え', '氷の牢獄に閉じ込めよ', '雷の龍よ、敵を喰らえ', '天より来たれ、聖なる大剣', '闇の刻印を刻め', '風の刃よ、我が周りを巡れ',
+    '命を吸収せよ', '炎の突進', '水晶の祭壇', '影分身', '究極の火球！', '大津波', '毒の沼', '空を飛べ'],
+};
 class Game {
   constructor() {
     this.settings = loadSettings();
@@ -983,6 +990,10 @@ class Game {
         }
       } else { this.chantProgress = Math.max(0, this.chantProgress - dt * 4); this.viewModel.setTier(0); this.chantAura(dt, null, null); }
       if (this.grace) this.resolveVoiceGrace();
+      if (this.mode === 'practice' && !this.chanting && !this.hintErr) {
+        this.tryT = (this.tryT ?? 3) - dt;
+        if (this.tryT <= 0) { this.tryT = 9; const list = TRY[getLang() === 'ja' ? 'ja' : 'en']; this.tryI = ((this.tryI ?? -1) + 1) % list.length; this.hud.hintHTML?.(t(this.voiceInit ? 'hint.chant' : 'hint.mic') + ' · ' + t('hint.try') + ' <b>“' + list[this.tryI] + '”</b>'); }
+      }
       this.boltCd -= dt;
       if (this.mouse.lmb) this.fireBolt();
       this.viewModel.update(dt, { speed: hs, chanting: this.chanting || !!this.channel, charge: this.chantProgress, grounded: p.grounded, voiceLevel: this.chanting ? this.voice.level : 0 });
