@@ -77,6 +77,7 @@ export class Royale {
     this.tick = 0; this.hudT = 0; this.placements = [];
     this.howl = game.audio.loop('darkness', new THREE.Vector3(), 0, null, { spin: 0.9 });
     this.windSnd = game.audio.loop('wind', null, 0, null, { spin: 0.5 });
+    this.shrineSnd = game.audio.loop('light', new THREE.Vector3(), 0);
   }
   // ------------------------------------------------------------ setup
   start() {
@@ -530,7 +531,8 @@ export class Royale {
   }
   nearestShrine(p, maxD) { let best = null, bd = maxD; for (const s of this.shrines || []) { const d = s.pos.distanceTo(p); if (d < bd && this.inZone(s.pos, -3)) { bd = d; best = s; } } return best; }
   updateShrines(dt) {
-    const g = this.g;
+    const g = this.g, pl = g.player, near = pl && this.nearestShrine(pl.pos, 30);
+    this.shrineSnd?.set(near ? near.pos.clone().setY(near.pos.y + 2.5) : null, near ? clamp(1 - near.pos.distanceTo(pl.pos) / 30) * 0.3 : 0); // a soft hum draws you in
     for (const S of this.shrines || []) {
       S.mc.update(dt); S.cry.rotation.y += dt * 1.2; S.cry.position.y = 2.6 + Math.sin(this.t * 1.5 + S.pos.x) * 0.2;
       let n = 0;
@@ -551,7 +553,7 @@ export class Royale {
     for (const F of this.falling || []) s.remove(F.mesh, F.beam);
     if (this.ship) { s.remove(this.ship.grp); this.ship.mc.dispose(); }
     for (const c of this.g.combatants) c.onShip = false;
-    this.howl?.stop(); this.windSnd?.stop();
+    this.howl?.stop(); this.windSnd?.stop(); this.shrineSnd?.stop();
     s.remove(this.wall, this.nextRing); this.wall.geometry.dispose(); this.wall.material.dispose(); this.nextRing.geometry.dispose(); this.nextRing.material.dispose();
     for (const m of this.mats.values()) m.dispose();
     document.body.classList.remove('storm-out'); document.getElementById('br-inv')?.classList.add('hidden'); document.getElementById('br-results')?.classList.add('hidden');
