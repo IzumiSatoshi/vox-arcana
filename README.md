@@ -93,6 +93,7 @@ reactions and statuses, and switches voice recognition to `ja-JP`. The rival als
 | **Left-click** | mana bolt (uses your last element) |
 | WASD / Space (hold to glide) / Shift / E / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
 | Esc | pause |
+| Battle royale: Space (on the ferry) · 1 / 2 / 3 · Tab · Enter (after a match) | jump off · heal / mana / shield potion · live standings · play again |
 
 Optional **hands-free mode** (Settings) casts whenever you say something that contains a spell.
 
