@@ -136,7 +136,8 @@ export class Royale {
     const S = this.ship;
     for (const c of this.g.combatants) {
       if (!c.onShip) continue;
-      c.pos.set(S.pos.x + Math.cos(c.deckA) * 4.2, S.pos.y + 1.62, S.pos.z + Math.sin(c.deckA) * 4.2); c.vel.set(0, 0, 0); c.grounded = true;
+      const ox = c.deckOff ? c.deckOff.x : Math.cos(c.deckA) * 4.2, oz = c.deckOff ? c.deckOff.z : Math.sin(c.deckA) * 4.2;
+      c.pos.set(S.pos.x + ox, S.pos.y + 1.62, S.pos.z + oz); c.vel.set(0, 0, 0); c.grounded = true;
       if (c.brain) c.yaw = Math.atan2(-S.dir.x, -S.dir.z);
     }
   }

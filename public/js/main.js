@@ -928,6 +928,7 @@ class Game {
       const speed = (sprint ? 10.5 : 7) * (this.chanting || this.channel ? 0.6 : 1);
       const fallV = p.vel.y, wasGrounded = p.grounded;
       if (p.alive && !p.onShip) this.stepBody(p, dt, wish, speed, this.keys.Space, this.keys.Space, this.keys.ControlLeft || this.keys.KeyC);
+      else if (p.onShip) { const o = (p.deckOff ||= { x: Math.cos(p.deckA) * 4.2, z: Math.sin(p.deckA) * 4.2 }); o.x += wish.x * 4 * dt; o.z += wish.z * 4 * dt; const L = Math.hypot(o.x, o.z); if (L > 6.8) { o.x *= 6.8 / L; o.z *= 6.8 / L; } } // stroll the ferry deck
       const onStone = Math.hypot(p.pos.x, p.pos.z) < 10.5 || p.pos.y - this.world.heightAt(p.pos.x, p.pos.z) > 0.25;
       if (!wasGrounded && p.grounded && fallV < -5) audio.land(clamp(-fallV / 22), onStone);
       if (p.alive && p.hp < p.maxHp * 0.3) { this.beatT = (this.beatT || 0) - dt; if (this.beatT <= 0) { this.beatT = 0.55 + (p.hp / p.maxHp) * 1.5; audio.heartbeat(); } }
