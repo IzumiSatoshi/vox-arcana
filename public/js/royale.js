@@ -67,6 +67,7 @@ export function royaleGuide(ja) {
   const core = ja ? ['元素の核', '対応する属性の魔法ダメージ+20%（重複可）'] : ['Element Core', '+20% damage for that element (stacks)'];
   const rows = [[core[0], core[1], 0xffc444], ...Object.values(PASSIVES).map((p) => [p[ja ? 'ja' : 'en'] + (p.rare ? ' ★' : ''), p.desc[ja ? 1 : 0], p.color]),
     ...Object.values(POTIONS).map((p) => ['[' + p.key + '] ' + p[ja ? 'ja' : 'en'], ja ? { '1': 'HP+220', '2': 'マナ+90', '3': 'シールド+160' }[p.key] : { '1': '+220 HP', '2': '+90 mana', '3': '+160 shield' }[p.key], p.color])];
+  rows.push([ja ? '共鳴' : 'Attunement', ja ? '同じ属性の核を3つで、その属性の強化を試合中ずっと得る' : 'three cores of one element grant its Enhance blessing for the whole match', 0xffd46a]);
   rows.push([ja ? 'マナの祠' : 'Mana Shrine', ja ? '石の環の中でマナと体力が回復（地図の青い丸）' : 'stand in the stone circle to restore mana and health (blue rings on the map)', 0x6fd8ff]);
   return rows.map(([n, d, c]) => '<li><b style="color:' + hex(c) + '">' + n + '</b> ' + d + '</li>').join('');
 }
