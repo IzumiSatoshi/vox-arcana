@@ -120,6 +120,10 @@ class WhipSpell extends Spell {
       d.addScaledVector(axis, wave).normalize();
       P[i].copy(P[i - 1]).addScaledVector(d, seg);
       const gy = groundY(this.g, P[i]) + 0.15; if (P[i].y < gy) P[i].y = gy;
+      if (i % 3 === 0 && this.sys.barriers.length) { // an enemy barrier stops the lash: the rest of it piles up at the wall
+        const bh = this.barrierHit(P[i - 3], P[i]);
+        if (bh) { const hp = P[i - 3].clone().lerp(P[i], bh.t); for (let j = i; j < this.N; j++) P[j].copy(hp); if (!this.bars?.has(li)) { (this.bars ||= new Set()).add(li); bh.bar.damage(28 * this.spec.dmgMult, hp); this.g.fx.explosion(this.el, hp, 0.9, 0.2, this.pal, { look: this.look, noDecal: true }); } break; }
+      }
     }
     // thin at the hand (it starts right under the caster's eye), thickest a little way out, tapering to the tip
     const r0 = this.r0, hand = this.caster.isPlayer ? 0.22 : 0.1, rad = (q) => r0 * (1.15 - 0.85 * q) * (0.4 + 0.6 * ext) * (0.2 + 0.8 * smooth(q / hand));
