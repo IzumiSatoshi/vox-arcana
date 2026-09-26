@@ -27,7 +27,7 @@ const handleApi = createApiHandler({ localModel, config: localConfig, apiKey });
 const MIME = {
   '.mp3': 'audio/mpeg',
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+  '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.vrm': 'model/gltf-binary',
 };
 
 const server = http.createServer(async (req, res) => {
