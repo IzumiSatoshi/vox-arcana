@@ -232,8 +232,45 @@ body.overcharge #hud::after { box-shadow: inset 0 0 140px color-mix(in srgb, var
 .br-pot.empty { opacity: .35; filter: grayscale(.7); }
 .br-pot kbd { position: absolute; top: 2px; left: 5px; font: 700 10px/1 var(--f-title, sans-serif); color: #f0d592; text-shadow: 0 1px 2px #000; }
 .br-pot b { position: absolute; bottom: 2px; right: 6px; font-size: 13px; color: #fff; text-shadow: 0 1px 3px #000; }
-.br-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 300px; }
-.br-chip { padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: color-mix(in srgb, var(--c) 30%, rgba(10,8,16,.8)); border: 1px solid color-mix(in srgb, var(--c) 80%, transparent); text-shadow: 0 1px 2px #000; }
+.br-pot b small { font-size: 9px; opacity: .6; font-weight: 600; }
+/* equipment bar: one tile per slot, filled with its rarity (Common grey → Legendary orange) */
+.br-gear { display: flex; align-items: flex-end; gap: 5px; }
+.br-gear .sep { width: 6px; }
+.br-slot { position: relative; width: 44px; height: 44px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+  background: radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--c) 75%, transparent), transparent 70%), linear-gradient(165deg, color-mix(in srgb, var(--c) 28%, rgba(18,14,28,.9)), rgba(8,6,14,.92));
+  border: 1.5px solid var(--c); box-shadow: 0 0 10px color-mix(in srgb, var(--c) 45%, transparent), inset 0 0 12px rgba(0,0,0,.55); }
+.br-slot .ico { width: 24px; height: 24px; filter: drop-shadow(0 1px 2px #000); }
+.br-slot .foc svg { display: block; filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 1px 2px #000); }
+.br-slot .el { position: absolute; left: 3px; top: 2px; display: none; }
+.br-slot .tn { position: absolute; right: 4px; bottom: 1px; font: 800 10px/1 var(--f-title, serif); color: var(--c); text-shadow: 0 1px 2px #000, 0 0 6px #000; letter-spacing: .5px; }
+.br-slot kbd { position: absolute; top: 2px; left: 4px; font: 700 10px/1 var(--f-title, sans-serif); color: #f0d592; text-shadow: 0 1px 2px #000; }
+.br-slot.empty { --c: rgba(200,200,220,.35); background: rgba(10,8,18,.5); border-style: dashed; box-shadow: none; color: rgba(255,255,255,.22); }
+.br-slot.t3 { animation: slotGlow 2.4s ease-in-out infinite; }
+.br-slot.t4 { animation: slotGlow 1.6s ease-in-out infinite; background: radial-gradient(circle at 50% 120%, color-mix(in srgb, var(--c) 90%, transparent), transparent 72%), linear-gradient(165deg, #4a2a08, rgba(8,6,14,.92)); }
+@keyframes slotGlow { 50% { box-shadow: 0 0 20px color-mix(in srgb, var(--c) 80%, transparent), inset 0 0 12px rgba(0,0,0,.5); } }
+.br-slot .cd { position: absolute; inset: 0; border-radius: 8px; --k: 0; background: conic-gradient(rgba(0,0,0,.7) calc(var(--k) * 360deg), transparent 0); }
+.br-slot.ready .cd { background: none; }
+/* loot cards */
+#br-toasts { position: absolute; right: 22px; bottom: 150px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.br-toast { --c: #fff; display: flex; align-items: center; gap: 10px; min-width: 230px; max-width: 330px; padding: 7px 12px 7px 9px; border-radius: 8px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 30%, rgba(12,10,20,.92)), rgba(10,8,16,.86) 55%); border-left: 4px solid var(--c); box-shadow: 0 4px 18px rgba(0,0,0,.5), 0 0 16px color-mix(in srgb, var(--c) 30%, transparent);
+  animation: toastIn .35s cubic-bezier(.2,1.4,.4,1); transition: opacity .5s, transform .5s; }
+.br-toast.out { opacity: 0; transform: translateX(30px); }
+.br-toast.t4 { box-shadow: 0 4px 18px rgba(0,0,0,.5), 0 0 26px color-mix(in srgb, var(--c) 60%, transparent); }
+.br-toast .ti { width: 34px; height: 34px; display: grid; place-items: center; color: var(--c); flex: none; }
+.br-toast .ti .ico { width: 30px; height: 30px; filter: drop-shadow(0 0 6px currentColor); }
+.br-toast .ti .pot { font-size: 24px; text-shadow: 0 0 8px currentColor; }
+.br-toast .tx { display: flex; flex-direction: column; line-height: 1.25; color: #f4efe4; text-shadow: 0 1px 2px #000; }
+.br-toast small { font: 800 10px/1.2 var(--f-title, sans-serif); letter-spacing: 2px; text-transform: uppercase; color: var(--c); }
+.br-toast b { font-size: 14px; }
+.br-toast span { font-size: 11.5px; opacity: .8; }
+.br-toast em { font-size: 10.5px; font-style: normal; opacity: .55; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(40px) scale(.96); } }
+/* armor: segmented steel-blue plates above the health bar */
+.bar.armorbar { height: 7px; background: rgba(8,10,18,0.5); }
+.bar.armorbar.hidden { display: none; }
+.bar .fill.armor { background: linear-gradient(90deg, #5c8fd6, #cfe6ff); }
+.bar.armorbar .seg { background: repeating-linear-gradient(90deg, transparent 0 calc(20% - 2px), rgba(0,0,0,0.7) calc(20% - 2px) 20%); }
 #storm-vignette { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .4s; background: radial-gradient(ellipse at center, transparent 45%, rgba(140, 40, 255, 0.55) 100%); }
 body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-out infinite; }
 @keyframes stormPulse { 50% { opacity: .65; } }
@@ -267,6 +304,12 @@ body.storm-out #storm-vignette { opacity: 1; animation: stormPulse 1.2s ease-in-
 #br-look.show { opacity: 1; }
 #br-look b { display: block; font-size: 15px; letter-spacing: 1px; }
 #br-look span { display: block; font-size: 12px; color: #e8e2d4; opacity: .85; }
+#br-look small { display: block; font: 800 10px/1.3 var(--f-title, sans-serif); letter-spacing: 3px; text-transform: uppercase; }
+#br-look i { display: inline-block; margin-top: 5px; padding: 2px 10px; border-radius: 999px; font-style: normal; font-size: 12px; color: #f4efe4; background: rgba(10,8,18,.7); border: 1px solid rgba(240,213,146,.4); }
+#br-look i b { display: inline; font-size: 12px; letter-spacing: 0; }
+#br-look i.up { border-color: #9dff9a; }
+#br-look i.dim { opacity: .6; }
+#br-look kbd { display: inline-block; min-width: 16px; padding: 0 4px; margin-right: 3px; border-radius: 4px; background: #f0d592; color: #1a1020; font: 800 11px/16px var(--f-title, sans-serif); text-align: center; text-shadow: none; }
 
 #ally-panel { position: absolute; left: 24px; bottom: 150px; width: 220px; padding: 6px 10px; border-radius: 8px; background: rgba(12,10,22,.65); border: 1px solid rgba(127,208,255,.5); pointer-events: none; font-size: 13px; color: #cfeaff; }
 #ally-panel .an { display: block; font-weight: 700; letter-spacing: 1px; margin-bottom: 4px; }

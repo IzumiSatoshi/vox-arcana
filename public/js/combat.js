@@ -174,6 +174,11 @@ export function applyHit(game, target, hit) {
     absorbed = Math.min(target.shield, dmg * eff); target.shield -= absorbed; dmg -= absorbed / eff;
     if (target.shield <= 0.5) { target.shield = 0; fx.explosion(target.shieldEl || 'earth', target.center(), 1.8, 0.4, null, { noDecal: true }); }
   }
+  // battle royale ward-mantle armor: soaks damage after the shield and before HP (not the storm)
+  if (target.armor > 0 && dmg > 0 && !trueDmg && !hit.storm) {
+    const a = Math.min(target.armor, dmg); target.armor -= a; dmg -= a; absorbed += a;
+    if (target.armor <= 0.5) { target.armor = 0; fx.ring?.(target.pos.clone().setY(target.pos.y + 1), new THREE.Color(0x8fd0ff), 2.2, 0.35); fx.element?.('ice', target.center(), { count: 16, speed: 4, size: 0.3 }); game.onArmorBreak?.(target); }
+  }
   target.hp -= dmg;
   if (dmg > 0.5 && !hit.dot) target.hitFlash = Math.min(1, 0.45 + dmg / 60); // model flashes white on a real hit
   if (hit.src && hit.src !== target) {

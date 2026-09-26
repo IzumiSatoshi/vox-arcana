@@ -624,6 +624,7 @@ class Game {
   }
   onVisualHit(target, hit) { if (hit.src === this.player) this.hud.hitm = 0.6; }
   onHeal(c, n) { if (n > 1) this.hud.popup(c.center().add(new THREE.Vector3(0, 1, 0)), '+' + Math.round(n), 'heal', '#9dff9a'); }
+  onArmorBreak(c) { if (c === this.player) { audio.shatter?.(null, 0.6); this.hud.popup(c.center().add(new THREE.Vector3(0, 1.2, 0)), t('royale.armorBreak'), 'react', '#8fd0ff'); } }
   onShield(c) { this.hud.popup(c.center().add(new THREE.Vector3(0, 1.2, 0)), t('st.shield'), 'react', '#ffd46a'); }
   onBotChant(c, text, onFinish) {
     if (this.mode === 'menu' || !this.settings.botVoice || !window.speechSynthesis) return;
@@ -710,6 +711,8 @@ class Game {
       if (e.code === 'KeyT' && this.mode === 'practice') { const b = this.bots[0]; if (b?.brain) { b.brain.dummy = !b.brain.dummy; this.hud.banner('', t(b.brain.dummy ? 'train.calm' : 'train.fight'), 1.8); } } // the golem fights back (or not)
       if (e.code === 'KeyM') { this.hud.bigMap = !this.hud.bigMap; $('minimap-wrap').classList.toggle('big', this.hud.bigMap); } // whole-island map
       if (this.royale && this.player && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.royale.drink(this.player, ['hp', 'mana', 'shield'][+e.code.slice(5) - 1]);
+      if (e.code === 'KeyR' && this.royale && this.player) this.royale.interact(this.player); // take / swap loot, open chests
+      if (e.code === 'KeyQ' && this.royale && this.player && !this.royale.useRune(this.player) && this.player.gear?.rune) audio.ui?.('click');
       if (e.code === 'Tab') { e.preventDefault(); if (this.royale && !this.royale.over) this.royale.showResults(); }
     });
     addEventListener('keyup', (e) => {
@@ -892,7 +895,7 @@ class Game {
       if (n.y < 0.66) { c.vel.x += n.x * 60 * dt; c.vel.z += n.z * 60 * dt; c.grounded = false; }
     }
     // bump the head on the underside of a construct
-    for (const b of this.world.boxes) if (c.vel.y > 0 && this.world.inBox(b, { x: c.pos.x, y: c.pos.y + 1.8, z: c.pos.z }, 0.2) && prevY + 1.8 <= b.y - b.hy + 0.05) { c.pos.y = b.y - b.hy - 1.81; c.vel.y = 0; }
+    for (const b of this.world.boxesAt(c.pos.x, c.pos.z)) if (c.vel.y > 0 && this.world.inBox(b, { x: c.pos.x, y: c.pos.y + 1.8, z: c.pos.z }, 0.2) && prevY + 1.8 <= b.y - b.hy + 0.05) { c.pos.y = b.y - b.hy - 1.81; c.vel.y = 0; }
     this.world.collideBody(c.pos);
     if (c.haste > 0) c.haste -= dt;
   }
@@ -1031,7 +1034,7 @@ class Game {
     for (const b of this.bots) {
       const out = b.brain.update(dt);
       if (out.dash && b.stamina > 30) { b.stamina -= 30; b.vel.addScaledVector(out.dash, 15); }
-      if (b.alive && !b.onShip) this.stepBody(b, dt, out.wish, out.speed || 6, out.jump, false);
+      if (b.alive && !b.onShip) this.stepBody(b, dt, out.wish, out.speed || 6, out.jump, !!out.glide);
       b.updateStatus(dt, this);
     }
     for (const c of this.combatants) {

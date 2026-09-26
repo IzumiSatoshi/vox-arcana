@@ -65,7 +65,15 @@ export class BotBrain {
       if (this.chant) this.updateChant(dt, c);
       else if (R && !c.dropping && c.canAct() && this.castCd <= 0 && Math.hypot(c.pos.x - R.zone.cx, c.pos.z - R.zone.cz) > R.zone.r + 8) this.startChant(c, c.hp / c.maxHp);
       if (this.forceAim) { this.aimPoint.copy(this.forceAim); this.aimDir.subVectors(this.aimPoint, c.eye(new THREE.Vector3())).normalize(); }
-      return { wish, jump: c.dropping ? false : jump, speed: this.d.speed * 1.1 };
+      // on the way down: glide (slow the fall) while the landing spot is still far off
+      const glide = c.dropping && R && c.brain?.dropTo && Math.hypot(this.dropTo.x - c.pos.x, this.dropTo.z - c.pos.z) > (c.pos.y - g.world.heightAt(c.pos.x, c.pos.z)) * 0.55;
+      // stuck against a wall on the way to loot: sidestep for a moment
+      if (!c.dropping && wish.lengthSq()) {
+        this.stuckT = (this.stuckT || 0) + dt;
+        if (this.stuckT > 0.6) { const moved = this.lastP ? Math.hypot(c.pos.x - this.lastP.x, c.pos.z - this.lastP.z) : 9; this.lastP = c.pos.clone(); this.stuckT = 0; if (moved < 1.2) { this.side = (Math.random() < 0.5 ? -1 : 1); this.sideT = rand(0.7, 1.4); jump = Math.random() < 0.4; } }
+        if (this.sideT > 0) { this.sideT -= dt; wish.set(-wish.z * this.side + wish.x * 0.2, 0, wish.x * this.side + wish.z * 0.2).normalize(); const d = wish; c.yaw = Math.atan2(-d.x, -d.z); }
+      }
+      return { wish, jump: c.dropping ? false : jump, speed: this.d.speed * 1.1, glide };
     }
     if (!tgt) return { wish, jump };
     // ---------- aim with lead + inaccuracy
@@ -87,7 +95,7 @@ export class BotBrain {
     wish.addScaledVector(to, flatD > pref + 4 ? 1 : flatD < pref - 5 ? -1 : 0);
     wish.addScaledVector(side, this.strafe * (this.chant ? 0.5 : 1));
     // keep inside the arena (and the storm)
-    if (Math.hypot(c.pos.x, c.pos.z) > 95) wish.addScaledVector(c.pos.clone().setY(0).normalize(), -1.5);
+    if (Math.hypot(c.pos.x, c.pos.z) > g.world.bound - 17) wish.addScaledVector(c.pos.clone().setY(0).normalize(), -1.5);
     if (R && !R.inZone(c.pos, -3)) wish.add(new THREE.Vector3(R.zone.cx - c.pos.x, 0, R.zone.cz - c.pos.z).normalize().multiplyScalar(2));
     // steer along cliff faces instead of grinding into them
     if (wish.lengthSq() > 0.01) {

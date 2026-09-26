@@ -20,14 +20,16 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
   - **rush** (突進), **totem** (祭壇) and **mark** (刻印)
   - The How-to page has a one-line guide for all 33 forms, and you get a warning when you are marked or trapped.
 - **Battle Royale**:
-  - 4, 8 or 12 mages, solo or in duos with an AI ally, ride a floating sky ferry and jump when they like.
-  - Loot element cores, relics and potions. Mesa tops hold extra relics, and a rare cache falls once per storm phase.
-  - Mana shrines in every quarter restore mana and health, and named places are announced as you enter them. A marker shows where you'll land.
-  - Survive a five-phase violet storm that ends in sudden death.
+  - **A much bigger island.** The old arena is now the island's heart. Roads run out to named landmarks: Highcrown Keep (a walled castle with walkable walls and a three-level keep), Millbrook (a village with a town hall and a windmill), the Ashen Colosseum, Starcaller Spire (a wizard's tower with a spiral stair and an open crown), Mirrormere lake, Moonstone Henge, Thornfield Farm, the Hollowmere ruins, Elderwood Lodge in the deep forest, and watchtowers along the coast.
+  - **Tiered gear.** Every item rolls Common, Uncommon, Rare, Epic or Legendary. You carry two grimoires (element damage), an amulet (mana), a ward mantle (armor that soaks damage before HP), boots (speed), an alchemist belt (potion slots) and a rune. Legendaries add a perk: attunement, echo, phoenix, stormwalker, distilled potions or a swift rune.
+  - Walking over a strict upgrade takes it. Trade-offs (another element, another rune) wait for **R**, and the piece you swap out drops at your feet. Aim at any item to see its tier, what it does and what it would replace.
+  - **Chests**: wooden chests in houses, iron-bound chests at landmarks, and Arcane Vaults at the top of the keep and the spire (always holding a Legendary). The fallen drop everything they carried.
+  - **Runes** (**Q**): Blink, Flight, Springstep, Wolfblood and Ward. Rune users can reach the tower tops.
+  - 4 to 16 mages, solo or in duos with an AI ally, ride a floating sky ferry and jump when they like. A cache of Epic and Legendary gear falls once per storm phase. Mana shrines across the island restore mana and health.
+  - Survive a six-phase violet storm that ends in sudden death.
   - The radar only shows foes that are close or chanting. After you fall you can spectate, and a standings panel shows the results.
   - Hold Tab for the live standings. The kill leader wears a crown. The winner gets a victory lap with fireworks and can press Enter to play again. A lifetime record appears on the setup screen.
   - Duos: a fallen teammate leaves a soul wisp you can revive them from, and an ally panel tracks your partner.
-  - Relics include the Storm Cloak (half storm damage) and the Echo Charm (spells may echo). Aim at any relic to read what it does.
 - **Sound**:
   - Distance filtering: air absorption and a delay before far sounds arrive. Walls and ruins occlude sound, missiles and serpents whoosh past your head, and standing in the storm muffles the world.
   - A hall reverb and a voice budget, so dense fights stay clear. Per-element loudness is balanced.
@@ -265,21 +267,30 @@ element reacts with it:
 - **Duel the Archmage**: best of three against an AI that chants generated incantations out loud (speech synthesis),
   runs them through Jev, reads your aura to set up reactions, dodges, walls and heals.
 - **Training Grounds**: a regenerating golem to test spells on.
-- **Battle Royale** (`public/js/royale.js`): 4, 8 or 12 mages board a floating sky ferry that crosses the island.
+- **Battle Royale** (`public/js/royale.js`, rules in `royale-rules.js`, landmarks in `lands.js`, loot models in `loot-art.js`): 4 to 16 mages board a floating sky ferry that crosses the island.
   - Play **Solo** or **Duos**. In Duos you and an AI ally (blue ◆ nameplate) take on pairs of mages. There's no friendly fire, the ally follows you and jumps with you, and the last team standing wins.
     A fallen teammate leaves a soul wisp for 30 s. Stand beside it for 4 s to revive them at 30% HP. Your ally will come and revive you too.
-  - Press **Space** to jump off wherever you like. Bots leave near the spot they want to land, and anyone still aboard is thrown off at the end of the line.
+  - Press **Space** to jump off wherever you like. Bots aim for a landmark near the ferry's line, and anyone still aboard is thrown off at the end of the line.
   - Steer the fall with WASD and hold Space to slow it.
-  - The minimap shows rivals within 40 m, or within 80 m while they chant.
-  - **Loot**: glowing relics with light beams are scattered across the map.
-    - Element cores give +20% damage for that element and stack.
-    - Passive relics: Mana Font (mana regen), Arcane Vessel (max mana), Troll Heart (max HP), Windstep Boots (speed), Sage Focus (cheaper spells), Storm Cloak (half storm damage) and Echo Charm (spells may echo at half power).
-    - Potions go into slots **1** (heal), **2** (mana) and **3** (shield).
-  - **Mana shrines**: four stone circles, one in each quarter, restore mana and health while you stand inside. Rivals fight over them.
-  - **Attunement**: collect three cores of one element and you gain that element's Enhance blessing (Cinder Heart, Gale Stride, Frost Mantle…) for the rest of the match.
-  - **Caches**: once per storm phase an arcane cache falls inside the next circle. It always contains a rare relic, either the Archmage Crown (+15% all damage) or the Phoenix Feather (revive once), plus extra loot.
-  - **The storm**: a violet storm wall shrinks in five phases, and its damage grows each phase. The final storm keeps getting stronger until one mage is left.
-  - **Bots** loot first, then fight whoever is nearest. They drink potions, run from the storm and drop their loot when eliminated.
+  - The minimap shows rivals within 40 m, or within 80 m while they chant. While you ride the ferry (or with **M**) it zooms out to the whole island.
+  - **The island**: about 660 m across. The arena and its rim hills sit in the middle; four roads lead out through the hills to the castle (south), the village (east), the colosseum (west) and the spire and lake (north), with the henge, farm, ruins and forest lodge between them. Buildings are real: walls block bodies and spells, floors, stairs, castle walls and roofs can be walked on.
+  - **Loot tiers**: Common (grey), Uncommon (green), Rare (blue), Epic (purple), Legendary (orange). Rare and better items throw a light beam; the rarer, the taller.
+
+    | Slot | What it gives (Common → Legendary) | Legendary perk |
+    |---|---|---|
+    | Grimoire ×2 | +10% → +50% damage with its element | Attuned: that element's Enhance blessing all match |
+    | Amulet | +15 → +80 max mana, +10% → +55% mana regen | Echo: 25% chance a spell repeats at half power |
+    | Ward Mantle | 60 → 300 armor (soaks damage before HP; not the storm) | Phoenix: rise once with half HP |
+    | Boots | +4% → +16% move speed | Stormwalker: half storm damage |
+    | Alchemist Belt | carry 3 → 7 of each potion (2 without one) | Distilled: potions 50% stronger |
+    | Rune (Q) | cooldown ×1 → ×0.5 | Swift |
+
+  - **Picking up**: strict upgrades are taken by walking over them. Anything else (a third element, a different rune) needs **R**, and the replaced piece drops. Potions go into slots **1** (heal), **2** (mana) and **3** (armor, or a shield if you have no mantle).
+  - **Chests** (**R** to open): wooden (2 items and usually a potion), iron-bound (3 better items) and Arcane Vaults (4 items, at least one Legendary). Bots walk in through doors to reach them.
+  - **Mana shrines**: stone circles across the island restore mana and health while you stand inside. Rivals fight over them.
+  - **Caches**: once per storm phase an arcane cache falls inside the next circle with a Legendary and three Epic-or-better items.
+  - **The storm**: a violet storm wall shrinks in six phases, and its damage grows each phase. The final storm keeps getting stronger until one mage is left.
+  - **Bots** loot first, then fight whoever is nearest. They open chests, swap in upgrades, drink potions, use their runes, run from the storm and drop everything when eliminated.
   - **After you fall**, the camera spectates the leader. The last mage standing wins.
 
 ## Files
@@ -290,7 +301,10 @@ public/js/main.js     game loop, input, modes, casting flow, post-processing
 public/js/spellbook.js  local parser, Jev client, spec merge, AI incantation generator
 public/js/spells.js   23 procedural spell forms (plus the shared helpers)
 public/js/spells-extra.js  10 more forms: whip, prison, decoy, drain, beast, halo, sword, rush, totem, mark
-public/js/royale.js   battle royale: drop, loot, potions, caches, shrinking storm, spectating
+public/js/royale.js   battle royale: drop, loot, chests, runes, potions, caches, shrinking storm, spectating
+public/js/royale-rules.js  battle royale rules as data: tiers, gear slots, loot odds, storm phases (unit-tested)
+public/js/lands.js    the outer island's landmarks: castle, village, colosseum, spire, henge, farm, ruins, lodge, watchtowers
+public/js/loot-art.js loot models (grimoires, amulets, mantles, boots, belts, runes, potions), rarity markers, chests, HUD icons
 public/js/look.js     look genome: continuous visual axes, substance biases, palette and particle recipes
 public/js/vfxkit.js   element surface kit: one matter shader (fluid · flame · gas · solid · energy) for every spell volume
 public/js/style.js    global art direction: soft cel terminator and rim light for all lit materials, chamfered stone and boulder geometry

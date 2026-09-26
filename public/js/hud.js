@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ELEMENTS, SHAPES, tierName, shapeName, reactName } from './elements.js';
 import { roman, clamp, TAU } from './util.js';
+import { ISLAND_R } from './world.js';
 import { t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -68,25 +69,28 @@ export class Hud {
     strip.innerHTML = h;
   }
   buildMinimapBg(world) {
-    const S = 360, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
-    const R = 135, img = g.createImageData(S, S);
+    const S = 720, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    const R = ISLAND_R + 50, img = g.createImageData(S, S), H = (x, z) => (world.gridH ? world.gridH(x, z) : world.heightAt(x, z));
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const wx = (x / S) * 2 * R - R, wz = (y / S) * 2 * R - R, h = world.heightAt(wx, wz), o = (y * S + x) * 4;
+      const wx = (x / S) * 2 * R - R, wz = (y / S) * 2 * R - R, h = H(wx, wz), o = (y * S + x) * 4;
       let c;
-      if (h < -2.8) c = [40, 110, 140]; else if (h < -1.2) c = [196, 180, 132];
+      if (h < -2.8) { const d = clamp((-2.8 - h) / 6); c = [40 - d * 16, 110 - d * 34, 140 - d * 20]; } else if (h < -1.2) c = [196, 180, 132];
       else if (Math.hypot(wx, wz) < 10.5) c = [150, 142, 124];
-      else { const k = clamp((h + 1) / 10); c = [70 + k * 40, 120 + k * 20, 60 + k * 30]; }
+      else { const k = clamp((h + 1) / 22), sh = clamp((H(wx - 1.5, wz - 1.5) - h) * 0.25, -0.25, 0.25); c = [(70 + k * 60) * (1 - sh), (120 + k * 34) * (1 - sh), (60 + k * 36) * (1 - sh)]; } // hill shading from the north-west
       img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
+    const px = (v) => ((v + R) / (2 * R)) * S, k = S / (2 * R);
     g.fillStyle = 'rgba(40,36,30,0.85)';
-    for (const o of world.obstacles) { g.beginPath(); g.arc(((o.x + R) / (2 * R)) * S, ((o.z + R) / (2 * R)) * S, Math.max(1.5, o.r * 2), 0, TAU); g.fill(); }
-    g.strokeStyle = 'rgba(111,224,255,0.6)'; g.lineWidth = 2; g.beginPath(); g.arc(S / 2, S / 2, (8.5 / (2 * R)) * S, 0, TAU); g.stroke();
+    for (const o of world.obstacles) { g.beginPath(); g.arc(px(o.x), px(o.z), Math.max(1, o.r * k), 0, TAU); g.fill(); }
+    g.fillStyle = 'rgba(58,44,34,0.95)';
+    for (const b of world.solids || []) { g.save(); g.translate(px(b.x), px(b.z)); g.rotate(-(b.yaw || 0)); g.fillRect(-b.hx * k, -b.hz * k, Math.max(1, 2 * b.hx * k), Math.max(1, 2 * b.hz * k)); g.restore(); }
+    g.strokeStyle = 'rgba(111,224,255,0.6)'; g.lineWidth = 2; g.beginPath(); g.arc(S / 2, S / 2, 8.5 * k, 0, TAU); g.stroke();
     this.mmBg = cv; this.mmR = R;
   }
   drawMinimap(p) {
     // px per metre; zoomed out to the whole island while riding the ferry or falling, so you can pick a landing spot
-    const g = this.mm, W = 180, wide = (this.g.royale && (p.onShip || p.dropping)) || this.bigMap, scale = this._mmS = (this._mmS ?? 2) + ((wide ? 0.62 : 2) - (this._mmS ?? 2)) * 0.15;
+    const g = this.mm, W = 180, wide = (this.g.royale && (p.onShip || p.dropping)) || this.bigMap, far = wide ? (this.g.royale ? 0.24 : 0.62) : 2, scale = this._mmS = (this._mmS ?? 2) + (far - (this._mmS ?? 2)) * 0.15;
     g.save(); g.clearRect(0, 0, W, W);
     g.beginPath(); g.arc(W / 2, W / 2, W / 2, 0, TAU); g.clip();
     g.fillStyle = '#28462a'; g.fillRect(0, 0, W, W);
@@ -130,7 +134,9 @@ export class Hud {
     setStyle($('self-hp'), 'width', hpF * 100 + '%');
     setStyle($('self-lag'), 'width', hpF * 100 + '%');
     setStyle($('self-shield'), 'width', clamp(p.shield / 300) * 100 + '%');
-    setText($('self-hp-num'), `${Math.ceil(p.hp)}${p.shield > 0 ? ` +${Math.ceil(p.shield)}` : ''}`);
+    const armored = p.maxArmor > 0; $('self-armor-bar').classList.toggle('hidden', !armored);
+    if (armored) setStyle($('self-armor'), 'width', clamp(p.armor / p.maxArmor) * 100 + '%');
+    setText($('self-hp-num'), `${Math.ceil(p.hp)}${p.armor > 0 ? ` ⛊${Math.ceil(p.armor)}` : ''}${p.shield > 0 ? ` +${Math.ceil(p.shield)}` : ''}`);
     setStyle($('self-mana'), 'width', clamp(p.mana / p.maxMana) * 100 + '%');
     setText($('self-mana-num'), Math.floor(p.mana));
     setStyle($('self-stam'), 'width', p.stamina + '%');
