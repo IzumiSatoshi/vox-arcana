@@ -1,6 +1,7 @@
 {
   "name": "vox-arcana",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Voice-cast FPS magic duel. Speak incantations; Jev turns them into procedurally generated spells.",
   "type": "module",
   "scripts": {

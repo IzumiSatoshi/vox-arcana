@@ -1,10 +1,9 @@
-# Deploy Vox Arcana to the existing jev-spell project
+# Deploy Vox Arcana
 
-This checkout is linked locally to the same Vercel project as `C:/Users/81809/Documents/ChatGPT/jev_spell`:
-
-- Project: `jev-spell` (scope: `mushoku1`)
-- Project ID: `prj_A3m0YKjFavWZHvTXeZDONK2Bgmua`
-- The link lives in ignored `.vercel/project.json`.
+Use your own Vercel account and project. Run `npx vercel login` and
+`npx vercel link` to select or create a project. The local link lives in ignored
+`.vercel/project.json`. Credentials, provider budgets, and firewall rules are
+not supplied by this repository.
 
 ## Validate and deploy
 
@@ -17,7 +16,7 @@ npm run build
 npm run deploy:preview
 ```
 
-`deploy:preview` uploads this checkout to a preview deployment in the existing project. Check the menu, Settings, `/api/status`, and a typed spell in Practice there. This preparation has not published a deployment.
+`deploy:preview` uploads this checkout to a preview deployment in your linked project. Check the menu, Settings, `/api/status`, and a typed spell in Practice there.
 
 When ready to replace the production site:
 
@@ -27,7 +26,7 @@ npm run deploy:production
 
 This command uses `vercel deploy --prod` and replaces the existing project's production site. It uploads source and builds on Vercel; it does not require a successful local `vercel build` or `--prebuilt`.
 
-On another checkout, first run `npx vercel link --project jev-spell --scope mushoku1`, then `npx vercel pull --yes --environment=preview`. Keep `.vercel` and environment files out of Git.
+On another checkout, first run `npx vercel link`, then `npx vercel pull --yes --environment=preview`. Keep `.vercel` and environment files out of Git.
 
 ## Local Vercel build check
 
@@ -36,7 +35,7 @@ npx vercel pull --yes --environment=preview
 npm run vercel:build
 ```
 
-The wrapper normalizes duplicate `Path` / `PATH` entries passed by Vercel CLI 59 on Windows and uses the system command processor. It affects only child processes; no machine configuration is changed. The Vercel build was verified locally with this normalization. The standard app build and 84 automated tests also passed. Browser checks covered the main screen, settings, difficulty selection, Japanese labels, and Practice with the microphone off. Physical microphone capture and hosted gateway access remain unverified.
+The wrapper normalizes duplicate `Path` / `PATH` entries passed by Vercel CLI on Windows and uses the system command processor. It affects only child processes; no machine configuration is changed.
 
 ## Hosting configuration
 
@@ -44,9 +43,9 @@ The wrapper normalizes duplicate `Path` / `PATH` entries passed by Vercel CLI 59
 
 Hosted spell requests always use Vercel AI Gateway. On Vercel they authenticate
 with the deployment OIDC token, which is covered by the project budget. The
-project currently has a $5 monthly AI Gateway budget and a live Vercel Firewall
-rule limiting `/api/spell` to 600 requests per IP per 60 seconds. Keep both
-controls in place before opening the deployment to the public. The local server
+must have a suitable AI Gateway spending cap and Vercel Firewall rate limits
+for `/api/spell` before opening the deployment to the public. Configure these
+in your own account; the repository does not create them. The local server
 can still use `JEV_API_KEY` or `TYPESAFE_API_KEY` for direct TypeSafe requests;
 hosted requests ignore those direct keys so they cannot bypass the budget.
 
@@ -63,4 +62,10 @@ Gateway access and available credits still need to be checked by casting a spell
 
 The hosted function intentionally does not import the heavyweight local inference runtime. Local-model availability is exposed through `/api/status` and the UI.
 
-The microphone is opt-in on the main screen. Starting Practice or Duel does not request microphone permission. Display language and speech language are independent. Game Settings contains a single Back to main screen action; voice options are in the main-screen sidebar.
+Typed casting is available without a microphone. Browser permission and speech
+support vary; selecting a local spell model does not make speech recognition
+offline. Display language and speech language are independent.
+
+The local Node server is for development. Do not expose it directly to an
+untrusted network. See `SECURITY_AUDIT.md` for the historical findings and scope;
+that report is not a certification of the current application.

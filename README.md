@@ -1,6 +1,6 @@
 # Vox Arcana: a voice-cast magic duel
 
-A browser FPS magic PvP game where you fight by **speaking incantations**.
+A browser FPS magic game where you fight AI opponents by **speaking incantations** or typing spells.
 Your words go through the Web Speech API, then **Jev** (TypeSafe's System One decision model) turns them into a
 procedurally generated spell: an element, a form, and a dozen continuous parameters.
 
@@ -37,15 +37,25 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
 - **Game feel**: a damage-direction indicator around the crosshair, hit-stop on heavy hits, kill-streak banners, and example chants that rotate in the training grounds. A Reduce motion setting tones down shake and flashes.
 - **Performance**: mage models use distance LOD down to a five-mesh impostor, so large lobbies stay smooth.
 
-## Run
+## License
+
+The original source code and documentation are licensed under the [MIT License](LICENSE).
+Third-party libraries, models, fonts, and media retain their own terms; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The MIT license does not grant
+rights to third-party services or their API credentials.
+
+## Run locally
 
 ```bash
-node server.js
+npm ci
+npm start
 ```
 
 Then open **http://localhost:8787** in **Chrome or Edge**, which have the Web Speech API. Allow the microphone.
 
-- Node 18+ for Jev/keywords. Run `npm install` to install the optional local-model runtime (Three.js still loads from a CDN).
+- Requires Node.js 24.x. Three.js and fonts load from CDNs, so the default setup needs internet access.
+- No API key is required for keyword interpretation: disable **Use selected model** in Settings. You can type spells with Enter without microphone access. The experimental local MiniLM option also needs no API key, but downloads model files on first use.
+- For Jev, copy `.env.example` to `.env`, set your own `JEV_API_KEY`, and run `node --env-file=.env server.js`. Plain `npm start` does not load `.env` automatically. Never commit credentials.
 - The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the endpoint and model with
   `JEV_URL` / `JEV_MODEL` or a `jev.config.json` (`{ "url": "...", "model": "...", "keyFile": "..." }`).
 - Set `JEV_DEBUG=1` to print Jev's raw answers in the server console.
