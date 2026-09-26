@@ -11,6 +11,7 @@ import { Royale, royaleGuide, royaleRecord } from './royale.js';
 import { FORM_GUIDE } from './form-guide.js';
 import { Combatant, ENHANCE } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
+import { loadAnimeMage } from './anime-mage.js';
 import { MagicCircle } from './magicCircle.js';
 import { BotBrain } from './bot.js';
 import { Hud, elChip } from './hud.js';
@@ -30,7 +31,7 @@ const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, royaleTeams: 1, quality: 1, sens: 1, chantSize: 26, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
+const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, royaleTeams: 1, quality: 1, sens: 1, chantSize: 26, anime: true, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
@@ -819,6 +820,8 @@ class Game {
     });
     $('set-chantsize-value').textContent = `${s.chantSize} px`;
     bind('set-sens', 'sens', Number);
+    bind('set-anime', 'anime', Boolean, 'checked', () => { MageModel.anime = s.anime; if (s.anime) loadAnimeMage(); });
+    MageModel.anime = !!s.anime; if (s.anime) loadAnimeMage();
     bind('set-calm', 'calm', Boolean, 'checked', () => { this.fx.calm = s.calm; });
     this.fx.calm = !!s.calm;
     bind('set-vol', 'vol', Number, 'value', () => audio.setVolume(s.vol));

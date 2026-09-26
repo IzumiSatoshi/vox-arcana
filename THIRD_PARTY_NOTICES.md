@@ -8,6 +8,8 @@ external services. Preserve the applicable notices when packaging a release.
 
 - Three.js 0.169.0 is loaded from jsDelivr, including its addons, under MIT:
   https://github.com/mrdoob/three.js/blob/r169/LICENSE
+- `@pixiv/three-vrm` 3.5.5 is loaded from jsDelivr under MIT; it loads and poses the VRM mage model:
+  https://github.com/pixiv/three-vrm/blob/release/LICENSE
 - Transformers.js is installed through npm under Apache-2.0:
   https://github.com/huggingface/transformers.js
 - `@vercel/oidc` is Apache-2.0. It and transitive npm packages carry their own license files.
@@ -26,6 +28,14 @@ external services. Preserve the applicable notices when packaging a release.
   services. This repository does not license those services or provide credits.
 
 ## Media
+
+- `public/models/mage.vrm`: pixiv Inc.'s `VRM1_Constraint_Twist_Sample` from the
+  three-vrm examples, (c) 2022 pixiv Inc., used as a placeholder mage body. Its VRM
+  metadata grants redistribution and modification with redistribution, allows
+  corporate commercial use, requires no credit, and forbids antisocial or hateful use,
+  under the VRM Public License 1.0: https://vrm.dev/licenses/1.0/
+  It is **not** covered by this repository's MIT license. Replacing the file with your own
+  VRoid Studio export keeps the game code unchanged.
 
 - `public/audio/fantasy-spellcasting-boss-theme.mp3`: the maintainer reports
   generating this track with Google's music-generation AI. The exact product

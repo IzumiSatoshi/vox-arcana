@@ -37,6 +37,15 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
 - **Game feel**: a damage-direction indicator around the crosshair, hit-stop on heavy hits, kill-streak banners, and example chants that rotate in the training grounds. A Reduce motion setting tones down shake and flashes.
 - **Performance**: mage models use distance LOD down to a five-mesh impostor, so large lobbies stay smooth.
 
+## Character model
+
+Rival mages are anime-style VRM characters (Settings → **Anime mages**; off falls back to the classic
+primitive mage). The game loads `public/models/mage.vrm` once and clones it for every mage, adding the
+witch hat, staff and cape in code. To use your own character, export a **VRM 1.0** from VRoid Studio and
+replace that file. Blinking, the chanting mouth and the casting poses come from the standard VRM humanoid
+bones and expressions. The bundled file is a pixiv sample used as a placeholder; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## License
 
 The original source code and documentation are licensed under the [MIT License](LICENSE).

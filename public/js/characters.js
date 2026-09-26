@@ -4,6 +4,7 @@ import { energyMaterial, barrierMaterial, addOutline, TIME } from './shaders.js'
 import { MagicCircle } from './magicCircle.js';
 import { ELEMENTS } from './elements.js';
 import { elementKit, surfaceMaterial } from './vfxkit.js';
+import { AnimeRig, animeMageReady } from './anime-mage.js';
 
 const cyl = (rt, rb, h, seg = 20) => { const g = new THREE.CylinderGeometry(rt, rb, h, seg); g.translate(0, -h / 2, 0); return g; }; // hangs down from its pivot
 
@@ -21,6 +22,7 @@ const waveHem = (g, below, amp = 1) => { // scalloped hem that dips toward the b
 // Stylised anime silhouette: wide-brimmed bent witch hat over a shadowed face with glowing eyes, high collar, a long
 // front-split coat with a contrasting lining, bell sleeves, belt with pouches and a grimoire, scarf tails and a notched cape.
 export class MageModel {
+  static anime = true; // use the VRM mage when it has loaded (Settings → Anime mages)
   constructor({ robe = 0x2a2350, trim = 0xe0b95a, accent = 0xff4a6a, hat = 0x1d1838 } = {}) {
     const root = (this.root = new THREE.Group());
     const body = (this.body = new THREE.Group()); root.add(body);
@@ -156,6 +158,13 @@ export class MageModel {
     const ap = []; for (let k = 0; k <= 16; k++) { const t = k / 16; ap.push(new THREE.Vector2(0.32 + Math.sin(Math.pow(t, 0.8) * Math.PI) * 0.26 - t * 0.12, t * 1.95)); }
     this.statusGeo = new THREE.LatheGeometry(ap, 32); this.statusMats = {}; this.statusEl = null; this.statusK = 0;
     this.statusMesh = new THREE.Mesh(this.statusGeo); this.statusMesh.visible = false; this.statusMesh.renderOrder = 3; root.add(this.statusMesh);
+    // anime mage: once the VRM has loaded, it replaces the primitive body (the far impostor and status visuals stay)
+    const tpl = MageModel.anime && animeMageReady();
+    if (tpl) {
+      this.anime = new AnimeRig(tpl, { trim, accent, hat }, this.glowMat);
+      root.remove(body); root.add(this.anime.root); root.add(this.chantOrb);
+      this.flashMats = this.anime.flashMats; this.staffTip = this.anime.staffTip;
+    }
   }
   status(el, k, dt) {
     this.statusK += ((el ? k : 0) - this.statusK) * Math.min(1, dt * 5);
@@ -173,7 +182,7 @@ export class MageModel {
     for (const m of this.lodOutlines) m.visible = level < 1;
     for (const m of this.lodShadow) m.castShadow = level < 2;
     for (const m of this.lodSmall) m.visible = level < 2;
-    this.body.visible = level < 3; this.proxy.visible = level >= 3;
+    (this.anime ? this.anime.root : this.body).visible = level < 3; this.proxy.visible = level >= 3;
   }
   setElement(el) { const c = new THREE.Color(ELEMENTS[el]?.color ?? 0xffffff); this.glowMat.color.copy(c).multiplyScalar(3.5); this.chantOrb.material.uniforms.uColor.value.copy(c); }
   handWorld(out = new THREE.Vector3()) { return (this.chant > 0.3 ? this.chantOrb : this.staffTip || this.handGem).getWorldPosition(out); }
@@ -185,6 +194,10 @@ export class MageModel {
     this.castAnim = Math.max(0, this.castAnim - dt * 3.5);
     this.chant += ((s.chanting ? 1 : 0) - this.chant) * Math.min(1, dt * 8);
     const w = this.walk;
+    if (this.anime) {
+      this.anime.pose(dt, { walk: w, sp, chant: this.chant, cast: this.castAnim, pitch: s.pitch || 0, hit: hf, skip: this.lodLevel >= 2 && (this._skip = !this._skip) });
+      this.chantOrb.position.set(0, 1.2, -0.45);
+    } else {
     for (const L of this.legs) {
       const ph = w + (L.s > 0 ? Math.PI : 0);
       L.hip.rotation.x = Math.sin(ph) * 0.65 * sp;
@@ -200,9 +213,7 @@ export class MageModel {
       A.sh.rotation.z = A.s * (0.12 - this.chant * 0.35);
       A.el.rotation.x = 0.25 + this.chant * 0.5 - castR * 0.2;
     }
-    this.chantOrb.visible = this.chant > 0.05;
     this.chantOrb.position.set(0, 1.25, -0.52);
-    this.chantOrb.scale.setScalar(this.chant * (1 + Math.sin(t * 12) * 0.1));
     this.head.rotation.x = -(s.pitch || 0) * 0.5;
     const cp = this.cape.geometry.attributes.position;
     for (let i = 0; i < cp.count; i++) {
@@ -215,6 +226,9 @@ export class MageModel {
       for (let i = 0; i < P.count; i++) { const y = S.base[i * 3 + 1]; P.setZ(i, S.base[i * 3 + 2] + Math.sin(t * 5.5 + y * 6 + S.ph) * 0.06 * -y - y * 0.5 * sp); P.setX(i, S.base[i * 3] + Math.sin(t * 3.7 + y * 4 + S.ph) * 0.03 * -y); }
       P.needsUpdate = true;
     }
+    }
+    this.chantOrb.visible = this.chant > 0.05;
+    this.chantOrb.scale.setScalar(this.chant * (1 + Math.sin(t * 12) * 0.1));
     this.shell.visible = !!s.frozen;
     this.bubble.visible = s.shield > 0;
     if (this.bubble.visible) { this.bubble.material.uniforms.uAlpha.value = Math.min(1, 0.4 + s.shield / 150); this.bubble.material.uniforms.uColor.value.set(ELEMENTS[s.shieldEl]?.color ?? 0xffd46a); }
