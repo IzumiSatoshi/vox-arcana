@@ -10,7 +10,7 @@ import { addOutline, TIME } from './shaders.js';
 // VRM normalized space: the model faces +Z, identity rotations are a T-pose, left arm along +X. The rig root is turned
 // half a revolution so the mage faces -Z like the rest of the game.
 export const ANIME_MAGE_URL = 'models/mage.vrm';
-const HEIGHT = 1.95; // heroic scale: slim anime proportions read tiny at combat range next to the old coat mage
+const EYE = 1.62; // same eye height as the player (Combatant.eye), so a mage you meet looks you in the eye
 let template = null, loading = null;
 
 export function loadAnimeMage(url = ANIME_MAGE_URL) {
@@ -33,7 +33,9 @@ export function loadAnimeMage(url = ANIME_MAGE_URL) {
       }
       // node constraints (twist bones that keep sleeves and wrists from candy-wrapping), rebuilt per clone by node name
       const constraints = [...(vrm.nodeConstraintManager?.constraints || [])].map((c) => ({ Ctor: c.constructor, dst: c.destination.name, src: c.source.name, weight: c.weight, rollAxis: c.rollAxis, aimAxis: c.aimAxis }));
-      template = { scene: vrm.scene, bones, expr, constraints, scale: HEIGHT / Math.max(0.5, box.max.y - box.min.y) };
+      const eyeNode = vrm.humanoid.getRawBoneNode('leftEye') || vrm.humanoid.getRawBoneNode('head');
+      const eyeY = eyeNode.getWorldPosition(new THREE.Vector3()).y - box.min.y + (vrm.humanoid.getRawBoneNode('leftEye') ? 0 : 0.07);
+      template = { scene: vrm.scene, bones, expr, constraints, scale: EYE / Math.max(0.5, eyeY) };
       return template;
     });
     loading.catch((e) => console.warn('Anime mage model unavailable; using the classic mage.', e));

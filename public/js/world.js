@@ -33,7 +33,7 @@ export function stoneMaterial(color, { moss = 1, joint = 0, rough = 0.9, grime =
         // polar paving (dais top): staggered rings of flagstones, each with its own tint, worn bright edges and dark joints
         float tj=1.0;
         if(uTiles>0.0 && WN.y>0.7){
-          float r=length(P.xz), ring=floor(r/uTiles), segs=max(1.0,floor(6.2832*(ring+0.5)*uTiles/2.1));
+          float r=length(P.xz), ring=floor(r/uTiles), segs=max(1.0,floor(6.2832*(ring+0.5)*uTiles/(uTiles*1.25)));
           float fa=(atan(P.z,P.x)+ring*1.3)/6.2832*segs, seg=floor(fa);
           float jr=(0.5-abs(fract(r/uTiles)-0.5))*uTiles, ja=(0.5-abs(fract(fa)-0.5))/segs*6.2832*r;
           tj=ring<0.5? 1.0 : min(jr,ja);
@@ -729,12 +729,12 @@ export class World {
     }
     this.scene.add(this.terrain);
     // central dais with glowing rune circle
-    const stone = stoneMaterial(0xc4b9a2, { moss: 0.2, grime: 0, tiles: 1.7 });
+    const stone = stoneMaterial(0xc4b9a2, { moss: 0.2, grime: 0, tiles: 0.85 }); // flagstones at paving scale, not giant slabs
     const dais = new THREE.Mesh(tintGeo(new THREE.CylinderGeometry(10, 10.8, 1.2, 96), mulberry32(1), 0), stone);
     dais.position.y = -0.25; dais.receiveShadow = true; this.scene.add(dais);
     const daisA = stoneMaterial(0xc2b8a2, { moss: 0.15, grime: 0 }), daisB = stoneMaterial(0xaea48e, { moss: 0.15, grime: 0 });
-    for (let i = 0; i < 24; i++) { // flagstone rim
-      const a = (i / 24) * TAU, b = new THREE.Mesh(tintGeo(stoneBlock(2.55, 0.35, 1.1, mulberry32(i + 3), { chip: 0.06, seg: 2 }), mulberry32(i)), i % 2 ? daisA : daisB);
+    for (let i = 0; i < 48; i++) { // flagstone rim
+      const a = (i / 48) * TAU, b = new THREE.Mesh(tintGeo(stoneBlock(1.28, 0.35, 0.8, mulberry32(i + 3), { chip: 0.03, seg: 2 }), mulberry32(i)), i % 2 ? daisA : daisB);
       b.position.set(Math.cos(a) * 10.2, 0.2, Math.sin(a) * 10.2); b.rotation.y = -a + Math.PI / 2 + (Math.random() - 0.5) * 0.04; this.statics.add(b);
     }
     const mc = new MagicCircle({ seed: 7, tier: 9, color: 0x3fb8ff, radius: 8.5, intensity: 0.45 });
@@ -825,7 +825,11 @@ export class World {
     const stone = stoneMaterial(0xe0d6c2, { moss: 0.8, joint: 1.6 }), block = stoneMaterial(0xc4b89e, { moss: 0.9 }), dark = stoneMaterial(0xa89c84, { moss: 1 });
     const gold = toon(0xd9b25a, { emissive: 0x3a2a00 });
     const rng = mulberry32(42), G = this.statics;
-    const put = (geo, mat, x, y, z, ry = 0, rx = 0, rz = 0) => { const m = new THREE.Mesh(tintGeo(geo, rng), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); G.add(m); return m; };
+    // a pivot group builds one ruin at a smaller scale about its base (columns and arches were cut for giants: 2.2 m thick
+    // columns and 9 m arches made the mages read doll-sized); pieces are placed in world coordinates either way
+    let pivot = null;
+    const scaled = (x, y, z, k, build) => { pivot = new THREE.Group(); pivot.position.set(x, y, z); pivot.scale.setScalar(k); G.add(pivot); build(); pivot = null; };
+    const put = (geo, mat, x, y, z, ry = 0, rx = 0, rz = 0) => { const m = new THREE.Mesh(tintGeo(geo, rng), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); if (pivot) { m.position.sub(pivot.position); pivot.add(m); } else G.add(m); return m; };
     const blk = (w, h, d, chip = 0.05) => stoneBlock(w, h, d, rng, { chip, seg: Math.max(w, h, d) > 1.6 ? 3 : Math.max(w, h, d) > 1.0 ? 2 : 1 });
     const rubble = (cx, cz, n, spread) => {
       for (let i = 0; i < n; i++) {
@@ -833,7 +837,8 @@ export class World {
         put(blk(s * (1 + rng()), s * 0.7, s, 0.14), rng() < 0.5 ? block : dark, x, this.heightAt(x, z) + s * 0.2, z, rng() * TAU, (rng() - 0.5) * 0.5, (rng() - 0.5) * 0.5);
       }
     };
-    const column = (x, z, h, broken) => {
+    const COL = 0.65, ARCH = 0.7;
+    const column = (x, z, h, broken) => scaled(x, this.heightAt(x, z) - 0.25, z, COL, () => {
       const y = this.heightAt(x, z) - 0.25, ry = rng() * TAU;
       put(blk(2.3, 0.45, 2.3, 0.08), dark, x, y + 0.22, z, ry);
       put(new THREE.CylinderGeometry(1.08, 1.12, 0.28, 32), block, x, y + 0.58, z, ry);
@@ -849,8 +854,8 @@ export class World {
         drum.geometry.translate(0, -L / 2, 0);
         rubble(x, z, 6, 5);
       }
-      this.obstacles.push({ x, z, r: 1.05, y0: y, h: h + 1.4 });
-    };
+      this.obstacles.push({ x, z, r: 1.05 * COL, y0: y, h: (h + 1.4) * COL });
+    });
     // hilltop shrines on the two broad mesas: a broken colonnade round a stone altar (a vantage point with cover)
     for (const m of [MESAS[0], MESAS[2]]) {
       const n = 6, rr = m.R * 0.55;
@@ -875,21 +880,23 @@ export class World {
       const a = (i / 4) * TAU + Math.PI / 4, r = 22;
       const cx = Math.cos(a) * r, cz = Math.sin(a) * r, tx = -Math.sin(a), tz = Math.cos(a), yaw = -a + Math.PI / 2;
       const y = Math.min(this.heightAt(cx + tx * 3, cz + tz * 3), this.heightAt(cx - tx * 3, cz - tz * 3)) - 0.1;
+      scaled(cx, y, cz, ARCH, () => {
       for (const sd of [-1, 1]) {
         const px = cx + tx * 3.3 * sd, pz = cz + tz * 3.3 * sd;
         put(blk(1.9, 0.5, 1.9, 0.08), dark, px, y + 0.25, pz, yaw);
         for (let k = 0; k < 4; k++) put(blk(1.45 - (k % 2) * 0.08, 1.58, 1.45 - (k % 2) * 0.08, 0.06), stone, px + (rng() - 0.5) * 0.06, y + 0.5 + 0.8 + k * 1.6, pz + (rng() - 0.5) * 0.06, yaw + (rng() - 0.5) * 0.06);
         put(blk(1.75, 0.35, 1.75, 0.08), dark, px, y + 7.0, pz, yaw);
-        this.obstacles.push({ x: px, z: pz, r: 0.95, y0: y, h: 7.2 });
+        this.obstacles.push({ x: cx + tx * 3.3 * sd * ARCH, z: cz + tz * 3.3 * sd * ARCH, r: 0.95 * ARCH, y0: y, h: 7.2 * ARCH });
       }
       for (let k = -1; k <= 1; k++) {
         const bx = cx + tx * k * 2.6, bz = cz + tz * k * 2.6;
         put(blk(k ? 3.2 : 2.0, k ? 1.1 : 1.45, 1.7, 0.06), k ? block : dark, bx, y + 7.75 + (k ? 0 : 0.12), bz, yaw);
       }
       rubble(cx, cz, 5, 7);
+      });
       const gem = new THREE.Mesh(mergeGeometries([crystalSpire(0.32, 0.9, 0.55), crystalSpire(0.32, 0.9, 0.55).rotateX(Math.PI)]), this.archGem ||= gemMaterial(0x7fe6ff)); // double-pointed keystone gem
-      gem.position.set(cx, y + 9.1, cz); this.scene.add(gem);
-      this.anim.push((dt) => { gem.rotation.y += dt; gem.position.y = y + 9.1 + Math.sin(TIME.value * 2 + i) * 0.15; });
+      gem.position.set(cx, y + 9.1 * ARCH, cz); gem.scale.setScalar(ARCH); this.scene.add(gem);
+      this.anim.push((dt) => { gem.rotation.y += dt; gem.position.y = y + 9.1 * ARCH + Math.sin(TIME.value * 2 + i) * 0.15; });
     }
     // crumbling brick walls for cover: a few near the dais, more (taller, longer, often L-shaped) out in the meadow
     const spots = [];
