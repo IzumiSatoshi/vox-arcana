@@ -27,6 +27,23 @@ external services. Preserve the applicable notices when packaging a release.
 
 ## Media
 
-The source-code MIT license does not automatically relicense bundled media.
-`public/voice-fixtures/README.txt` documents the synthetic speech test fixtures.
-Review media provenance and applicable redistribution terms before repackaging.
+- `public/audio/fantasy-spellcasting-boss-theme.mp3`: the maintainer reports
+  generating this track with Google's music-generation AI. The exact product
+  and model version were not recorded. This is AI-generated music, not a claim
+  of human composition or Google endorsement.
+- `public/voice-fixtures/*.wav`: synthetic test utterances generated locally
+  using Windows speech synthesis, as documented in
+  `public/voice-fixtures/README.txt`; these are not microphone recordings.
+
+The maintainer includes these project-supplied media files under the repository's
+MIT terms to the extent the maintainer holds applicable rights. This does not
+license any third-party rights or assert that AI-generated output necessarily
+qualifies for copyright protection.
+
+Google's general terms say it does not claim ownership of original generated
+content. Its Labs FAQ refers commercial-use questions to those terms. These
+references document the reviewed general guidance, not verification of the
+specific generation session or a guarantee of exclusive rights:
+
+- https://policies.google.com/terms
+- https://labs.google/fx/faq
