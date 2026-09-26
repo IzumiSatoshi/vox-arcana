@@ -4,18 +4,19 @@ import { fbm, smooth, rand, mulberry32, TAU, clamp } from './util.js';
 import { MagicCircle } from './magicCircle.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { stoneBlock, boulder, CLOUD, CLOUD_GLSL } from './style.js';
+import { buildLands } from './lands.js';
 
 // Procedural weathered stone (hand-painted look): per-block tint (vertex colour), warm/cool hue drift, worn bright bevels
 // (screen-space curvature), cracks, block joints, rain streaks under ledges and two-tone painterly moss on top faces.
-export function stoneMaterial(color, { moss = 1, joint = 0, rough = 0.9, grime = 1, tiles = 0 } = {}) {
+export function stoneMaterial(color, { moss = 1, joint = 0, rough = 0.9, grime = 1, tiles = 0, brick = 0 } = {}) {
   const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, vertexColors: true });
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uMoss = { value: moss }; sh.uniforms.uJoint = { value: joint }; sh.uniforms.uGrime = { value: grime }; sh.uniforms.uTiles = { value: tiles };
+    sh.uniforms.uMoss = { value: moss }; sh.uniforms.uJoint = { value: joint }; sh.uniforms.uGrime = { value: grime }; sh.uniforms.uTiles = { value: tiles }; sh.uniforms.uBrick = { value: brick };
     // pattern space: world space for the baked statics (identity transform); bobbing islands and rising spell walls keep
     // their paint because vertical motion is left out
     // aGround: terrain height under each vertex (added when statics are baked); the height above it drives base grime
     sh.vertexShader = 'attribute float aGround; varying vec3 vWP; varying vec3 vWN; varying float vGH;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vWP=mat3(modelMatrix)*transformed+vec3(modelMatrix[3].x,0.0,modelMatrix[3].z); vWN=normalize(mat3(modelMatrix)*objectNormal); vGH=vWP.y-aGround;');
-    sh.fragmentShader = 'varying vec3 vWP; varying vec3 vWN; varying float vGH; uniform float uMoss, uJoint, uGrime, uTiles; float sBump;\n' + NOISE + sh.fragmentShader
+    sh.fragmentShader = 'varying vec3 vWP; varying vec3 vWN; varying float vGH; uniform float uMoss, uJoint, uGrime, uTiles, uBrick; float sBump;\n' + NOISE + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 P=vWP, WN=normalize(vWN);
         float n1=snoise(P*0.32), n2=snoise(P*1.6+3.1), n3=snoise(P*5.5+7.0);
@@ -29,7 +30,14 @@ export function stoneMaterial(color, { moss = 1, joint = 0, rough = 0.9, grime =
         float jy=uJoint>0.0? smoothstep(0.05,0.0,0.5-abs(fract(P.y/uJoint)-0.5)) : 0.0;
         float streak=smoothstep(0.35,0.95,snoise(vec3(P.x*2.4,P.y*0.22,P.z*2.4)))*(1.0-abs(WN.y));
         base*=1.0-streak*0.2;
-        base*=1.0-max(jy*0.45,crack*0.5);
+        // masonry: staggered vertical joints between the courses (walls, towers, keeps)
+        float jb=0.0;
+        if(uBrick>0.0 && abs(WN.y)<0.7){
+          vec2 tg=normalize(vec2(-WN.z,WN.x)+1e-5); float row=floor(P.y/uJoint), along=dot(P.xz,tg)+row*uBrick*0.5;
+          jb=smoothstep(0.045,0.0,(0.5-abs(fract(along/uBrick)-0.5))*uBrick);
+          base*=0.93+0.14*fract(sin(dot(vec2(floor(along/uBrick),row),vec2(12.9898,78.233)))*43758.5453);
+        }
+        base*=1.0-max(max(jy,jb)*0.45,crack*0.5);
         // polar paving (dais top): staggered rings of flagstones, each with its own tint, worn bright edges and dark joints
         float tj=1.0;
         if(uTiles>0.0 && WN.y>0.7){
@@ -65,7 +73,7 @@ export function stoneMaterial(color, { moss = 1, joint = 0, rough = 0.9, grime =
   return m;
 }
 // per-block tint so a wall is never one flat colour
-function tintGeo(g, rng, amt = 0.1) {
+export function tintGeo(g, rng, amt = 0.1) {
   const n = g.attributes.position.count, c = new Float32Array(n * 3);
   const k = 1 - amt / 2 + rng() * amt, warm = (rng() - 0.5) * amt * 0.6;
   for (let i = 0; i < n; i++) { c[i * 3] = k + warm; c[i * 3 + 1] = k; c[i * 3 + 2] = k - warm; }
@@ -141,10 +149,113 @@ export const MESAS = [
   return { ...m, x, z, dx: Math.cos(t), dz: Math.sin(t) };
 });
 export const SEA_Y = -3;
+// Battle royale island: the duel arena (everything inside ARENA_R) is its heart; beyond the rim hills rolling uplands
+// hold the named landmarks, and roads run out along the four dirt paths. Duels stay fenced at ARENA_R.
+export const ISLAND_R = 330;
+const TERRAIN_E = 440; // terrain mesh half-extent (the coast falls into the sea well inside it)
+// landmarks: polar angle a, distance r, flat radius R, falloff, lift (m above the land around it); h is filled in below
+export const SITES = [
+  { id: 'castle', a: Math.PI / 2, r: 236, R: 46, fall: 30, lift: 8, name: ['Highcrown Keep', '高冠の城塞'] },
+  { id: 'village', a: 0, r: 218, R: 50, fall: 22, lift: 0, name: ['Millbrook', 'ミルブルック村'] },
+  { id: 'colosseum', a: Math.PI, r: 222, R: 46, fall: 18, lift: -0.5, name: ['Ashen Colosseum', '灰の闘技場'] },
+  { id: 'spire', a: Math.PI * 1.5, r: 236, R: 18, fall: 14, lift: 1.5, name: ['Starcaller Spire', '星詠みの塔'] },
+  { id: 'lake', a: Math.PI * 1.5 + 0.3, r: 200, R: 24, fall: 36, lift: 0, water: true, name: ['Mirrormere', '鏡の湖'] },
+  { id: 'henge', a: Math.PI / 4, r: 196, R: 22, fall: 16, lift: 1, name: ['Moonstone Henge', '月長石の環'] },
+  { id: 'farm', a: Math.PI * 0.75, r: 206, R: 34, fall: 18, lift: 0, name: ['Thornfield Farm', '茨野の農場'] },
+  { id: 'hollow', a: Math.PI * 1.25, r: 200, R: 34, fall: 18, lift: 0, name: ['Hollowmere Ruins', '廃村ホロウミア'] },
+  { id: 'elder', a: Math.PI * 1.75, r: 206, R: 16, fall: 14, lift: 0, name: ['Elderwood Lodge', '古樹の森の山荘'] },
+].map((s) => ({ ...s, x: Math.cos(s.a) * s.r, z: Math.sin(s.a) * s.r }));
+export const siteAt = (x, z, pad = 0) => SITES.find((s) => Math.hypot(x - s.x, z - s.z) < s.R + pad) || null;
+const ROAD_END = 204;
+// on one of the four outer roads (arena edge to the landmarks)
+export const onRoad = (x, z, w = 2.6) => { const r = Math.hypot(x, z); return r > 98 && r < ROAD_END && Math.min(Math.abs(x), Math.abs(z)) < w; };
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.52, -0.65).normalize();
 // the shadow camera's right/up axes (as lookAt builds them), for snapping the shadow box to its texel grid
 const SUN_X = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize(), SUN_Y = SUN_DIR.clone().cross(SUN_X);
 const FOG = 0xb4cde6;
+const NO_CELL = { o: [], b: [] };
+
+// ------------------------------------------------ height field
+// Layout (outward from the centre): the rune dais, the ruin rings, a meadow broken by cliff-sided mesas (each with one
+// ramp), then a ring terrace whose cliff faces the arena, climbed by ramps where the four dirt paths meet it, and a hilly
+// rim. Past the rim (battle royale only) rolling uplands carry the landmarks, and the land falls to the sea round
+// ISLAND_R. Cliffs are real: stepBody blocks walking up them and they stop spells.
+function landHeight(x, z) {
+  const r = Math.hypot(x, z);
+  let h = fbm(x * 0.018, z * 0.018, 4) * 2.4 + fbm(x * 0.07, z * 0.07, 2) * 0.3;
+  h *= smooth(8, 40, r) * 0.85 + 0.15;
+  // ring terrace
+  const ringR = TERRACE_R + fbm(x * 0.02 + 11, z * 0.02, 3) * 7;
+  const cliff = smooth(ringR - 1.3, ringR + 1.3, r), ramp = clamp((r - ringR + 15) / 17);
+  const ax = Math.min(Math.abs(x), Math.abs(z));
+  const gate = smooth(7, 4, ax + fbm(x * 0.1, z * 0.1, 2) * 1.5);
+  h += TERRACE_H * (1 + fbm(x * 0.012 + 3, z * 0.012, 2) * 0.7) * (cliff + (ramp - cliff) * gate);
+  // the rim hills; the roads cut a valley through them, and they settle into the uplands beyond
+  const valley = smooth(24, 9, ax) * smooth(84, 98, r);
+  h += smooth(ringR + 8, ringR + 40, r) * (2 + fbm(x * 0.03 + 7, z * 0.03, 3) * 7) * (1 - valley * 0.85) * (1 - smooth(150, 195, r) * 0.65);
+  if (r > 130) h += smooth(135, 190, r) * (fbm(x * 0.007 + 20, z * 0.007, 3) * 8 + fbm(x * 0.028, z * 0.028, 2) * 1.6);
+  return h;
+}
+// landmark ground heights (their flat tops), from the land around each centre
+for (const s of SITES) s.h = s.water ? SEA_Y - 0.4 : landHeight(s.x, s.z) + s.lift;
+function heightField(x, z) {
+  const r = Math.hypot(x, z);
+  let h = landHeight(x, z);
+  // mesas
+  for (const m of MESAS) {
+    const dx = x - m.x, dz = z - m.z; if (Math.abs(dx) > m.R + 24 || Math.abs(dz) > m.R + 24) continue;
+    const d = Math.hypot(dx, dz) + fbm(x * 0.09 + m.x, z * 0.09, 2) * 2.2;
+    let k = 1 - smooth(m.R - 1.1, m.R + 1.1, d);
+    const along = dx * m.dx + dz * m.dz, perp = Math.abs(dx * m.dz - dz * m.dx);
+    if (along > 0 && perp < 5.5) k += (clamp(1 - (along - m.R + 3) / 15) - k) * smooth(5.5, 3.2, perp); // the ramp replaces the cliff across its corridor
+    h += m.h * k;
+  }
+  if (r > 140) {
+    // landmarks sit on levelled ground (a lake is a shallow bowl below the sea line)
+    for (const s of SITES) {
+      const dx = x - s.x, dz = z - s.z, L = s.R + s.fall; if (Math.abs(dx) > L || Math.abs(dz) > L) continue;
+      const d = Math.hypot(dx, dz) + (s.water ? fbm(x * 0.05, z * 0.05, 2) * 7 : 0);
+      const k = 1 - smooth(s.R, L, d);
+      h += (s.h - (s.water ? Math.max(0, 1 - d / s.R) * 1.1 : 0) - h) * k;
+    }
+    // coast: an irregular shoreline, beaches, then the shelf dropping under the sea
+    const cr = r + fbm(x * 0.009 + 5, z * 0.009, 3) * 26;
+    const k = smooth(ISLAND_R - 4, ISLAND_R + 44, cr);
+    h += (SEA_Y - 8 - h) * k;
+  }
+  if (r < 11) h = h * smooth(9, 11, r) + 0.35 * (1 - smooth(9, 11, r)); // dais
+  return h;
+}
+
+// heraldic banner cloth (tinted by `color`): the pole-hung flags of the arena and the landmarks
+let _bannerTex = null;
+export function bannerCloth(color) {
+  const tex = _bannerTex ||= (() => {
+    const S = 128, cv = document.createElement('canvas'); cv.width = S; cv.height = S * 2; const g = cv.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, S, S * 2);                          // tinted by the material colour
+    g.fillStyle = '#e8c068'; g.fillRect(0, 0, S, 10); g.fillRect(0, 0, 8, S * 2); g.fillRect(S - 8, 0, 8, S * 2); // gold trim
+    g.beginPath(); g.moveTo(0, S * 2 - 34); g.lineTo(S / 2, S * 2); g.lineTo(S, S * 2 - 34); g.lineTo(S, S * 2); g.lineTo(0, S * 2); g.fillStyle = 'rgba(0,0,0,0)'; g.globalCompositeOperation = 'destination-out'; g.fill(); g.globalCompositeOperation = 'source-over';
+    g.strokeStyle = '#e8c068'; g.lineWidth = 6; g.beginPath(); g.moveTo(0, S * 2 - 40); g.lineTo(S / 2, S * 2 - 6); g.lineTo(S, S * 2 - 40); g.stroke();
+    g.fillStyle = '#e8c068'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU - Math.PI / 2, r = i % 2 ? 14 : 34; g.lineTo(S / 2 + Math.cos(a) * r, S * 0.85 + Math.sin(a) * r); } g.fill(); // star emblem
+    g.lineWidth = 4; g.beginPath(); g.arc(S / 2, S * 0.85, 44, 0, TAU); g.stroke();
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    return tex;
+  })();
+  {
+      const m = new THREE.MeshLambertMaterial({ color, map: tex, side: THREE.DoubleSide, alphaTest: 0.5 });
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = TIME;
+        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec4 bw=modelMatrix*vec4(0.0,0.0,0.0,1.0); float hang=clamp(-position.y/2.6,0.0,1.0); // 0 at the bar, 1 at the tail
+          float wv=sin(uTime*2.6-position.y*2.2+position.x*1.5+bw.x*0.2)*0.5+sin(uTime*4.1-position.y*3.7+bw.z*0.3)*0.22;
+          transformed.z+=wv*hang*0.35+hang*hang*0.25; transformed.x+=sin(uTime*1.3+bw.x)*hang*0.08;`)
+          .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+          { float hang=clamp(-position.y/2.6,0.0,1.0); objectNormal=normalize(objectNormal+vec3(0.0,0.0,0.0)+vec3(cos(uTime*2.6-position.y*2.2)*hang*0.6,0.0,0.0)); }`);
+      };
+      m.customProgramCacheKey = () => 'banner';
+      return m;
+  }
+}
 
 let toonGrad = null;
 export function toonGradient() {
@@ -269,7 +380,7 @@ function treeTrunk(h, seed) {
 }
 
 // Hexagonal crystal spire: a prism with a faceted point, base at y 0 (flat facets: the gem shader lights per facet)
-function crystalSpire(r, h, tip = 0.35) {
+export function crystalSpire(r, h, tip = 0.35) {
   const g = new THREE.CylinderGeometry(r * 0.82, r, h * (1 - tip), 6, 1).translate(0, h * (1 - tip) / 2, 0);
   const cap = new THREE.ConeGeometry(r * 0.82, h * tip, 6, 1).translate(0, h * (1 - tip) + h * tip / 2, 0);
   const m = mergeGeometries([g.toNonIndexed(), cap.toNonIndexed()]); m.computeVertexNormals();
@@ -277,7 +388,7 @@ function crystalSpire(r, h, tip = 0.35) {
 }
 // Stylised gem: opaque (reads in daylight), cel-banded facets from deep to bright, a glowing fresnel rim, a luminous
 // core gradient up the spire and a slow shimmer band sliding through it. Emissive enough to bloom at the edges only.
-function gemMaterial(color) {
+export function gemMaterial(color) {
   return new THREE.ShaderMaterial({
     uniforms: { uTime: TIME, uCol: { value: new THREE.Color(color) } },
     vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vY;
@@ -322,11 +433,11 @@ function islandGeo(seed) {
 // up to four bodies (player, bots) that part the grass around them, then up to four blast gusts that flatten it in an
 // expanding ring and let it spring back; shared by every meadow material (w = radius, PUSHK = strength)
 const PUSH = { value: [...Array(8)].map(() => new THREE.Vector4(0, -999, 0, 0)) }, PUSHK = { value: new Array(8).fill(1) };
-function meadowMaterial(flower = false, ground = null) {
+function meadowMaterial(flower = false, ground = null, mid = false) {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = TIME; sh.uniforms.uPush = PUSH; sh.uniforms.uPushK = PUSHK;
-    if (ground) { sh.uniforms.uGround = { value: ground.tex }; sh.defines = { ...sh.defines, GROUND_WRAP: 1, ...(flower ? { GROUND_FLOWER: 1 } : {}), G_N: ground.n.toFixed(1), G_HALF: (ground.size / 2).toFixed(2), G_STEP: (ground.size / (ground.n - 1)).toFixed(5) }; }
+    if (ground) { sh.uniforms.uGround = { value: ground.tex }; sh.defines = { ...sh.defines, GROUND_WRAP: 1, ...(flower ? { GROUND_FLOWER: 1 } : {}), ...(mid ? { GROUND_MID: 1 } : {}), G_N: ground.n.toFixed(1), G_HALF: (ground.size / 2).toFixed(2), G_STEP: (ground.size / (ground.n - 1)).toFixed(5) }; }
     sh.vertexShader = 'uniform float uTime; uniform vec4 uPush[8]; uniform float uPushK[8]; varying float vTip; varying vec3 vMeadow;\n#ifdef GROUND_WRAP\nuniform sampler2D uGround;\n#endif\n' + (flower ? 'attribute float aHead;\n' : '') + NOISE + sh.vertexShader
       .replace('#include <color_vertex>', flower ? `vColor = color;
         #ifdef USE_INSTANCING_COLOR
@@ -350,6 +461,8 @@ function meadowMaterial(flower = false, ground = null) {
           #ifdef GROUND_FLOWER
             float fr=fract(sin(float(gl_InstanceID)*12.9898)*43758.5453); // thinned by the field density
             float gk=step(fr,gs.b)*(1.0-smoothstep(12.0,18.5,distance(wp.xz,cameraPosition.xz)));
+          #elif defined(GROUND_MID)
+            float gk=gs.g*smoothstep(121.0,128.0,length(wp.xz)); // the outer island's mid field (the arena has fixed chunks)
           #else
             float gk=gs.g*(1.0-smoothstep(12.0,18.5,distance(wp.xz,cameraPosition.xz)));
           #endif
@@ -387,7 +500,7 @@ function meadowMaterial(flower = false, ground = null) {
           totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0,1.1,0.35) * trans * smoothstep(0.2,1.0,vTip) * 0.7;
         #endif`);
   };
-  mat.customProgramCacheKey = () => 'meadow' + flower + !!ground;
+  mat.customProgramCacheKey = () => 'meadow' + flower + !!ground + mid;
   return mat;
 }
 
@@ -440,20 +553,20 @@ function cloudMaterial(seed, tall, haze) {
 export class World {
   constructor(scene, quality = 1) {
     this.scene = scene; this.quality = quality;
-    this.obstacles = []; this.anim = []; this.canopyMats = []; this.boxes = []; this.gusts = [];
+    this.obstacles = []; this.anim = []; this.canopyMats = []; this.boxes = []; this.gusts = []; this.solids = [];
+    this.bound = ARENA_R; // how far bodies may roam (the battle royale opens the whole island)
+    this.lootSpots = []; // chests placed by the landmark builders (x, y, z, yaw, tier, via: waypoints in from outside)
     this.statics = new THREE.Group(); // merged after construction
     this.sunView = new THREE.Vector3();
     this.buildSky(); this.buildLights(); this.buildTerrain(); this.buildWater();
-    this.buildRuins(); this.buildLandmarks(); this.buildBanners(); this.buildCliffs(); this.buildTrees(); this.buildRocks(); this.buildCrystals(); this.buildDistant();
+    this.buildRuins(); this.buildLandmarks(); this.buildBanners(); buildLands(this); this.buildCliffs(); this.buildTrees(); this.buildRocks(); this.buildCrystals(); this.buildDistant();
     this.buildGrass(); this.buildFerns(); this.buildBirds(); this.buildButterflies();
     bake(this.scene, this.statics, (x, z) => this.gridH(x, z));
     this.statics.clear();
+    this.index();
   }
 
-  // ------------------------------------------------ height field
-  // Layout (outward from the centre): the rune dais, the ruin rings, a meadow broken by cliff-sided mesas (each with one
-  // ramp), then a ring terrace whose cliff faces the arena, climbed by ramps where the four dirt paths meet it, and a
-  // hilly rim that falls away to the sea. Cliffs are real: stepBody blocks walking up them and they stop spells.
+  // ------------------------------------------------ height field (see heightField)
   // a blast flattens the meadow around it (see PUSH): up to four at once, the oldest replaced
   gust(pos, radius) {
     this.gusts ||= [];
@@ -461,29 +574,7 @@ export class World {
     const free = this.gusts.findIndex((q) => !q || q.t >= q.dur);
     if (free >= 0 && free < 4) this.gusts[free] = g; else if (this.gusts.length < 4) this.gusts.push(g); else { this.gusts.shift(); this.gusts.push(g); }
   }
-  heightAt(x, z) {
-    const r = Math.hypot(x, z);
-    let h = fbm(x * 0.018, z * 0.018, 4) * 2.4 + fbm(x * 0.07, z * 0.07, 2) * 0.3;
-    h *= smooth(8, 40, r) * 0.85 + 0.15;
-    // ring terrace
-    const ringR = TERRACE_R + fbm(x * 0.02 + 11, z * 0.02, 3) * 7;
-    const cliff = smooth(ringR - 1.3, ringR + 1.3, r), ramp = clamp((r - ringR + 15) / 17);
-    const gate = smooth(7, 4, Math.min(Math.abs(x), Math.abs(z)) + fbm(x * 0.1, z * 0.1, 2) * 1.5);
-    h += TERRACE_H * (1 + fbm(x * 0.012 + 3, z * 0.012, 2) * 0.7) * (cliff + (ramp - cliff) * gate);
-    h += smooth(ringR + 8, ringR + 40, r) * (2 + fbm(x * 0.03 + 7, z * 0.03, 3) * 7);
-    h -= smooth(ARENA_R + 26, ARENA_R + 58, r) * 28;
-    // mesas
-    for (const m of MESAS) {
-      const dx = x - m.x, dz = z - m.z; if (Math.abs(dx) > m.R + 24 || Math.abs(dz) > m.R + 24) continue;
-      const d = Math.hypot(dx, dz) + fbm(x * 0.09 + m.x, z * 0.09, 2) * 2.2;
-      let k = 1 - smooth(m.R - 1.1, m.R + 1.1, d);
-      const along = dx * m.dx + dz * m.dz, perp = Math.abs(dx * m.dz - dz * m.dx);
-      if (along > 0 && perp < 5.5) k += (clamp(1 - (along - m.R + 3) / 15) - k) * smooth(5.5, 3.2, perp); // the ramp replaces the cliff across its corridor
-      h += m.h * k;
-    }
-    if (r < 11) h = h * smooth(9, 11, r) + 0.35 * (1 - smooth(9, 11, r)); // dais
-    return h;
-  }
+  heightAt(x, z) { return heightField(x, z); }
   // inside a ramp corridor (terrace gates and mesa ramps): keep props off these
   onRamp(x, z) {
     const r = Math.hypot(x, z);
@@ -495,10 +586,11 @@ export class World {
     }
     return false;
   }
-  // bilinear height from the terrain grid (build-time placement: cheaper than heightAt and matches the rendered mesh)
+  // bilinear height from the terrain grid (build-time placement: cheaper than heightAt and matches the rendered mesh).
+  // The grid is fine over the arena and coarser over the outer island (see buildTerrain), so each axis maps through fi().
   gridH(x, z) {
     const g = this.hGrid; if (!g) return this.heightAt(x, z);
-    const { n, size, pos } = g, st = size / (n - 1), fx = (x + size / 2) / st, fz = (z + size / 2) / st;
+    const { n, pos, fi } = g, fx = fi(x), fz = fi(z);
     const i = Math.max(0, Math.min(n - 2, Math.floor(fx))), j = Math.max(0, Math.min(n - 2, Math.floor(fz))), u = fx - i, v = fz - j;
     const a = pos[(j * n + i) * 3 + 1], b = pos[(j * n + i + 1) * 3 + 1], c = pos[((j + 1) * n + i) * 3 + 1], d = pos[((j + 1) * n + i + 1) * 3 + 1];
     return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
@@ -511,12 +603,36 @@ export class World {
   // ---- conjured solids (yaw-rotated boxes): platforms, stairs, pillars, ramparts
   addBox(b) { b.cos = Math.cos(b.yaw || 0); b.sin = Math.sin(b.yaw || 0); this.boxes.push(b); return b; }
   removeBox(b) { const i = this.boxes.indexOf(b); if (i >= 0) this.boxes.splice(i, 1); }
+  // ---- static solids (buildings): the same yaw-rotated boxes, hashed with the obstacles into 10 m cells by index()
+  addSolid(x, y0, z, w, h, d, yaw = 0) { const b = { x, y: y0 + h / 2, z, hx: w / 2, hy: h / 2, hz: d / 2, yaw, cos: Math.cos(yaw), sin: Math.sin(yaw) }; this.solids.push(b); return b; }
+  // build-time: is anything solid within `pad` of (x, z)
+  blocked(x, z, pad = 1) {
+    for (const o of this.obstacles) if (Math.hypot(o.x - x, o.z - z) < o.r + pad) return true;
+    return this.inSolid(x, z, pad);
+  }
+  inSolid(x, z, pad = 0) { for (const b of this.solids) { const [lx, lz] = this.local(b, x, z); if (Math.abs(lx) < b.hx + pad && Math.abs(lz) < b.hz + pad) return true; } return false; }
+  index() {
+    const C = 10, G = (this.grid = new Map());
+    const put = (x0, z0, x1, z1, kind, o) => {
+      for (let i = Math.floor(x0 / C); i <= Math.floor(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.floor(z1 / C); j++) {
+        const k = i * 4096 + j; let c = G.get(k); if (!c) G.set(k, (c = { o: [], b: [] })); c[kind].push(o);
+      }
+    };
+    for (const o of this.obstacles) put(o.x - o.r - 2, o.z - o.r - 2, o.x + o.r + 2, o.z + o.r + 2, 'o', o);
+    for (const b of this.solids) {
+      const ex = Math.abs(b.hx * b.cos) + Math.abs(b.hz * b.sin) + 2, ez = Math.abs(b.hx * b.sin) + Math.abs(b.hz * b.cos) + 2;
+      put(b.x - ex, b.z - ez, b.x + ex, b.z + ez, 'b', b);
+    }
+  }
+  cell(x, z) { return this.grid?.get(Math.floor(x / 10) * 4096 + Math.floor(z / 10)) || NO_CELL; }
+  // every box (conjured and static) that could touch a body at (x, z)
+  boxesAt(x, z) { const c = this.cell(x, z).b; return this.boxes.length ? (c.length ? [...this.boxes, ...c] : this.boxes) : c; }
   local(b, x, z) { const dx = x - b.x, dz = z - b.z; return [dx * b.cos - dz * b.sin, dx * b.sin + dz * b.cos]; }
   inBox(b, p, pad = 0) { const [lx, lz] = this.local(b, p.x, p.z); return Math.abs(lx) < b.hx + pad && Math.abs(lz) < b.hz + pad && p.y > b.y - b.hy && p.y < b.y + b.hy; }
   // highest walkable surface under (x,z) that is not above `feetY` + step height
   groundAt(x, z, feetY = Infinity) {
     let h = this.heightAt(x, z);
-    for (const b of this.boxes) {
+    for (const b of this.boxesAt(x, z)) {
       const [lx, lz] = this.local(b, x, z);
       if (Math.abs(lx) < b.hx + 0.45 && Math.abs(lz) < b.hz + 0.45) { const top = b.y + b.hy; if (top <= feetY + 0.62 && top > h) h = top; }
     }
@@ -525,7 +641,9 @@ export class World {
   solid(p) {
     if (p.y < this.heightAt(p.x, p.z)) return true;
     for (const b of this.boxes) if (this.inBox(b, p)) return true;
-    for (const o of this.obstacles) {
+    const c = this.cell(p.x, p.z);
+    for (const b of c.b) if (this.inBox(b, p)) return true;
+    for (const o of c.o) {
       const dx = p.x - o.x, dz = p.z - o.z;
       if (dx * dx + dz * dz < o.r * o.r && p.y > o.y0 - 0.5 && p.y < o.y0 + o.h) return true;
     }
@@ -544,12 +662,13 @@ export class World {
     return { point: origin.clone().addScaledVector(d, maxDist), dist: maxDist, hit: false };
   }
   collideBody(pos, radius = 0.45) {
-    for (const o of this.obstacles) {
+    const cell = this.cell(pos.x, pos.z);
+    for (const o of this.grid ? cell.o : this.obstacles) {
       if (pos.y > o.y0 + o.h || pos.y + 1.8 < o.y0) continue;
       const dx = pos.x - o.x, dz = pos.z - o.z, d = Math.hypot(dx, dz), min = o.r + radius;
       if (d < min && d > 0.0001) { pos.x = o.x + (dx / d) * min; pos.z = o.z + (dz / d) * min; }
     }
-    for (const b of this.boxes) { // push out sideways when the body overlaps a box it is not standing on
+    for (const b of this.boxesAt(pos.x, pos.z)) { // push out sideways when the body overlaps a box it is not standing on
       if (pos.y >= b.y + b.hy - 0.6 || pos.y + 1.8 <= b.y - b.hy) continue; // low ledges are stepped onto, not blocked
       const [lx, lz] = this.local(b, pos.x, pos.z), ex = b.hx + radius - Math.abs(lx), ez = b.hz + radius - Math.abs(lz);
       if (ex > 0 && ez > 0) {
@@ -558,8 +677,8 @@ export class World {
         pos.x = b.x + nx * b.cos + nz * b.sin; pos.z = b.z - nx * b.sin + nz * b.cos;
       }
     }
-    const r = Math.hypot(pos.x, pos.z);
-    if (r > ARENA_R) { pos.x *= ARENA_R / r; pos.z *= ARENA_R / r; }
+    const r = Math.hypot(pos.x, pos.z), R = this.bound;
+    if (r > R) { pos.x *= R / r; pos.z *= R / r; }
   }
 
   // ------------------------------------------------ sky
@@ -635,28 +754,48 @@ export class World {
 
   // ------------------------------------------------ terrain (vertex colours + painterly world-space variation)
   buildTerrain() {
-    const size = 460, seg = this.quality > 0 ? 400 : 200;
-    const geo = new THREE.PlaneGeometry(size, size, seg, seg); geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position, colors = new Float32Array(pos.count * 3);
+    // one grid, two densities: the arena square (460 m) keeps its fine spacing, the outer island gets ~2.2x coarser rows
+    const A = 230, seg = this.quality > 0 ? 400 : 200, st = (2 * A) / seg, nOut = Math.round((TERRAIN_E - A) / (st * 2.2)), N = seg + 2 * nOut, row = N + 1;
+    const so = (TERRAIN_E - A) / nOut, xs = new Float32Array(row);
+    for (let i = 0; i <= N; i++) xs[i] = i < nOut ? -TERRAIN_E + i * so : i <= nOut + seg ? -A + (i - nOut) * st : A + (i - nOut - seg) * so;
+    const fi = (x) => (x < -A ? (x + TERRAIN_E) / so : x <= A ? nOut + (x + A) / st : nOut + seg + (x - A) / so);
+    const pos = new THREE.BufferAttribute(new Float32Array(row * row * 3), 3), index = new Uint32Array(N * N * 6);
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) pos.setXYZ(j * row + i, xs[i], 0, xs[j]);
+    for (let j = 0, k = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const a = j * row + i, b = a + row, c = b + 1, d = a + 1;
+      index[k++] = a; index[k++] = b; index[k++] = d; index[k++] = b; index[k++] = c; index[k++] = d;
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', pos); geo.setIndex(new THREE.BufferAttribute(index, 1));
+    const colors = new Float32Array(pos.count * 3);
     const cGrassA = new THREE.Color(0x4c8a34), cGrassB = new THREE.Color(0x8fb34c), cGrassC = new THREE.Color(0x356a30);
     const cRock = new THREE.Color(0x8a8478), cSand = new THREE.Color(0xdcc89a), cDirt = new THREE.Color(0x8e6c46), c = new THREE.Color();
-    const hs = new Float32Array(pos.count), row = seg + 1, st = size / seg;
+    const cWheat = new THREE.Color(0xc8a04a), cPave = new THREE.Color(0xa89a80);
+    const hs = new Float32Array(pos.count);
     for (let i = 0; i < pos.count; i++) hs[i] = this.heightAt(pos.getX(i), pos.getZ(i));
     const HS = (ii, jj) => hs[Math.min(row - 1, Math.max(0, jj)) * row + Math.min(row - 1, Math.max(0, ii))];
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i), h = hs[i], ci = i % row, cj = (i - ci) / row;
       pos.setY(i, Math.hypot(x, z) < 10.95 ? h - 0.6 : h); // the dais covers the centre: keep terrain well below it
-      const gx = (HS(ci - 1, cj) - HS(ci + 1, cj)) / (2 * st), gz = (HS(ci, cj - 1) - HS(ci, cj + 1)) / (2 * st);
+      const dxs = xs[Math.min(N, ci + 1)] - xs[Math.max(0, ci - 1)], dzs = xs[Math.min(N, cj + 1)] - xs[Math.max(0, cj - 1)];
+      const gx = (HS(ci - 1, cj) - HS(ci + 1, cj)) / dxs, gz = (HS(ci, cj - 1) - HS(ci, cj + 1)) / dzs;
       const slope = 1 - 1 / Math.hypot(gx, 1, gz), v = fbm(x * 0.08, z * 0.08, 3);
       c.copy(cGrassA).lerp(cGrassB, clamp(v * 0.8 + 0.5)).lerp(cGrassC, clamp(fbm(x * 0.02 + 3, z * 0.02, 2) + 0.2));
       const r = Math.hypot(x, z);
       if (r < 11) c.lerp(cDirt, 0.3);
+      if (r > 140) { // landmark grounds: trodden dirt in the village and the castle ward, raked sand in the arena, fields at the farm
+        for (const S of SITES) {
+          const d = Math.hypot(x - S.x, z - S.z); if (d > S.R + 12) continue;
+          if (S.id === 'village' || S.id === 'castle' || S.id === 'hollow') c.lerp(S.id === 'castle' ? cPave : cDirt, (1 - smooth(S.R * (S.id === 'castle' ? 0.62 : 0.3), S.R * (S.id === 'castle' ? 0.66 : 0.45), d + v * 3)) * 0.75);
+          if (S.id === 'colosseum') c.lerp(cSand, 1 - smooth(19, 21, d + v));
+          if (S.id === 'farm' && d > 12) { const ang = Math.atan2(z - S.z, x - S.x); c.lerp(Math.sin(ang * 3) > 0 ? cWheat : cDirt, (1 - smooth(S.R - 4, S.R + 6, d)) * (0.55 + 0.25 * Math.sign(Math.sin(d * 1.3)))); }
+        }
+      }
       c.lerp(cRock, smooth(0.16, 0.36, slope));
       c.lerp(cSand, Math.max(smooth(-1.2, -3.2, h), smooth(1.2, -1.0, h) * smooth(122, 140, r))); // sandy beach round the coast
       colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    this.hGrid = { n: seg + 1, size, pos: pos.array };
+    this.hGrid = { n: row, pos: pos.array, fi };
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
     mat.onBeforeCompile = (sh) => {
@@ -688,6 +827,15 @@ export class World {
         dirt=mix(dirt,vec3(0.5,0.45,0.36),step(0.62,snoise(vec3(vWPos.xz*3.2,2.0)))*0.8);
         diffuseColor.rgb*=1.0-(1.0-smoothstep(hw,hw+0.45,pd))*(1.0-path)*reach*0.22;
         diffuseColor.rgb=mix(diffuseColor.rgb,dirt,path);
+        // the four roads beyond the arena: straight cart tracks out to the landmarks (two wheel ruts in a packed bed)
+        if(pr>96.0){
+          float ax=min(abs(vWPos.x),abs(vWPos.z)), rhw=2.2+snoise(vec3(vWPos.xz*0.07,4.0))*0.3;
+          float road=(1.0-smoothstep(rhw-0.12,rhw+0.05,ax+nD*0.08))*smoothstep(97.0,104.0,pr+nA*3.0)*(1.0-smoothstep(${ROAD_END - 14}.0,${ROAD_END}.0,pr+nA*6.0));
+          vec3 rd=mix(vec3(0.33,0.23,0.12),vec3(0.46,0.35,0.2),smoothstep(rhw,0.0,ax)*0.6+nB*0.2);
+          rd*=1.0-smoothstep(0.35,0.0,abs(ax-1.05))*0.28;
+          diffuseColor.rgb*=1.0-(1.0-smoothstep(rhw,rhw+0.5,ax))*(1.0-road)*smoothstep(97.0,104.0,pr)*0.2;
+          diffuseColor.rgb=mix(diffuseColor.rgb,rd,road);
+        }
         // cliff faces: layered sandstone strata (warm bands, dark creases, pale ledges) with a grassy lip at the top
         float steep=(1.0-smoothstep(0.55,0.8,normalize(vWNrm).y+nD*0.06))*smoothstep(-1.2,0.6,vWPos.y); // not on the beach
         if(steep>0.001){
@@ -709,14 +857,14 @@ export class World {
     // Only split the index buffer so terrain behind the camera can be culled.
     this.terrain = new THREE.Group();
     const cells = 40, point = new THREE.Vector3();
-    for (let row = 0; row < seg; row += cells) for (let col = 0; col < seg; col += cells) {
+    for (let r0 = 0; r0 < N; r0 += cells) for (let col = 0; col < N; col += cells) {
       const indices = [], bounds = new THREE.Box3();
-      const rowEnd = Math.min(seg, row + cells), colEnd = Math.min(seg, col + cells);
-      for (let y = row; y < rowEnd; y++) {
-        for (let k = (y * seg + col) * 6; k < (y * seg + colEnd) * 6; k++) indices.push(geo.index.array[k]);
+      const rowEnd = Math.min(N, r0 + cells), colEnd = Math.min(N, col + cells);
+      for (let y = r0; y < rowEnd; y++) {
+        for (let k = (y * N + col) * 6; k < (y * N + colEnd) * 6; k++) indices.push(geo.index.array[k]);
       }
-      for (let y = row; y <= rowEnd; y++) for (let x = col; x <= colEnd; x++) {
-        bounds.expandByPoint(point.fromBufferAttribute(pos, y * (seg + 1) + x));
+      for (let y = r0; y <= rowEnd; y++) for (let x = col; x <= colEnd; x++) {
+        bounds.expandByPoint(point.fromBufferAttribute(pos, y * row + x));
       }
       const tile = new THREE.BufferGeometry();
       for (const [name, attr] of Object.entries(geo.attributes)) tile.setAttribute(name, attr);
@@ -748,10 +896,10 @@ export class World {
   // ------------------------------------------------ water
   buildWater() {
     // depth below the sea surface, baked from the height field: drives toon depth bands, shallow caustics and shore foam
-    const DN = 256, DS = 480, dd = new Uint8Array(DN * DN);
+    const DN = 512, DS = 2 * TERRAIN_E + 40, dd = new Uint8Array(DN * DN);
     for (let j = 0; j < DN; j++) for (let i = 0; i < DN; i++) {
       const x = ((i + 0.5) / DN - 0.5) * DS, z = ((j + 0.5) / DN - 0.5) * DS;
-      dd[j * DN + i] = Math.round(clamp((SEA_Y - this.heightAt(x, z)) / 12) * 255);
+      dd[j * DN + i] = Math.round(clamp((SEA_Y - this.gridH(x, z)) / 12) * 255);
     }
     const depthTex = new THREE.DataTexture(dd, DN, DN, THREE.RedFormat, THREE.UnsignedByteType);
     depthTex.minFilter = depthTex.magFilter = THREE.LinearFilter; depthTex.needsUpdate = true;
@@ -933,7 +1081,7 @@ export class World {
   buildCliffs() {
     const rng = mulberry32(31), geos = [0, 1, 2, 3, 4, 5].map(() => stoneBlock(1, 1, 1, rng, { chip: 0.16, seg: 2, round: 0.12 }));
     const mat = stoneMaterial(0xc9b08c, { moss: 0.75, joint: 0.5, grime: 0.6 }), mat2 = stoneMaterial(0xb09c80, { moss: 0.85, joint: 0.65, grime: 0.6 });
-    const S = 2.3, R = ARENA_R + 20;
+    const S = 2.3, R = ISLAND_R + 50;
     const slab = (x, z, y, w, h, d, yaw) => {
       const m = new THREE.Mesh(tintGeo(geos[Math.floor(rng() * geos.length)].clone(), rng, 0.16), rng() < 0.5 ? mat : mat2);
       m.scale.set(w, h, d); m.position.set(x, y, z); m.rotation.set((rng() - 0.5) * 0.1, yaw, (rng() - 0.5) * 0.14);
@@ -941,7 +1089,7 @@ export class World {
     };
     for (let gx = -R; gx <= R; gx += S) for (let gz = -R; gz <= R; gz += S) {
       const x = gx + (rng() - 0.5) * S * 0.7, z = gz + (rng() - 0.5) * S * 0.7;
-      if (this.gridUp(x, z) > 0.62) continue; const n = this.normalAt(x, z);
+      if (this.gridUp(x, z) > 0.62 || this.gridH(x, z) < SEA_Y - 2) continue; const n = this.normalAt(x, z);
       const gxz = Math.hypot(n.x, n.z), ox = n.x / gxz, oz = n.z / gxz; // outward (downhill) direction
       const top = this.heightAt(x - ox * 2.4, z - oz * 2.4), bot = this.heightAt(x + ox * 2.4, z + oz * 2.4), H = top - bot;
       if (H < 1.6) continue;
@@ -1015,28 +1163,7 @@ export class World {
   // Heraldic banners on poles: at the head of each terrace ramp and beside the arches. The cloth hangs from a crossbar and
   // ripples in the same world wind as the grass (vertex shader), cel-lit like everything else.
   buildBanners() {
-    const S = 128, cv = document.createElement('canvas'); cv.width = S; cv.height = S * 2; const g = cv.getContext('2d');
-    g.fillStyle = '#fff'; g.fillRect(0, 0, S, S * 2);                          // tinted by the material colour
-    g.fillStyle = '#e8c068'; g.fillRect(0, 0, S, 10); g.fillRect(0, 0, 8, S * 2); g.fillRect(S - 8, 0, 8, S * 2); // gold trim
-    g.beginPath(); g.moveTo(0, S * 2 - 34); g.lineTo(S / 2, S * 2); g.lineTo(S, S * 2 - 34); g.lineTo(S, S * 2); g.lineTo(0, S * 2); g.fillStyle = 'rgba(0,0,0,0)'; g.globalCompositeOperation = 'destination-out'; g.fill(); g.globalCompositeOperation = 'source-over';
-    g.strokeStyle = '#e8c068'; g.lineWidth = 6; g.beginPath(); g.moveTo(0, S * 2 - 40); g.lineTo(S / 2, S * 2 - 6); g.lineTo(S, S * 2 - 40); g.stroke();
-    g.fillStyle = '#e8c068'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = (i / 10) * TAU - Math.PI / 2, r = i % 2 ? 14 : 34; g.lineTo(S / 2 + Math.cos(a) * r, S * 0.85 + Math.sin(a) * r); } g.fill(); // star emblem
-    g.lineWidth = 4; g.beginPath(); g.arc(S / 2, S * 0.85, 44, 0, TAU); g.stroke();
-    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-    const cloth = (color) => {
-      const m = new THREE.MeshLambertMaterial({ color, map: tex, side: THREE.DoubleSide, alphaTest: 0.5 });
-      m.onBeforeCompile = (sh) => {
-        sh.uniforms.uTime = TIME;
-        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
-          vec4 bw=modelMatrix*vec4(0.0,0.0,0.0,1.0); float hang=clamp(-position.y/2.6,0.0,1.0); // 0 at the bar, 1 at the tail
-          float wv=sin(uTime*2.6-position.y*2.2+position.x*1.5+bw.x*0.2)*0.5+sin(uTime*4.1-position.y*3.7+bw.z*0.3)*0.22;
-          transformed.z+=wv*hang*0.35+hang*hang*0.25; transformed.x+=sin(uTime*1.3+bw.x)*hang*0.08;`)
-          .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
-          { float hang=clamp(-position.y/2.6,0.0,1.0); objectNormal=normalize(objectNormal+vec3(0.0,0.0,0.0)+vec3(cos(uTime*2.6-position.y*2.2)*hang*0.6,0.0,0.0)); }`);
-      };
-      m.customProgramCacheKey = () => 'banner';
-      return m;
-    };
+    const cloth = bannerCloth;
     const mats = [cloth(0x2b4a9a), cloth(0x9a2b3c), cloth(0x2f7a4a)];
     const pole = stoneMaterial(0x6a4c34, { moss: 0.2, grime: 0 }), gold = toon(0xd9b25a, { emissive: 0x3a2a00 });
     const clothGeo = new THREE.PlaneGeometry(1.3, 2.6, 6, 12); clothGeo.translate(0, -1.3, 0);
@@ -1059,9 +1186,9 @@ export class World {
   // Low leafy shrubs: soft cover to duck behind (they hide you, they don't stop spells)
   bushBlobs(rng) {
     const out = [];
-    for (let i = 0, tries = 0; i < 70 && tries < 900; tries++) {
-      const a = rng() * TAU, r = 16 + rng() * 96, x = Math.cos(a) * r, z = Math.sin(a) * r, y = this.heightAt(x, z);
-      if (y < -1 || this.gridUp(x, z) < 0.85 || Math.min(Math.abs(x), Math.abs(z)) < 5 || this.onRamp(x, z)) continue;
+    for (let i = 0, tries = 0; i < 200 && tries < 3000; tries++) {
+      const outer = i >= 70, a = rng() * TAU, r = outer ? 135 + rng() * 190 : 16 + rng() * 96, x = Math.cos(a) * r, z = Math.sin(a) * r, y = this.heightAt(x, z);
+      if (y < -1 || this.gridUp(x, z) < 0.85 || Math.min(Math.abs(x), Math.abs(z)) < 5 || this.onRamp(x, z) || (outer && (siteAt(x, z, 4) || this.blocked(x, z, 2.5)))) continue;
       const blobs = [], n = 2 + Math.floor(rng() * 3), s = 0.8 + rng() * 0.6;
       for (let k = 0; k < n; k++) { const bx = x + (rng() - 0.5) * 2.6 * s, bz = z + (rng() - 0.5) * 2.6 * s, br = (0.9 + rng() * 0.5) * s; blobs.push({ c: new THREE.Vector3(bx, this.heightAt(bx, bz) + br * 0.55, bz), r: br }); }
       const bloom = rng() < 0.35 ? new THREE.Color([0xffb3d1, 0xfff4ee, 0xffe07a, 0xd9b8ff][Math.floor(rng() * 4)]) : null; // flowering shrub
@@ -1076,11 +1203,9 @@ export class World {
     this.sakura = [];
     const cards = [], proxies = [];
     this.worldTree(bark, cards, proxies, rng);
-    for (let i = 0; i < 72; i++) {
-      const a = rng() * TAU, r = 40 + rng() * 72, x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const tree = (x, z, i, sc0 = 1, per = 1) => {
       const y = this.heightAt(x, z);
-      if (y < -1 || this.gridUp(x, z) < 0.8 || (Math.min(Math.abs(x), Math.abs(z)) < 7 && r < 104) || this.onRamp(x, z)) continue;
-      const sc = 0.9 + rng() * 0.5, h = (4.5 + rng() * 4);
+      const sc = (0.9 + rng() * 0.5) * sc0, h = (4.5 + rng() * 4);
       const trunk = new THREE.Mesh(treeTrunk(h, i), bark); trunk.position.set(x, y - 0.3, z); trunk.scale.setScalar(sc); this.statics.add(trunk);
       const sway = (yy) => new THREE.Vector3(x + Math.sin(yy * 2.5 + i) * 0.35 * yy * sc, y - 0.3 + yy * h * sc, z + Math.cos(yy * 1.7 + i) * 0.15 * yy * sc);
       const pink = rng() < 0.3, color = new THREE.Color(pink ? palettes[4 + (i % 2)] : palettes[i % 4]);
@@ -1094,17 +1219,35 @@ export class World {
         const from = sway(0.55 + rng() * 0.25), to = blobs[k].c.clone().lerp(from, 0.3), mid = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, 0.5 * sc, 0));
         this.statics.add(new THREE.Mesh(taperTube(new THREE.CatmullRomCurve3([from, mid, to]), 0.15 * sc, 0.045 * sc, 6, 6), bark));
       }
-      cards.push({ blobs, color });
+      cards.push({ blobs, color, per });
       for (const b of blobs) { const g = new THREE.IcosahedronGeometry(b.r * 0.85, 1); g.translate(b.c.x, b.c.y, b.c.z); proxies.push(g); }
       this.obstacles.push({ x, z, r: 0.65, y0: y, h: h * sc });
       if (pink) this.sakura.push(new THREE.Vector3(x, y + h * sc + 1, z));
+    };
+    for (let i = 0; i < 72; i++) {
+      const a = rng() * TAU, r = 40 + rng() * 72, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const y = this.heightAt(x, z);
+      if (y < -1 || this.gridUp(x, z) < 0.8 || (Math.min(Math.abs(x), Math.abs(z)) < 7 && r < 104) || this.onRamp(x, z)) continue;
+      tree(x, z, i);
     }
-    // backdrop groves on the rim hills beyond the playable edge (no collision needed out there)
+    // the outer island: a deep forest round the Elderwood lodge, groves on the uplands, a few lone trees
+    const elder = SITES.find((q) => q.id === 'elder');
+    for (let i = 0, tries = 0; i < (this.quality > 0 ? 300 : 190) && tries < 3000; tries++) {
+      let x, z;
+      if (i < 110) { const a = rng() * TAU, d = elder.R + 4 + Math.sqrt(rng()) * 62; x = elder.x + Math.cos(a) * d; z = elder.z + Math.sin(a) * d; }
+      else if (rng() < 0.7) { const g = mulberry32(Math.floor(rng() * 14) + 300), a = g() * TAU, r = 150 + g() * 160, a2 = rng() * TAU, d = Math.sqrt(rng()) * 22; x = Math.cos(a) * r + Math.cos(a2) * d; z = Math.sin(a) * r + Math.sin(a2) * d; } // groves
+      else { const a = rng() * TAU, r = 140 + rng() * 180; x = Math.cos(a) * r; z = Math.sin(a) * r; }
+      const r = Math.hypot(x, z);
+      if (r > ISLAND_R + 8 || this.gridH(x, z) < SEA_Y + 1.5 || this.gridUp(x, z) < 0.82 || onRoad(x, z, 5) || siteAt(x, z, 8) || this.blocked(x, z, 2)) continue;
+      tree(x, z, i + 400, 1 + rng() * 0.25, 0.75); i++;
+    }
+    // groves on the rim hills (the duel arena's backdrop, open ground in the battle royale)
     for (let i = 0; i < 60; i++) {
       const a = rng() * TAU, r = ARENA_R + 2 + rng() * 26, x = Math.cos(a) * r, z = Math.sin(a) * r, y = this.heightAt(x, z);
-      if (y < 0 || this.onRamp(x, z)) continue;
+      if (y < 0 || this.onRamp(x, z) || onRoad(x, z, 5)) continue;
       const sc = 1 + rng() * 0.6, h = 5 + rng() * 4, pink = rng() < 0.25;
       const trunk = new THREE.Mesh(treeTrunk(h, i + 50), bark); trunk.position.set(x, y - 0.3, z); trunk.scale.setScalar(sc); this.statics.add(trunk);
+      this.obstacles.push({ x, z, r: 0.6 * sc, y0: y, h: h * sc });
       const blobs = [];
       for (let k = 0; k < 4; k++) blobs.push({ c: new THREE.Vector3((rng() - 0.5) * 3.4, h + (rng() - 0.2) * 2.4, (rng() - 0.5) * 3.4).multiplyScalar(sc).add(new THREE.Vector3(x, y - 0.2, z)), r: (1.8 + rng() * 1.2) * sc });
       cards.push({ blobs, color: new THREE.Color(pink ? palettes[4 + (i % 2)] : palettes[i % 4]), per: 0.8 });
@@ -1126,7 +1269,12 @@ export class World {
     });
     const mat = canopyMaterial(0xffffff); mat.uniforms.uTex.value = leafTexture(); mat.uniforms.uSunView = { value: this.sunView }; mat.uniforms.uTime = TIME;
     mat.vertexColors = true;
-    for (const geo of geos) {
+    // one canopy mesh per 48 m cell (hundreds of trees over the island in a few dozen draw calls, still culled per cell)
+    const cellsC = new Map();
+    for (const geo of geos) { const c0 = geo.boundingSphere.center, k = Math.floor(c0.x / 48) + ',' + Math.floor(c0.z / 48); if (!cellsC.has(k)) cellsC.set(k, []); cellsC.get(k).push(geo); }
+    for (const list of cellsC.values()) {
+      const geo = list.length > 1 ? mergeGeometries(list, false) : list[0];
+      geo.computeBoundingSphere(); geo.boundingSphere.radius += 3;
       const canopy = new THREE.Mesh(geo, mat); canopy.userData.noAO = true;
       canopy.updateMatrix(); canopy.matrixAutoUpdate = false; this.scene.add(canopy);
     }
@@ -1149,6 +1297,21 @@ export class World {
       m.position.set(x, y + s * 0.1, z); m.scale.set(s * (1 + rng() * 0.5), s, s); m.rotation.y = rng() * TAU;
       this.statics.add(m);
       if (s > 1.2) this.obstacles.push({ x, z, r: s * 0.9, y0: y - 1, h: s * 1.1 + 1 });
+    }
+    // the uplands: boulder clusters (cover between the landmarks) and big tors
+    const r2 = mulberry32(55);
+    for (let i = 0, tries = 0; i < 90 && tries < 1500; tries++) {
+      const a = r2() * TAU, r = 135 + r2() * 200, cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+      if (this.gridH(cx, cz) < SEA_Y + 0.5 || onRoad(cx, cz, 5) || siteAt(cx, cz, 6) || this.blocked(cx, cz, 3)) continue;
+      i++;
+      const n = 1 + Math.floor(r2() * 3), big = r2() < 0.2;
+      for (let k = 0; k < n; k++) {
+        const x = cx + (r2() - 0.5) * 5, z = cz + (r2() - 0.5) * 5, y = this.gridH(x, z), s = big && !k ? 3 + r2() * 2.5 : 0.7 + r2() * 1.8;
+        const m = new THREE.Mesh(tintGeo(geos[(i + k) % 4].clone(), r2, 0.16), mat);
+        m.position.set(x, y + s * 0.1, z); m.scale.set(s * (1 + r2() * 0.5), s * (big && !k ? 1.3 : 1), s); m.rotation.y = r2() * TAU;
+        this.statics.add(m);
+        if (s > 1.1) this.obstacles.push({ x, z, r: s * 0.9, y0: y - 1, h: s * (big && !k ? 1.4 : 1.1) + 1 });
+      }
     }
   }
   buildCrystals() {
@@ -1233,14 +1396,14 @@ export class World {
       return g;
     };
     // no AO on the ranges: at 400-1500 m the depth buffer is too coarse and GTAO smears black jags along every ridgeline
-    for (const g of [range(360, 900, 120, 3.1, 110, 800, 5, 2.0), range(950, 1550, 380, 11.7, 70, 640, 5, 1.2)]) { // green foothills, snowy far peaks
+    for (const g of [range(560, 1080, 130, 3.1, 110, 800, 5, 2.0), range(1120, 1650, 380, 11.7, 70, 640, 5, 1.2)]) { // green foothills, snowy far peaks
       const m = new THREE.Mesh(g, mMat); m.userData.noAO = true; this.scene.add(m);
     }
     // floating islands: carrot-shaped sculpted rock with strata, a grassy cap and little trees
     const iMat = Object.assign(stoneMaterial(0xe6dccb, { moss: 1.1, joint: 3, grime: 0 }), { emissive: new THREE.Color(0x2a3550), emissiveIntensity: 0.45 }); // sky bounce so undersides aren't black
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x4f8f3a, roughness: 0.9 }), pinkMat = new THREE.MeshStandardMaterial({ color: 0xf2a6c4, roughness: 0.9 });
     for (let i = 0; i < 5; i++) {
-      const a = rng() * TAU, r = 230 + rng() * 110, y = 45 + rng() * 60, s = 8 + rng() * 14;
+      const a = rng() * TAU, r = 440 + rng() * 110, y = 55 + rng() * 60, s = 9 + rng() * 15;
       const g = new THREE.Group();
       const rock = new THREE.Mesh(islandGeo(i + 11), iMat); rock.scale.setScalar(s); g.add(rock);
       for (let k = 0; k < 3; k++) {
@@ -1303,13 +1466,14 @@ export class World {
     const rng = mulberry32(17), list = [];
     const spots = [...this.obstacles.filter((o) => o.r < 1.3).map((o) => [o.x, o.z, o.r + 0.5])];
     for (let i = 0; i < 140; i++) { const a = rng() * TAU, r = 14 + rng() * 100; spots.push([Math.cos(a) * r, Math.sin(a) * r, 1.5]); }
+    for (let i = 0; i < 160; i++) { const a = rng() * TAU, r = 135 + rng() * 190; spots.push([Math.cos(a) * r, Math.sin(a) * r, 1.5]); }
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
     for (const [ox, oz, rr] of spots) {
       const n = 1 + Math.floor(rng() * 3);
       for (let k = 0; k < n; k++) {
         const a = rng() * TAU, x = ox + Math.cos(a) * (rr + rng() * 0.8), z = oz + Math.sin(a) * (rr + rng() * 0.8);
         if (this.gridUp(x, z) < 0.85 || this.gridH(x, z) < -1 || Math.hypot(x, z) < 11.5 || this.onRamp(x, z)) continue;
-        if (Math.abs(Math.sin(Math.atan2(z, x) * 2)) < 0.1 && Math.hypot(x, z) < 100) continue; // off the paths
+        if ((Math.abs(Math.sin(Math.atan2(z, x) * 2)) < 0.1 && Math.hypot(x, z) < 100) || onRoad(x, z) || this.inSolid(x, z, 0.3)) continue; // off the paths, out of buildings
         const s2 = 1.0 + rng() * 0.8; p.set(x, this.gridH(x, z) - 0.05, z); e.set((rng() - 0.5) * 0.2, rng() * TAU, (rng() - 0.5) * 0.2); q.setFromEuler(e); sc.set(s2, s2, s2);
         list.push([m4.compose(p, q, sc).clone(), c.setHSL(0.24 + rng() * 0.07, 0.45 + rng() * 0.15, 0.4 + rng() * 0.12).clone()]);
       }
@@ -1538,14 +1702,32 @@ export class World {
   // its height and whether grass may grow there (not on the dais, paths, cliffs or beach) in a texture baked from the
   // terrain grid, so the extra density costs no CPU and no memory beyond one tile's worth of instances.
   buildLawn(bladeGeo, N = 1500) {
-    const { n, size, pos } = this.hGrid, step = size / (n - 1), data = new Uint16Array(n * n * 4), H = (i, j) => pos[(Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i))) * 3 + 1];
+    // ground texture on a uniform grid over the whole island: height, grass mask, flower field, field colour
+    const size = 2 * (ISLAND_R + 30), n = this.quality > 0 ? 626 : 314, step = size / (n - 1), data = new Uint16Array(n * n * 4), hs = new Float32Array(n * n), mask = new Float32Array(n * n).fill(1);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) hs[j * n + i] = this.gridH(-size / 2 + i * step, -size / 2 + j * step);
+    const H = (i, j) => hs[Math.min(n - 1, Math.max(0, j)) * n + Math.min(n - 1, Math.max(0, i))];
+    // no blades through floors, walls and paving: stamp every building footprint out of the mask
+    for (const b of this.solids) {
+      if (b.y - b.hy > this.gridH(b.x, b.z) + 1.2) continue;
+      const ex = Math.abs(b.hx * b.cos) + Math.abs(b.hz * b.sin) + 0.3, ez = Math.abs(b.hx * b.sin) + Math.abs(b.hz * b.cos) + 0.3;
+      for (let j = Math.max(0, Math.floor((b.z - ez + size / 2) / step)); j <= Math.min(n - 1, Math.ceil((b.z + ez + size / 2) / step)); j++)
+        for (let i = Math.max(0, Math.floor((b.x - ex + size / 2) / step)); i <= Math.min(n - 1, Math.ceil((b.x + ex + size / 2) / step)); i++) {
+          const [lx, lz] = this.local(b, -size / 2 + i * step, -size / 2 + j * step);
+          if (Math.abs(lx) < b.hx + 0.35 && Math.abs(lz) < b.hz + 0.35) mask[j * n + i] = 0;
+        }
+    }
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
       const x = -size / 2 + i * step, z = -size / 2 + j * step, h = H(i, j), r = Math.hypot(x, z);
       const sl = Math.hypot(H(i + 1, j) - H(i - 1, j), H(i, j + 1) - H(i, j - 1)) / (2 * step);
-      const pd = Math.abs(Math.sin(Math.atan2(z, x) * 2)) * r * 0.5, onPath = r > 10.5 && r < 100 && pd < 0.075 * r * 0.5 + 0.35;
-      let m = smooth(10.8, 12, r) * (1 - smooth(0.3, 0.45, sl)) * smooth(-1.6, -0.9, h) * (onPath ? 0 : 1) * smooth(-0.55, -0.25, fbm(x * 0.05, z * 0.05, 2));
+      const pd = Math.abs(Math.sin(Math.atan2(z, x) * 2)) * r * 0.5, onPath = (r > 10.5 && r < 100 && pd < 0.075 * r * 0.5 + 0.35) || onRoad(x, z, 2.5);
+      let m = smooth(10.8, 12, r) * (1 - smooth(0.3, 0.45, sl)) * smooth(-1.6, -0.9, h) * (onPath ? 0 : 1) * smooth(-0.55, -0.25, fbm(x * 0.05, z * 0.05, 2)) * mask[j * n + i];
+      if (r > 130) {
+        m *= r < 150 ? 1 : smooth(0.4, 1.6, h); // no grass on the beaches
+        const S = siteAt(x, z, 2);
+        if (S) { const d = Math.hypot(x - S.x, z - S.z); m *= S.id === 'castle' ? smooth(S.R * 0.6, S.R * 0.68, d) : S.id === 'colosseum' ? smooth(19, 21.5, d) : S.id === 'village' || S.id === 'hollow' ? smooth(S.R * 0.28, S.R * 0.45, d) : 1; }
+      }
       const o = (j * n + i) * 4;
-      const field = m * (0.08 + 0.92 * smooth(0.12, 0.38, fbm(x * 0.028 + 40, z * 0.028, 3))) * (1 - smooth(10, 16, 100 - r) * 0); // meadows in bloom
+      const field = m * (0.08 + 0.92 * smooth(0.12, 0.38, fbm(x * 0.028 + 40, z * 0.028, 3))); // meadows in bloom
       data[o] = THREE.DataUtils.toHalfFloat(h); data[o + 1] = THREE.DataUtils.toHalfFloat(m);
       data[o + 2] = THREE.DataUtils.toHalfFloat(field); data[o + 3] = THREE.DataUtils.toHalfFloat(clamp(fbm(x * 0.018 + 90, z * 0.018, 2) * 1.6 + 0.5));
     }
@@ -1567,6 +1749,22 @@ export class World {
       this.scene.add(t); this.lawn.push(t);
     }
     this.lawnT = T;
+    // the outer island's mid field (the arena keeps its fixed chunks): bigger tiles hopping with the camera out to ~70 m
+    const T2 = 18, N2 = this.quality > 0 ? 1100 : 420, mm = meadowMaterial(false, { tex, n, size }, true), mp = new THREE.InstancedMesh(bladeGeo, mm, N2);
+    for (let k = 0; k < N2; k++) {
+      const cx = Math.random() * T2, cz = Math.random() * T2;
+      p.set(cx, 0, cz); e.set((Math.random() - 0.5) * 0.45, Math.random() * TAU, (Math.random() - 0.5) * 0.45); q.setFromEuler(e);
+      const h = 0.3 + Math.random() * 0.5; sc.set(0.8 + Math.random() * 0.6, h, 0.8 + Math.random() * 0.4);
+      mp.setMatrixAt(k, m4.compose(p, q, sc));
+      c.setHSL(0.23 + Math.random() * 0.06, 0.42 + Math.random() * 0.12, 0.35 + Math.random() * 0.12); mp.setColorAt(k, c);
+    }
+    this.midLawn = [];
+    for (let k = 0; k < 64; k++) {
+      const t = new THREE.InstancedMesh(bladeGeo, mm, N2); t.instanceMatrix = mp.instanceMatrix; t.instanceColor = mp.instanceColor;
+      t.receiveShadow = true; t.userData.noAO = true; t.boundingSphere = new THREE.Sphere(new THREE.Vector3(T2 / 2, 0, T2 / 2), T2 * 0.75 + 12);
+      this.scene.add(t); this.midLawn.push(t);
+    }
+    this.midT = T2;
     if (this.flowerGeo) {
       const FN = Math.round(N * 0.22), fmat = meadowMaterial(true, { tex, n, size }), fp = new THREE.InstancedMesh(this.flowerGeo, fmat, FN);
       for (let k = 0; k < FN; k++) {
@@ -1638,6 +1836,10 @@ export class World {
       if (this.lawn) {
         const T = this.lawnT, cx = Math.floor(camera.position.x / T), cz = Math.floor(camera.position.z / T);
         this.lawn.forEach((t, k) => { const kk = k % 25; t.position.set((cx + (kk % 5) - 2) * T, 0, (cz + Math.floor(kk / 5) - 2) * T); t.boundingSphere.center.set(T / 2, camera.position.y, T / 2); t.updateMatrixWorld(); });
+      }
+      if (this.midLawn) {
+        const T = this.midT, cx = Math.floor(camera.position.x / T), cz = Math.floor(camera.position.z / T), inner = Math.hypot(camera.position.x, camera.position.z) < 45; // deep in the arena: nothing to draw
+        this.midLawn.forEach((t, k) => { t.visible = !inner; t.position.set((cx + (k % 8) - 4) * T, 0, (cz + Math.floor(k / 8) - 4) * T); t.boundingSphere.center.set(T / 2, camera.position.y, T / 2); t.updateMatrixWorld(); });
       }
       for (const g of this.grassChunks) g.visible = g.boundingSphere.center.distanceToSquared(camera.position) < (78 + g.boundingSphere.radius) ** 2;
       for (const c of this.clouds) {
