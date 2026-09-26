@@ -82,8 +82,9 @@ export class AnimeRig {
       }
       this.constraints.setInitState();
     }
-    scene.rotation.y = Math.PI; scene.scale.setScalar(tpl.scale); this.root.add(scene); // …so turn and scale it only after
     this.bone = (n) => this.humanoid.getNormalizedBoneNode(n);
+    this.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true); this.arms = armRig(this.bone, tpl); // rest lengths in the model's own units
+    scene.rotation.y = Math.PI; scene.scale.setScalar(tpl.scale); this.root.add(scene); // …so turn and scale it only after
     this.morphs = {};
     for (const [name, binds] of Object.entries(tpl.expr)) {
       const list = [];
@@ -99,9 +100,9 @@ export class AnimeRig {
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 1.5, 8), wood); shaft.position.y = 0.3; staff.add(shaft); addOutline(shaft, 0.008);
     const crook = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.011, 6, 20, Math.PI * 1.5), trimM); crook.position.y = 1.1; crook.rotation.z = -Math.PI * 0.25; staff.add(crook);
     const focus = (this.staffTip = new THREE.Mesh(new THREE.OctahedronGeometry(0.042, 0), glowMat)); focus.scale.y = 1.6; focus.position.y = 1.1; staff.add(focus);
-    staff.scale.setScalar(inv); staff.position.set(-0.06 * inv, -0.015 * inv, 0.01 * inv);
-    staff.rotation.set(0, 0, -Math.PI / 2 + 0.4); // staff up along the hand's +X, which points up when the arm hangs
-    this.bone('rightHand')?.add(staff); this.staff = staff;
+    // the staff is a prop animated in the model's own space (origin at the grip); the hands are solved onto it
+    shaft.geometry = new THREE.CylinderGeometry(0.016, 0.022, 1.66, 8); shaft.position.y = -0.28; crook.position.y = 0.6; focus.position.y = 0.6;
+    staff.scale.setScalar(inv); scene.add(staff); this.staff = staff;
     if (!dressed) this.buildCape(accent, inv);
     for (const mat of [trimM, wood]) this.flashMats.push({ m: mat, base: mat.emissive.clone() });
     this.frame = 0;
@@ -136,6 +137,9 @@ export class AnimeRig {
   setFlash(k, color) { for (const f of this.flashMats) f.m.emissive.copy(f.base).lerp(color, k); }
   rot(name, x, y, z) { const b = this.bone(name); if (b) b.quaternion.setFromEuler(_e.set(x, y, z, 'XYZ')); }
   // walk: gait phase, sp: 0..1 run blend, chant: 0..1, cast: 0..1 flick, pitch: look up (+) / down (-)
+  // Poses are keyed per state (idle, walk, chant, cast, hit) and blended every frame. The body is posed forward (FK); the
+  // staff is placed as a prop from the same keys, the right hand is solved onto its grip (IK) and closes into a fist,
+  // and the left hand hangs, swings, or opens palm-forward to cast.
   pose(dt, { walk, sp, chant, cast, pitch, hit, skip }) {
     const t = TIME.value;
     // face: blink, a determined brow while chanting, lip-flap on the incantation, a wince on hits
@@ -143,26 +147,60 @@ export class AnimeRig {
     this.blink = Math.max(0, this.blink - dt * 7);
     this.hurt = Math.max(this.hurt - dt * 2.5, hit);
     this.mouth += ((chant > 0.3 ? 0.35 + 0.45 * Math.abs(Math.sin(t * 11) * Math.sin(t * 7.3)) : 0) - this.mouth) * Math.min(1, dt * 18);
+    this.castS = (this.castS || 0) + (cast - (this.castS || 0)) * Math.min(1, dt * 30); // the thrust snaps out, eases back
     if (skip) return; // far mages hold the last pose for a frame
     this.setMorph('blink', Math.max(Math.sin(this.blink * Math.PI), this.hurt * 0.8));
     this.setMorph('aa', this.mouth); this.setMorph('angry', Math.min(1, chant * 0.6 + this.hurt * 0.4));
-    const w = walk, idle = Math.sin(t * 2) * 0.02;
-    for (const s of [1, -1]) { // s: +1 left (+X), -1 right
+    const w = walk, c = chant, k = this.castS, h = this.hurt, br = Math.sin(t * 1.9), still = (1 - sp) * (1 - c);
+    const act = Math.max(c, k); // chanting or casting: the staff comes up
+    // --- body (FK). Clone space: faces +Z, +x rotations lean forward / swing a limb forward.
+    const stride = Math.sin(w);
+    this.rot('hips', 0, stride * 0.12 * sp + k * 0.12, Math.sin(t * 0.8) * 0.015 * still);
+    this.scene.position.y = Math.abs(stride) * 0.035 * sp - sp * 0.025 - k * 0.03 - still * 0.008 * (1 - br);
+    this.rot('spine', 0.1 * sp + c * 0.05 + k * 0.2 - h * 0.28, -stride * 0.06 * sp, 0);
+    this.rot('chest', 0.012 * br * still - h * 0.12, -stride * 0.1 * sp - c * 0.1 - k * 0.2, 0);
+    this.rot('upperChest', 0.01 * br, 0, 0);
+    this.rot('neck', -pitch * 0.2 + h * 0.15, c * 0.05 + k * 0.1, 0);
+    this.rot('head', -pitch * 0.3 - h * 0.3, c * 0.06 + k * 0.12, 0);
+    for (const s of [1, -1]) { // s: +1 left, -1 right
       const side = s > 0 ? 'left' : 'right', ph = w + (s > 0 ? 0 : Math.PI);
-      this.rot(`${side}UpperLeg`, -Math.sin(ph) * 0.6 * sp, 0, 0);
-      this.rot(`${side}LowerLeg`, Math.max(0, Math.sin(ph - 1.2)) * 1.0 * sp, 0, 0);
-      this.rot(`${side}Foot`, -Math.max(0, Math.sin(ph - 1.2)) * 0.3 * sp, 0, 0);
-      const swing = Math.sin(w + (s > 0 ? Math.PI : 0)) * 0.55 * sp, castR = s < 0 ? cast : 0;
-      const fwd = swing * (1 - chant) + chant * 1.15 + castR * 1.3; // arm forward
-      this.rot(`${side}UpperArm`, -fwd, 0, -s * (1.22 - idle + chant * 0.3));
-      this.rot(`${side}LowerArm`, 0, -s * (0.25 + chant * 0.55 - castR * 0.2), 0);
-      this.rot(`${side}Hand`, 0, 0, -s * chant * 0.3);
+      const lunge = s < 0 ? k * 0.45 : -k * 0.25; // the cast steps into it
+      this.rot(`${side}UpperLeg`, -Math.sin(ph) * 0.6 * sp - lunge, 0, s * 0.03 * still);
+      this.rot(`${side}LowerLeg`, Math.max(0, Math.sin(ph - 1.2)) * 1.0 * sp + 0.06 * still + Math.abs(lunge) * 0.6, 0, 0);
+      this.rot(`${side}Foot`, -Math.max(0, Math.sin(ph - 1.2)) * 0.3 * sp - Math.abs(lunge) * 0.3, 0, 0);
     }
-    this.rot('spine', 0.1 * sp + chant * 0.05 - cast * 0.08, 0, 0);
-    this.rot('chest', idle * 0.5, -chant * 0.12, 0);
-    this.rot('neck', -pitch * 0.25, 0, 0);
-    this.rot('head', -pitch * 0.3, 0, 0);
-    this.scene.position.y = Math.abs(Math.sin(w)) * 0.04 * sp - sp * 0.02;
+    this.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
+    const A = this.arms; A.frame(this.scene);
+    // --- staff (prop): grip point and shaft direction per state, blended
+    const lerp3 = (a, b, x) => a.clone().lerp(b, x);
+    const swing = Math.sin(w) * sp;
+    let G = lerp3(_v3(-0.215, 0.975 + 0.004 * br, 0.19), _v3(-0.2, 0.93 + Math.abs(stride) * 0.02, 0.17 + swing * 0.05), sp);
+    let D = lerp3(_v3(-0.08, 1, 0.04), _v3(-0.06, 1, 0.72 + swing * 0.1), sp).normalize();
+    const aim = (v) => v.applyAxisAngle(_X, -pitch * 0.8); // chant and cast point the staff where the mage looks
+    G.lerp(_v3(-0.17, 1.09 + pitch * 0.06, 0.3), c); D.lerp(aim(_v3(0.08, 1, 0.55)).normalize(), c).normalize();
+    G.lerp(_v3(-0.09, 1.22 + pitch * 0.1, 0.42), k); D.lerp(aim(_v3(0.02, 0.22, 1)).normalize(), k).normalize(); // levelled at the target
+    G.y += -h * 0.04;
+    // the shaft slides forward through the hand as it comes up, so a levelled staff doesn't spear back through the body
+    this.staff.position.copy(G).addScaledVector(D, (c * 0.2 + k * 0.62) * this.staff.scale.x); // metres -> model units
+    this.staff.quaternion.setFromUnitVectors(_Y, D); this.staff.updateMatrixWorld(true);
+    // --- right hand on the grip
+    const R = A.right, fore0 = _v3(0, 0, 1);
+    A.solve(R, G, _v3(-0.7, -1, -0.5));
+    const Dh = R.fore.clone().addScaledVector(D, -R.fore.dot(D)); if (Dh.lengthSq() < 1e-6) Dh.copy(fore0); Dh.normalize();
+    const P = new THREE.Vector3().crossVectors(D, Dh).normalize();
+    A.solve(R, G.clone().addScaledVector(Dh, -R.palm).addScaledVector(P, -R.palm * 0.35), _v3(-0.7, -1, -0.5));
+    A.hand(R, Dh, P); A.curl('right', -1, [1.25, 1.3, 0.9], 0.04, 0.9);
+    // --- left hand: hangs relaxed, swings in the stride, opens palm-forward to cast
+    const L = A.left, ls = -swing;
+    const T = lerp3(_v3(0.215, 0.86 + 0.004 * br, 0.03), _v3(0.2, 0.88, 0.05 + ls * 0.2), sp);
+    T.lerp(_v3(0.12 + Math.sin(t * 3.1) * 0.01, 1.17 + pitch * 0.06, 0.34), c).lerp(_v3(0.17, 1.22 + pitch * 0.1, 0.52), k);
+    T.y -= h * 0.05;
+    A.solve(L, T, _v3(0.7, -1, -0.4));
+    const hang = lerp3(_v3(0, -1, 0.12 + ls * 0.3), L.fore, 0.5).normalize();
+    const Dl = hang.lerp(_v3(0.1, 1, 0.12).normalize(), act).normalize();
+    const Pl = lerp3(_v3(-1, 0, 0), _v3(0, 0.1, 1), act); Pl.addScaledVector(Dl, -Pl.dot(Dl)).normalize();
+    A.hand(L, Dl, Pl);
+    A.curl('left', 1, [0.35 * (1 - act) + 0.08, 0.4 * (1 - act) + 0.08, 0.3 * (1 - act)], 0.1 * act, 0.25);
     this.humanoid.update(); this.constraints?.update();
     if (this.cape) {
       const cp = this.cape.geometry.attributes.position;
@@ -170,6 +208,8 @@ export class AnimeRig {
       cp.needsUpdate = true;
     }
   }
+  // chant orb: just ahead of the staff's focus, in the mage's root space
+  orbAt(out) { this.staffTip.getWorldPosition(out); return this.root.worldToLocal(out); }
   tipWorld(out = _v) { return this.staffTip.getWorldPosition(out); }
 }
 
@@ -178,8 +218,53 @@ export class AnimeRig {
 // just below and ahead of the camera. Two-bone IK puts the right hand on the staff grip; the left hand rises into a
 // casting gesture while chanting. Works in the clone's own space: faces +Z, normalized bones at rest are identity.
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3(), _f = new THREE.Vector3(), _h = new THREE.Vector3();
+const _X = new THREE.Vector3(1, 0, 0), _Y = new THREE.Vector3(0, 1, 0), _v3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const frameQuat = (out, dir, nrm) => { _c.crossVectors(dir, nrm); return out.setFromRotationMatrix(_m.makeBasis(dir, nrm, _c)); };
 const FINGERS = ['Index', 'Middle', 'Ring', 'Little'], SEGS = ['Proximal', 'Intermediate', 'Distal'];
+
+// Two-bone arm IK on a VRM's normalized rig, in the clone's own space (faces +Z; at rest every normalized bone is
+// identity, the left arm along +X). Works under a posed torso: shoulders are read from the current pose each frame.
+function armRig(bone, tpl) {
+  const node = (n) => bone(n);
+  const inv = new THREE.Matrix4(), pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+  const local = (n, outP, outQ) => { _m.multiplyMatrices(inv, node(n).matrixWorld).decompose(outP || pos, outQ || quat, scl); };
+  const rig = {
+    frame(scene) { inv.copy(scene.matrixWorld).invert(); },
+    solve(arm, T, pole) {
+      const { a, b, rest, hinge, side } = arm;
+      const S = new THREE.Vector3(), Pq = new THREE.Quaternion();
+      local(`${side}UpperArm`, S); local(bone(`${side}Shoulder`) ? `${side}Shoulder` : 'upperChest', null, Pq);
+      const d = Math.min(_a.subVectors(T, S).length(), (a + b) * 0.999), dir = _a.normalize();
+      const cosA = Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d))), sinA = Math.sqrt(1 - cosA * cosA);
+      const n = _b.copy(pole).addScaledVector(dir, -pole.dot(dir)).normalize();
+      const E = arm.elbow.copy(S).addScaledVector(dir, a * cosA).addScaledVector(n, a * sinA);
+      const u = _c.subVectors(E, S).normalize().clone(), f = _f.copy(S).addScaledVector(dir, d).sub(E).normalize();
+      const h = _h.crossVectors(u, f); if (h.lengthSq() < 1e-8) h.copy(n).cross(u); h.normalize();
+      // rest frames: (bone direction, hinge); the elbow bends about the same hinge on both bones
+      const qRest = frameQuat(new THREE.Quaternion(), rest, hinge).invert();
+      const qU = frameQuat(new THREE.Quaternion(), u, h).multiply(qRest), qL = frameQuat(new THREE.Quaternion(), f, h).multiply(qRest);
+      node(`${side}UpperArm`).quaternion.copy(Pq.invert().multiply(qU));
+      node(`${side}LowerArm`).quaternion.copy(qU.clone().invert().multiply(qL));
+      arm.up.copy(qL); arm.fore = f.clone();
+    },
+    hand(arm, dir, palm) { // hand frame in clone space: fingers along dir, palm facing palm
+      const rest = frameQuat(_q2, arm.rest, _d.set(0, -1, 0)).invert();
+      const q = frameQuat(_q, dir, palm).multiply(rest);
+      node(`${arm.side}Hand`).quaternion.copy(arm.up.clone().invert().multiply(q));
+    },
+    curl(side, s, amt, spread = 0, thumb = amt) {
+      FINGERS.forEach((F, i) => SEGS.forEach((G, j) => { const b = bone(`${side}${F}${G}`); if (b) b.quaternion.setFromEuler(_e.set(0, j ? 0 : -s * (i - 1.5) * spread, -s * amt[j] * (1 + i * 0.06), 'XYZ')); }));
+      for (const [G, k] of [['Metacarpal', 0.5], ['Proximal', 0.8], ['Distal', 1]]) { const b = bone(`${side}Thumb${G}`); if (b) b.quaternion.setFromEuler(_e.set(0, s * thumb * 0.6 * k, -s * thumb * 0.5 * k, 'XYZ')); }
+    },
+  };
+  // rest lengths, read before the clone is turned and scaled
+  for (const [side, s] of [['left', 1], ['right', -1]]) {
+    const P = (n) => bone(n).getWorldPosition(new THREE.Vector3());
+    const S = P(`${side}UpperArm`), E = P(`${side}LowerArm`), H = P(`${side}Hand`), M = bone(`${side}MiddleProximal`) ? P(`${side}MiddleProximal`) : H.clone().add(new THREE.Vector3(s * 0.08, 0, 0));
+    rig[side] = { side, s, S, a: S.distanceTo(E), b: E.distanceTo(H), palm: H.distanceTo(M) * 0.9, rest: new THREE.Vector3(s, 0, 0), hinge: new THREE.Vector3(0, -s, 0), elbow: new THREE.Vector3(), up: new THREE.Quaternion() };
+  }
+  return rig;
+}
 
 export class FirstPersonArms {
   constructor(tpl, camera) {
@@ -210,12 +295,7 @@ export class FirstPersonArms {
     }
     const bone = (this.bone = (n) => this.humanoid.getNormalizedBoneNode(n));
     this.humanoid.normalizedHumanBonesRoot.updateMatrixWorld(true);
-    const pos = (n) => bone(n).getWorldPosition(new THREE.Vector3()); // scene is still unrotated/unscaled here
-    this.arms = {};
-    for (const [side, s] of [['left', 1], ['right', -1]]) {
-      const S = pos(`${side}UpperArm`), E = pos(`${side}LowerArm`), H = pos(`${side}Hand`), M = bone(`${side}MiddleProximal`) ? pos(`${side}MiddleProximal`) : H.clone().add(new THREE.Vector3(s * 0.08, 0, 0));
-      this.arms[side] = { side, s, S, a: S.distanceTo(E), b: E.distanceTo(H), palm: H.distanceTo(M) * 0.9, rest: new THREE.Vector3(s, 0, 0), hinge: new THREE.Vector3(0, -s, 0), elbow: new THREE.Vector3(), up: new THREE.Quaternion() };
-    }
+    this.rig = armRig(bone, tpl); this.arms = { left: this.rig.left, right: this.rig.right };
     // right shoulder just right of and below the eye, a little ahead of it; the rest of the body is cut away
     const k = tpl.scale; scene.scale.setScalar(k); scene.rotation.y = Math.PI;
     const Sr = this.arms.right.S; scene.position.set(0.2 - Sr.x * k, -0.3 - Sr.y * k, -0.2 + Sr.z * k);
@@ -226,34 +306,13 @@ export class FirstPersonArms {
   // point (world) -> clone space
   toLocal(v) { return this.scene.worldToLocal(v); }
   camDir(x, y, z) { const o = this.toLocal(this.camera.localToWorld(new THREE.Vector3())); return this.toLocal(this.camera.localToWorld(new THREE.Vector3(x, y, z))).sub(o).normalize(); } // camera-space direction -> clone space
-  solve(arm, T, pole) {
-    const { S, a, b, rest, hinge } = arm;
-    const d = Math.min(_a.subVectors(T, S).length(), (a + b) * 0.999), dir = _a.normalize();
-    const cosA = Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d))), sinA = Math.sqrt(1 - cosA * cosA);
-    const n = _b.copy(pole).addScaledVector(dir, -pole.dot(dir)).normalize();
-    const E = arm.elbow.copy(S).addScaledVector(dir, a * cosA).addScaledVector(n, a * sinA);
-    const u = _c.subVectors(E, S).normalize().clone(), f = _f.copy(S).addScaledVector(dir, d).sub(E).normalize();
-    const h = _h.crossVectors(u, f); if (h.lengthSq() < 1e-8) h.copy(n).cross(u); h.normalize();
-    // rest frames: (bone direction, hinge); the elbow bends about the same hinge on both bones
-    const qRest = frameQuat(new THREE.Quaternion(), rest, hinge).invert();
-    const qU = frameQuat(new THREE.Quaternion(), u, h).multiply(qRest), qL = frameQuat(new THREE.Quaternion(), f, h).multiply(qRest);
-    this.bone(`${arm.side}UpperArm`).quaternion.copy(qU);
-    this.bone(`${arm.side}LowerArm`).quaternion.copy(qU.clone().invert().multiply(qL));
-    arm.up.copy(qL); arm.fore = f.clone();
-  }
-  hand(arm, dir, palm) { // world-space (clone) hand frame: fingers along dir, palm facing palm
-    const rest = frameQuat(_q2, arm.rest, _d.set(0, -1, 0)).invert();
-    const q = frameQuat(_q, dir, palm).multiply(rest);
-    this.bone(`${arm.side}Hand`).quaternion.copy(arm.up.clone().invert().multiply(q));
-  }
-  curl(side, s, amt, spread = 0, thumb = amt) {
-    FINGERS.forEach((F, i) => SEGS.forEach((G, j) => { const b = this.bone(`${side}${F}${G}`); if (b) b.quaternion.setFromEuler(_e.set(0, j ? 0 : -s * (i - 1.5) * spread, -s * amt[j] * (1 + i * 0.06), 'XYZ')); }));
-    for (const [G, k] of [['Metacarpal', 0.5], ['Proximal', 0.8], ['Distal', 1]]) { const b = this.bone(`${side}Thumb${G}`); if (b) b.quaternion.setFromEuler(_e.set(0, s * thumb * 0.6 * k, -s * thumb * 0.5 * k, 'XYZ')); }
-  }
+  solve(arm, T, pole) { this.rig.solve(arm, T, pole); }
+  hand(arm, dir, palm) { this.rig.hand(arm, dir, palm); }
+  curl(...a) { this.rig.curl(...a); }
   // grip, axis: staff grip point and shaft direction (world); chant 0..1, kick 0..1 cast thrust
   update(dt, grip, axis, chant, kick) {
     const t = TIME.value;
-    this.camera.updateMatrixWorld(); this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(); this.scene.updateMatrixWorld(true); this.rig.frame(this.scene);
     const R = this.arms.right, L = this.arms.left;
     // right hand on the staff: forearm continues into the hand, palm wraps the shaft
     const G = this.toLocal(grip.clone()), A = this.toLocal(axis.clone().add(grip)).sub(G).normalize();

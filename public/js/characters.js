@@ -196,7 +196,7 @@ export class MageModel {
     const w = this.walk;
     if (this.anime) {
       this.anime.pose(dt, { walk: w, sp, chant: this.chant, cast: this.castAnim, pitch: s.pitch || 0, hit: hf, skip: this.lodLevel >= 2 && (this._skip = !this._skip) });
-      this.chantOrb.position.set(0, 1.2, -0.45);
+      this.anime.orbAt(this.chantOrb.position); // the spell gathers at the staff's focus
     } else {
     for (const L of this.legs) {
       const ph = w + (L.s > 0 ? Math.PI : 0);
