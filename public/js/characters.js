@@ -161,7 +161,7 @@ export class MageModel {
     // anime mage: once the VRM has loaded, it replaces the primitive body (the far impostor and status visuals stay)
     const tpl = MageModel.anime && animeMageReady();
     if (tpl) {
-      this.anime = new AnimeRig(tpl, { trim, accent, hat }, this.glowMat);
+      this.anime = new AnimeRig(tpl, { robe, trim, accent, hat }, this.glowMat);
       root.remove(body); root.add(this.anime.root); root.add(this.chantOrb);
       this.flashMats = this.anime.flashMats; this.staffTip = this.anime.staffTip;
     }

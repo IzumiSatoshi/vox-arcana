@@ -48,7 +48,7 @@ const lathe = (pts, seg = 32) => new THREE.LatheGeometry(pts.map(([r, y]) => new
 const _e = new THREE.Euler(), _v = new THREE.Vector3();
 
 export class AnimeRig {
-  constructor(tpl, { trim = 0xe0b95a, accent = 0xff4a6a, hat = 0x1d1838 } = {}, glowMat) {
+  constructor(tpl, { robe = 0x2a2350, trim = 0xe0b95a, accent = 0xff4a6a, hat = 0x1d1838 } = {}, glowMat) {
     this.root = new THREE.Group();
     const scene = (this.scene = SkeletonUtils.clone(tpl.scene));
     // own materials so hit flash stays per mage
@@ -59,6 +59,15 @@ export class AnimeRig {
       const own = (mat) => { if (!seen.has(mat)) { const c = mat.clone(); seen.set(mat, c); if (c.emissive) this.flashMats.push({ m: c, base: c.emissive.clone() }); } return seen.get(mat); };
       m.material = Array.isArray(m.material) ? m.material.map(own) : own(m.material);
     });
+    // a model dressed in tools/character (materials Robe, Lining, Hat) wears this mage's colours and its own hat
+    const tone = (hex, l) => { const c = new THREE.Color(hex), h = {}; c.getHSL(h); return c.setHSL(h.h, h.s, Math.max(h.l, l)); }; // keep the hue, lift only very dark cloth
+    const dye = { Robe: tone(robe, 0.3), Lining: tone(accent, 0.2).multiplyScalar(0.75), Hat: tone(hat, 0.24) };
+    let dressed = false;
+    for (const mat of seen.values()) {
+      const c = dye[mat.name]; if (!c) continue;
+      if (mat.name === 'Hat') dressed = true;
+      mat.color?.copy(c); mat.shadeColorFactor?.copy(c).multiplyScalar(0.5);
+    }
     const raw = {};
     for (const [name, node] of Object.entries(tpl.bones)) { const n = scene.getObjectByName(node); if (n) raw[name] = { node: n }; }
     scene.updateMatrixWorld(true); // the normalized rig is built from the rest pose in the clone's own frame…
@@ -83,8 +92,23 @@ export class AnimeRig {
     }
     this.blinkT = 2 + Math.random() * 3; this.blink = 0; this.mouth = 0; this.hurt = 0;
     const inv = 1 / tpl.scale; // accessories hang off normalized bones, so they live in the model's own units
-    // witch hat: wide drooping brim, crown bent back at the tip (the mage silhouette)
-    const hatC = new THREE.Color(hat).lerp(new THREE.Color(0xffffff), 0.1), trimM = toon(trim, { emissive: new THREE.Color(trim).multiplyScalar(0.12) });
+    const trimM = toon(trim, { emissive: new THREE.Color(trim).multiplyScalar(0.12) });
+    if (!dressed) this.buildHat(hat, trimM, glowMat, inv);
+    // staff in the right hand; spells leave from its focus
+    const staff = new THREE.Group(), wood = toon(0x5a3a24);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 1.5, 8), wood); shaft.position.y = 0.3; staff.add(shaft); addOutline(shaft, 0.008);
+    const crook = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.011, 6, 20, Math.PI * 1.5), trimM); crook.position.y = 1.1; crook.rotation.z = -Math.PI * 0.25; staff.add(crook);
+    const focus = (this.staffTip = new THREE.Mesh(new THREE.OctahedronGeometry(0.042, 0), glowMat)); focus.scale.y = 1.6; focus.position.y = 1.1; staff.add(focus);
+    staff.scale.setScalar(inv); staff.position.set(-0.06 * inv, -0.015 * inv, 0.01 * inv);
+    staff.rotation.set(0, 0, -Math.PI / 2 + 0.4); // staff up along the hand's +X, which points up when the arm hangs
+    this.bone('rightHand')?.add(staff); this.staff = staff;
+    if (!dressed) this.buildCape(accent, inv);
+    for (const mat of [trimM, wood]) this.flashMats.push({ m: mat, base: mat.emissive.clone() });
+    this.frame = 0;
+  }
+  // fallbacks for an undressed model (e.g. a stock VRoid export): witch hat on the head, short cape from the shoulders
+  buildHat(hat, trimM, glowMat, inv) {
+    const hatC = new THREE.Color(hat).lerp(new THREE.Color(0xffffff), 0.1);
     const hood = toon(hatC), hatG = new THREE.Group();
     const brimGeo = lathe([[0.4, -0.04], [0.34, -0.018], [0.25, 0.004], [0.16, 0.012], [0.115, 0.014]], 40);
     { const P = brimGeo.attributes.position; for (let i = 0; i < P.count; i++) { const a = Math.atan2(P.getX(i), P.getZ(i)), r = Math.hypot(P.getX(i), P.getZ(i)); P.setY(i, P.getY(i) - Math.max(0, -Math.cos(a)) * (r - 0.115) * 0.18 + Math.sin(a * 3) * 0.008 * r); } brimGeo.computeVertexNormals(); }
@@ -96,24 +120,17 @@ export class AnimeRig {
     const charm = new THREE.Mesh(new THREE.OctahedronGeometry(0.028, 0), glowMat); charm.position.set(-0.08, 0.05, 0.1); hatG.add(charm);
     hatG.scale.setScalar(inv * 0.92); hatG.position.set(0, 0.155 * inv, -0.01 * inv); hatG.rotation.x = -0.12; this.bone('head')?.add(hatG);
     this.hat = hatG;
-    // staff in the right hand; spells leave from its focus
-    const staff = new THREE.Group(), wood = toon(0x5a3a24);
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 1.5, 8), wood); shaft.position.y = 0.3; staff.add(shaft); addOutline(shaft, 0.008);
-    const crook = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.011, 6, 20, Math.PI * 1.5), trimM); crook.position.y = 1.1; crook.rotation.z = -Math.PI * 0.25; staff.add(crook);
-    const focus = (this.staffTip = new THREE.Mesh(new THREE.OctahedronGeometry(0.042, 0), glowMat)); focus.scale.y = 1.6; focus.position.y = 1.1; staff.add(focus);
-    staff.scale.setScalar(inv); staff.position.set(-0.06 * inv, -0.015 * inv, 0.01 * inv);
-    staff.rotation.set(0, 0, -Math.PI / 2 + 0.4); // staff up along the hand's +X, which points up when the arm hangs
-    this.bone('rightHand')?.add(staff); this.staff = staff;
-    // short cape from the shoulders, fluttering like the classic coat's
+    hatG.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    this.flashMats.push({ m: hood, base: hood.emissive.clone() });
+  }
+  buildCape(accent, inv) {
     const capeGeo = new THREE.PlaneGeometry(0.46, 0.95, 6, 12); capeGeo.translate(0, -0.475, 0);
     { const P = capeGeo.attributes.position; for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), t = -y / 0.95; P.setX(i, x * (0.8 + t * 0.55)); if (t > 0.99) P.setY(i, y + (Math.abs(Math.round(x / 0.0766)) % 2) * 0.08); } }
     this.capeBase = capeGeo.attributes.position.array.slice();
     this.cape = new THREE.Mesh(capeGeo, toon(new THREE.Color(accent).multiplyScalar(0.9), { side: THREE.DoubleSide }));
     this.cape.castShadow = true; this.cape.scale.setScalar(inv); this.cape.position.set(0, 0.14 * inv, -0.11 * inv);
     (this.bone('upperChest') || this.bone('chest'))?.add(this.cape);
-    this.hat.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-    for (const mat of [hood, trimM, wood, this.cape.material]) this.flashMats.push({ m: mat, base: mat.emissive.clone() });
-    this.frame = 0;
+    this.flashMats.push({ m: this.cape.material, base: this.cape.material.emissive.clone() });
   }
   setMorph(name, v) { for (const b of this.morphs[name] || []) b.m.morphTargetInfluences[b.i] = v * b.w; }
   setFlash(k, color) { for (const f of this.flashMats) f.m.emissive.copy(f.base).lerp(color, k); }
@@ -147,9 +164,11 @@ export class AnimeRig {
     this.rot('head', -pitch * 0.3, 0, 0);
     this.scene.position.y = Math.abs(Math.sin(w)) * 0.04 * sp - sp * 0.02;
     this.humanoid.update(); this.constraints?.update();
-    const cp = this.cape.geometry.attributes.position;
-    for (let i = 0; i < cp.count; i++) { const y = this.capeBase[i * 3 + 1], x = this.capeBase[i * 3]; cp.setZ(i, this.capeBase[i * 3 + 2] - Math.sin(t * 4 + y * 4 + x * 3) * 0.04 * -y - -y * 0.35 * sp); }
-    cp.needsUpdate = true;
+    if (this.cape) {
+      const cp = this.cape.geometry.attributes.position;
+      for (let i = 0; i < cp.count; i++) { const y = this.capeBase[i * 3 + 1], x = this.capeBase[i * 3]; cp.setZ(i, this.capeBase[i * 3 + 2] - Math.sin(t * 4 + y * 4 + x * 3) * 0.04 * -y - -y * 0.35 * sp); }
+      cp.needsUpdate = true;
+    }
   }
   tipWorld(out = _v) { return this.staffTip.getWorldPosition(out); }
 }
