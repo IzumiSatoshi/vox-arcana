@@ -158,7 +158,7 @@ export class MageModel {
     const ap = []; for (let k = 0; k <= 16; k++) { const t = k / 16; ap.push(new THREE.Vector2(0.32 + Math.sin(Math.pow(t, 0.8) * Math.PI) * 0.26 - t * 0.12, t * 1.95)); }
     this.statusGeo = new THREE.LatheGeometry(ap, 32); this.statusMats = {}; this.statusEl = null; this.statusK = 0;
     this.statusMesh = new THREE.Mesh(this.statusGeo); this.statusMesh.visible = false; this.statusMesh.renderOrder = 3; root.add(this.statusMesh);
-    // anime mage: once the VRM has loaded, it replaces the primitive body (the far impostor and status visuals stay)
+    // Keep the detailed rig nearby; the simple mage silhouette is used by distant LOD.
     const tpl = MageModel.anime && animeMageReady();
     if (tpl) {
       this.anime = new AnimeRig(tpl, { robe, trim, accent, hat }, this.glowMat);
@@ -182,7 +182,8 @@ export class MageModel {
     for (const m of this.lodOutlines) m.visible = level < 1;
     for (const m of this.lodShadow) m.castShadow = level < 2;
     for (const m of this.lodSmall) m.visible = level < 2;
-    (this.anime ? this.anime.root : this.body).visible = level < 3; this.proxy.visible = level >= 3;
+    (this.anime ? this.anime.root : this.body).visible = level < 3;
+    this.proxy.visible = level >= 3;
   }
   setElement(el) { const c = new THREE.Color(ELEMENTS[el]?.color ?? 0xffffff); this.glowMat.color.copy(c).multiplyScalar(3.5); this.chantOrb.material.uniforms.uColor.value.copy(c); }
   handWorld(out = new THREE.Vector3()) { return (this.chant > 0.3 ? this.chantOrb : this.staffTip || this.handGem).getWorldPosition(out); }
@@ -194,10 +195,10 @@ export class MageModel {
     this.castAnim = Math.max(0, this.castAnim - dt * 3.5);
     this.chant += ((s.chanting ? 1 : 0) - this.chant) * Math.min(1, dt * 8);
     const w = this.walk;
-    if (this.anime) {
+    if (this.anime && this.lodLevel < 3) {
       this.anime.pose(dt, { walk: w, sp, chant: this.chant, cast: this.castAnim, pitch: s.pitch || 0, hit: hf, skip: this.lodLevel >= 2 && (this._skip = !this._skip) });
       this.anime.orbAt(this.chantOrb.position); // the spell gathers at the staff's focus
-    } else {
+    } else if (!this.anime) {
     for (const L of this.legs) {
       const ph = w + (L.s > 0 ? Math.PI : 0);
       L.hip.rotation.x = Math.sin(ph) * 0.65 * sp;

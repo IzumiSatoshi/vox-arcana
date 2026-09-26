@@ -124,11 +124,12 @@ reactions and statuses, and switches voice recognition to `ja-JP`. The rival als
 
 | | |
 |---|---|
-| **Hold F / Right-click** | chant (speak), release the latest Jev-recognized spell (instant mode defaults on) |
+| **Hold Right-click** | chant (speak), release the latest Jev-recognized spell (instant mode defaults on) |
 | **Enter** | type an incantation instead (a channel time scales with its length) |
 | **Left-click** | mana bolt (uses your last element) |
-| WASD / Space (hold to glide) / Shift / E / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
+| WASD / Space (hold to glide) / Shift / F / Ctrl | move / jump (ascend while flying) / sprint / dash / descend while flying |
 | Esc | pause |
+| Battle royale: E / I / Q | loot or open chest / inventory (pauses the match) / activate rune |
 | Battle royale: Space (on the ferry) · 1 / 2 / 3 · Tab · M · Enter (after a match) | jump off · heal / mana / shield potion · live standings · big map · play again |
 
 Optional **hands-free mode** (Settings) casts whenever you say something that contains a spell.
@@ -285,8 +286,8 @@ element reacts with it:
     | Alchemist Belt | carry 3 → 7 of each potion (2 without one) | Distilled: potions 50% stronger |
     | Rune (Q) | cooldown ×1 → ×0.5 | Swift |
 
-  - **Picking up**: strict upgrades are taken by walking over them. Anything else (a third element, a different rune) needs **R**, and the replaced piece drops. Potions go into slots **1** (heal), **2** (mana) and **3** (armor, or a shield if you have no mantle).
-  - **Chests** (**R** to open): wooden (2 items and usually a potion), iron-bound (3 better items) and Arcane Vaults (4 items, at least one Legendary). Bots walk in through doors to reach them.
+  - **Picking up**: strict upgrades are taken by walking over them. Anything else (a third element, a different rune) needs **E**, and the replaced piece drops. Potions go into slots **1** (heal), **2** (mana) and **3** (armor, or a shield if you have no mantle).
+  - **Chests** (**E** to open): wooden (2 items and usually a potion), iron-bound (3 better items) and Arcane Vaults (4 items, at least one Legendary). Bots walk in through doors to reach them.
   - **Mana shrines**: stone circles across the island restore mana and health while you stand inside. Rivals fight over them.
   - **Caches**: once per storm phase an arcane cache falls inside the next circle with a Legendary and three Epic-or-better items.
   - **The storm**: a violet storm wall shrinks in six phases, and its damage grows each phase. The final storm keeps getting stronger until one mage is left.

@@ -109,8 +109,8 @@ export class Hud {
     g.beginPath(); g.moveTo(W / 2, W / 2 - 8); g.lineTo(W / 2 + 6, W / 2 + 6); g.lineTo(W / 2, W / 2 + 2); g.lineTo(W / 2 - 6, W / 2 + 6); g.closePath(); g.fill();
     g.shadowBlur = 0;
   }
-  // battle royale radar: foes show within 40 m, or within 80 m while they chant (your voice gives you away)
-  hiddenFoe(c, p) { return !!this.g.royale && c.owner !== p && !(p.team && c.team === p.team) && c.pos.distanceTo(p.pos) > (c.chanting ? 80 : 40); }
+  // Battle royale map and compass identify allies only; enemies must be spotted in the world.
+  hiddenFoe(c, p) { return !!this.g.royale && c.owner !== p && !(p.team && c.team === p.team); }
   updateCompass(p) {
     const W = this.compassWidth;
     const heading = ((-p.yaw * 180) / Math.PI % 360 + 360) % 360;
@@ -153,11 +153,12 @@ export class Hud {
     this.hitm = Math.max(0, this.hitm - dt * 5); setStyle($('hitmarker'), 'opacity', this.hitm);
     this.updateDirs(dt);
     this.updateCompass(p);
-    if ((this._mmT = (this._mmT || 0) + 1) % 2 === 0) this.drawMinimap(p); // 30 Hz is plenty
+    this._mmT = (this._mmT || 0) - dt;
+    if (this._mmT <= 0) { this.drawMinimap(p); this._mmT = this.g.royale ? 0.1 : 1 / 30; }
     this.updatePlates(cam);
     // chant bubble over the chanting enemy
     const bub = $('bubble');
-    const chanter = g.combatants.find((c) => c !== p && c.chanting && c.chantText && c.alive);
+    const chanter = !g.royale && g.combatants.find((c) => c !== p && c.chanting && c.chantText && c.alive);
     const sp = chanter && this.project(chanter.pos.clone().setY(chanter.pos.y + 2.9), cam);
     if (sp) { bub.classList.remove('hidden'); bub.style.left = sp.x + 'px'; bub.style.top = sp.y + 'px'; bub.textContent = '“' + chanter.chantText + '”'; }
     else bub.classList.add('hidden');
@@ -175,6 +176,11 @@ export class Hud {
   }
   updatePlates(cam) {
     const g = this.g, box = $('nameplates'), seen = new Set();
+    if (g.royale) {
+      for (const el of this.plates.values()) el.remove();
+      this.plates.clear();
+      return;
+    }
     for (const c of g.combatants) {
       if (c === g.player || !c.alive) continue;
       seen.add(c);

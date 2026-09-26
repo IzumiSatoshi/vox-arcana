@@ -7,7 +7,7 @@
 // buildings (wooden, iron-bound, and gilded vaults at the top of the keep and the spire); loose loot lies everywhere.
 // Items (rules in royale-rules.js): tiered gear Common → Legendary: two grimoires (element damage), an amulet (mana),
 // a ward mantle (armor), boots (speed), an alchemist belt (potion slots) and an active rune (Q); potions 1 · 2 · 3.
-// Strict upgrades are picked up by walking over them; trade-offs wait for the interact key (R). The fallen drop it all.
+// Strict upgrades are picked up by walking over them; trade-offs wait for the interact key (E). The fallen drop it all.
 // Duos: a teammate ally, no friendly fire, revive wisps.
 // Bots loot (walking in through doors), open chests, drink, use runes, recover at shrines, revive and outrun the storm.
 import * as THREE from 'three';
@@ -95,7 +95,7 @@ const itemColor = (k) => (k.type === 'potion' ? POTIONS[k.id].color : TIERS[k.ti
 // How-to page: the tiers, the slots and the potions
 export function royaleGuide(J) {
   const L = J ? 1 : 0, rows = [];
-  rows.push([TIERS.map((q) => `<span style="color:${hex(q.color)}">${q[J ? 'ja' : 'en']}</span>`).join(' › '), J ? '装備はすべてこの5段階。上位の装備は歩くだけで拾い、判断が要るものは <b>R</b> で交換' : 'every piece of gear rolls one of five tiers; walk over a strict upgrade to take it, press <b>R</b> to swap anything else', 0xffffff]);
+  rows.push([TIERS.map((q) => `<span style="color:${hex(q.color)}">${q[J ? 'ja' : 'en']}</span>`).join(' › '), J ? '装備はすべてこの5段階。上位の装備は歩くだけで拾い、判断が要るものは <b>E</b> で交換' : 'every piece of gear rolls one of five tiers; walk over a strict upgrade to take it, press <b>E</b> to swap anything else', 0xffffff]);
   rows.push([GEAR.focus[J ? 'ja' : 'en'] + ' ×2', J ? 'その属性の魔法ダメージ +10〜50%' : '+10–50% damage with its element (you carry two)', 0xbd6bff]);
   rows.push([GEAR.amulet[J ? 'ja' : 'en'], J ? '最大マナとマナ回復' : 'max mana and mana regen', 0x3ea8ff]);
   rows.push([GEAR.mantle[J ? 'ja' : 'en'], J ? 'HPの前に削れるアーマー（守護薬で回復）' : 'armor that soaks damage before HP (Aegis Draughts refill it)', 0x5ee07a]);
@@ -104,7 +104,7 @@ export function royaleGuide(J) {
   rows.push([GEAR.rune[J ? 'ja' : 'en'] + ' [Q]', Object.values(RUNES).map((r) => r[J ? 'ja' : 'en']).join(' · '), 0x9fd8ff]);
   rows.push([J ? 'レジェンダリー' : 'Legendary', Object.values(GEAR).map((g) => g.perk[L].split(':')[0].split('：')[0]).join(' · '), 0xffa834]);
   rows.push(...Object.values(POTIONS).map((p) => ['[' + p.key + '] ' + p[J ? 'ja' : 'en'], J ? { '1': 'HP+220', '2': 'マナ+90', '3': 'アーマー+140（無ければシールド）' }[p.key] : { '1': '+220 HP', '2': '+90 mana', '3': '+140 armor (a shield without a mantle)' }[p.key], p.color]));
-  rows.push([J ? '宝箱' : 'Chests', J ? '<b>R</b>で開ける。木箱 < 鉄の宝箱 < 城と塔の頂の秘宝の櫃' : 'press <b>R</b> to open: wooden < iron-bound < the vaults atop the keep and the spire', 0xc8a46a]);
+  rows.push([J ? '宝箱' : 'Chests', J ? '<b>E</b>で開ける。木箱 < 鉄の宝箱 < 城と塔の頂の秘宝の櫃' : 'press <b>E</b> to open: wooden < iron-bound < the vaults atop the keep and the spire', 0xc8a46a]);
   rows.push([J ? 'マナの祠' : 'Mana Shrine', J ? '石の環の中でマナと体力が回復（地図の青い丸）' : 'stand in the stone circle to restore mana and health (blue rings on the map)', 0x6fd8ff]);
   return rows.map(([n, d, c]) => '<li><b style="color:' + hex(c) + '">' + n + '</b> ' + d + '</li>').join('');
 }
@@ -489,15 +489,15 @@ export class Royale {
         it.grp.position.set(it.pos.x, it.pos.y + bob, it.pos.z); it.body.rotation.y = Math.atan2(cam.x - it.pos.x, cam.z - it.pos.z) + Math.sin(this.t * 0.9 + it.seed) * 0.55;
         for (const ch of it.body.children) { if (ch.userData.spin) ch.rotation.y += dt * ch.userData.spin; if (ch.userData.orbit) ch.rotation.set(Math.sin(this.t * 1.3 + it.seed) * 0.6, this.t * 1.7, 0); }
         const k = it.kind.tier || 0;
-        if (Math.random() < 0.04 + k * 0.03) { const a = rand(0, TAU); g.fx.glow.emit({ x: it.pos.x + Math.cos(a) * 0.5, y: it.pos.y + 0.5, z: it.pos.z + Math.sin(a) * 0.5, vy: rand(0.6, 1.4 + k * 0.4), life: rand(0.8, 1.4), size: 0.1 + k * 0.03, size1: 0.02, color: it.col, alpha: 1, drag: 0.3, frame: 1 }); } // motes rising off it (more for rarer)
-        if (k >= 4 && Math.random() < 0.3) g.fx.lights.request?.(it.grp.position, it.col, 90, 6);
+        if (d2 < 35 * 35 && Math.random() < dt * (2.4 + k * 1.8)) { const a = rand(0, TAU); g.fx.glow.emit({ x: it.pos.x + Math.cos(a) * 0.5, y: it.pos.y + 0.5, z: it.pos.z + Math.sin(a) * 0.5, vy: rand(0.6, 1.4 + k * 0.4), life: rand(0.8, 1.4), size: 0.1 + k * 0.03, size1: 0.02, color: it.col, alpha: 1, drag: 0.3, frame: 1 }); } // motes only read at close range
+        if (d2 < 35 * 35 && k >= 4 && Math.random() < dt * 18) g.fx.lights.request?.(it.grp.position, it.col, 90, 6);
       }
       if (mid) { it.halo.position.set(it.pos.x, it.pos.y + 0.06, it.pos.z); it.halo.rotation.y = this.t * 0.5 + it.seed; it.halo.scale.setScalar((it.kind.type === 'potion' ? 0.7 : 1) * (1 + Math.sin(this.t * 3 + it.seed) * 0.06)); }
       if (it.beam) it.beam.position.set(it.pos.x, it.pos.y, it.pos.z);
       if (it.age < 0.6 || it.vel) continue;
       for (const c of g.combatants) {
         if (!c.alive || c.decoy || !c.inv || c.dropping || (it.noAuto === c && it.noAutoT > 0)) continue;
-        if (Math.hypot(c.pos.x - it.pos.x, c.pos.z - it.pos.z) > 1.7 || Math.abs(c.pos.y - it.pos.y) > 2.5) continue;
+        if ((c.pos.x - it.pos.x) ** 2 + (c.pos.z - it.pos.z) ** 2 > 1.7 ** 2 || Math.abs(c.pos.y - it.pos.y) > 2.5) continue;
         if (autoTake(c, it.kind) || (c.brain && isUpgrade(c, it.kind))) { this.pickup(c, it); break; }
       }
     }
@@ -561,13 +561,13 @@ export class Royale {
     if (key === this._lookKey) return; this._lookKey = key;
     if (!best) { lookEl.classList.remove('show'); return; }
     let h;
-    if (best.lid) { const C = CHEST[best.tier]; h = `<b style="color:${hex(C.glow)}">${C[ja() ? 'ja' : 'en']}</b>${reach ? `<i><kbd>R</kbd> ${t('royale.open')}</i>` : ''}`; }
+    if (best.lid) { const C = CHEST[best.tier]; h = `<b style="color:${hex(C.glow)}">${C[ja() ? 'ja' : 'en']}</b>${reach ? `<i><kbd>E</kbd> ${t('royale.open')}</i>` : ''}`; }
     else {
       const k = best.kind, col = hex(itemColor(k)), rep = replaces(p, k);
       h = `${k.type === 'potion' ? '' : `<small style="color:${col}">${tierName(k)}</small>`}<b style="color:${col}">${itemName(k)}</b><span>${itemStat(k)}</span>`;
       if (rep === false) h += `<i class="dim">${t(k.type === 'potion' ? 'royale.full' : 'royale.worse')}</i>`;
-      else if (rep) h += `<i class="${isUpgrade(p, k) ? 'up' : ''}">${reach ? '<kbd>R</kbd> ' : ''}${t('royale.swap')} <b style="color:${hex(TIERS[rep.tier].color)}">${tierName(rep)} ${itemName(rep)}</b></i>`;
-      else if (reach) h += `<i><kbd>R</kbd> ${t('royale.take')}</i>`;
+      else if (rep) h += `<i class="${isUpgrade(p, k) ? 'up' : ''}">${reach ? '<kbd>E</kbd> ' : ''}${t('royale.swap')} <b style="color:${hex(TIERS[rep.tier].color)}">${tierName(rep)} ${itemName(rep)}</b></i>`;
+      else if (reach) h += `<i><kbd>E</kbd> ${t('royale.take')}</i>`;
     }
     lookEl.innerHTML = h; lookEl.classList.add('show');
   }
@@ -740,6 +740,16 @@ export class Royale {
     setTimeout(() => { if (g.royale === this) g.endToMenu(); }, 20000);
   }
   // HUD: the equipment bar (tiered slots), potions, rune cooldown, ally panel, round line
+  updateInventory() {
+    const p = this.g.player, G = p.gear || {}, L = ja() ? 'ja' : 'en';
+    const slots = [['focus', G.focus?.[0]], ['focus', G.focus?.[1]], ...['amulet', 'mantle', 'boots', 'belt', 'rune'].map(type => [type, G[type]])];
+    document.getElementById('inventory-gear').innerHTML = slots.map(([type, it], i) =>
+      `<article class="inventory-slot"${it ? ` style="--c:${hex(itemColor(it))}"` : ''}><small>${GEAR[type][L]}${type === 'focus' ? ' ' + (i + 1) : ''}${type === 'rune' ? ' · Q' : ''}</small><strong>${it ? itemName(it) : t('inv.empty')}</strong><span>${it ? tierName(it) + ' · ' + itemStat(it) : '—'}</span></article>`
+    ).join('');
+    document.getElementById('inventory-potions').innerHTML = Object.entries(POTIONS).map(([id, P]) =>
+      `<article class="inventory-slot" style="--c:${hex(P.color)}"><small>${P.key} · ${P[L]}</small><strong>${p.inv?.[id] || 0} / ${p.potionCap}</strong><span>${itemStat({ type: 'potion', id })}</span></article>`
+    ).join('');
+  }
   updateHud(force = false) {
     const g = this.g, p = g.player; this.hudT = 0.25;
     const top = this.alive().sort((x, y) => y.kills - x.kills)[0]; this.leader = top && top.kills >= 2 ? top : null; // the kill leader wears a crown
@@ -767,7 +777,7 @@ export class Royale {
     const f = G.focus || [];
     const rune = G.rune ? slot(G.rune, 'rune', `<kbd>Q</kbd><span class="cd" id="br-rune-cd"></span>`) : slot(null, 'rune', '<kbd>Q</kbd>');
     const pots = Object.entries(POTIONS).map(([id, P2]) => `<div class="br-pot${p.inv?.[id] ? '' : ' empty'}" style="--c:${hex(P2.color)}"><kbd>${P2.key}</kbd><span>${P2.icon}</span><b>${p.inv?.[id] || 0}<small>/${p.potionCap}</small></b></div>`).join('');
-    box.innerHTML = `<div class="br-gear">${slot(f[0], 'focus')}${slot(f[1], 'focus')}<i class="sep"></i>${slot(G.amulet, 'amulet')}${slot(G.mantle, 'mantle')}${slot(G.boots, 'boots')}${slot(G.belt, 'belt')}<i class="sep"></i>${rune}</div><div class="br-pots">${pots}</div>`;
+    box.innerHTML = `<span class="inventory-hint">I · ${t('inv.title')}</span><div class="br-gear">${slot(f[0], 'focus')}${slot(f[1], 'focus')}<i class="sep"></i>${slot(G.amulet, 'amulet')}${slot(G.mantle, 'mantle')}${slot(G.boots, 'boots')}${slot(G.belt, 'belt')}<i class="sep"></i>${rune}</div><div class="br-pots">${pots}</div>`;
     this.updateRuneCd(p);
   }
   // minimap overlay: current storm edge + next circle (hud.drawMinimap calls this inside its rotated frame)

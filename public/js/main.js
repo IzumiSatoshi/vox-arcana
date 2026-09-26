@@ -321,11 +321,13 @@ class Game {
   }
   showScreen(id) {
     if (id === 'menu') void this.refreshVoiceDownload?.();
-    for (const s of ['menu', 'settings', 'howto', 'pause', 'duel-setup', 'royale-setup']) $(s).classList.toggle('hidden', s !== id);
-    this.paused = id === 'pause' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
+    for (const s of ['menu', 'settings', 'howto', 'pause', 'inventory', 'duel-setup', 'royale-setup']) $(s).classList.toggle('hidden', s !== id);
+    this.paused = id === 'pause' || id === 'inventory' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
     audio.ambience?.(!this.paused);
     if (this.paused || this.mode === 'menu') {
+      this.keys = {}; this.mouse.lmb = false;
+      this.voice.cancelChant();
       this.pendingJevCast = null;
       this.grace = null; this.chanting = false;
       if (this.player) this.player.chanting = false;
@@ -693,6 +695,7 @@ class Game {
   // ------------------------------------------------------------ input
   bindInput() {
     const canvas = $('c');
+    $('inventory-close').addEventListener('click', () => this.toggleInventory());
     addEventListener('keydown', (e) => {
       if (this.typing) {
         if (e.code === 'Enter' && !e.isComposing) { const tx = $('type-input').value.trim(); this.closeTyping(); if (tx) this.typedCast(tx); }
@@ -700,28 +703,30 @@ class Game {
         return;
       }
       if (this.mode === 'menu') return;
+      if (e.code === 'KeyI' && this.royale && !e.repeat) { e.preventDefault(); this.toggleInventory(); return; }
+      if (e.code === 'Escape' && !$('inventory').classList.contains('hidden')) { this.toggleInventory(); return; }
+      if (e.code === 'Tab' && !$('inventory').classList.contains('hidden')) { e.preventDefault(); $('inventory-close').focus(); return; }
+      if (this.paused) return;
       this.keys[e.code] = true;
       if (e.repeat) return;
       if (e.code === 'Space' && this.player?.onShip) this.royale?.jump(this.player);
-      if (e.code === 'KeyF' || e.code === 'KeyV') this.beginChant();
       if (e.code === 'Enter' && this.royale?.over) { e.preventDefault(); this.startMode('royale'); return; } // play again
       if (e.code === 'Enter') { e.preventDefault(); this.openTyping(); }
-      if (e.code === 'KeyE') this.dashPlayer();
+      if (e.code === 'KeyF') this.dashPlayer();
       if (e.code === 'KeyJ') this.hud.toggleJevView();
       if (e.code === 'KeyT' && this.mode === 'practice') { const b = this.bots[0]; if (b?.brain) { b.brain.dummy = !b.brain.dummy; this.hud.banner('', t(b.brain.dummy ? 'train.calm' : 'train.fight'), 1.8); } } // the golem fights back (or not)
       if (e.code === 'KeyM') { this.hud.bigMap = !this.hud.bigMap; $('minimap-wrap').classList.toggle('big', this.hud.bigMap); } // whole-island map
       if (this.royale && this.player && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.royale.drink(this.player, ['hp', 'mana', 'shield'][+e.code.slice(5) - 1]);
-      if (e.code === 'KeyR' && this.royale && this.player) this.royale.interact(this.player); // take / swap loot, open chests
+      if (e.code === 'KeyE' && this.royale && this.player) this.royale.interact(this.player); // take / swap loot, open chests
       if (e.code === 'KeyQ' && this.royale && this.player && !this.royale.useRune(this.player) && this.player.gear?.rune) audio.ui?.('click');
       if (e.code === 'Tab') { e.preventDefault(); if (this.royale && !this.royale.over) this.royale.showResults(); }
     });
     addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
-      if (e.code === 'KeyF' || e.code === 'KeyV') this.endChant();
       if (e.code === 'Tab' && this.royale && !this.royale.over && this.player?.alive) document.getElementById('br-results')?.classList.add('hidden'); // hold Tab: standings
     });
     canvas.addEventListener('mousedown', (e) => {
-      if (this.mode === 'menu') return;
+      if (this.mode === 'menu' || this.paused || this.typing) return;
       if (document.pointerLockElement !== canvas) { this.lock(); return; }
       if (e.button === 0) this.mouse.lmb = true;
       if (e.button === 2) this.beginChant();
@@ -736,6 +741,18 @@ class Game {
         this.showScreen('pause');
       }
     });
+  }
+  toggleInventory() {
+    if (!this.royale || !this.player?.alive || this.royale.over) return;
+    const open = !$('inventory').classList.contains('hidden');
+    if (this.paused && !open) return;
+    if (open) { this.showScreen(null); this.lock(); }
+    else {
+      this.royale.updateInventory();
+      this.showScreen('inventory');
+      document.exitPointerLock?.();
+      $('inventory-close').focus();
+    }
   }
   openTyping() { this.typing = true; $('type-box').classList.remove('hidden'); const i = $('type-input'); i.value = ''; setTimeout(() => i.focus(), 0); this.keys = {}; }
   closeTyping() { this.typing = false; $('type-box').classList.add('hidden'); $('type-input').blur(); }
@@ -1045,10 +1062,16 @@ class Game {
       const camD = Array.isArray(eye) ? Math.hypot(c.pos.x - eye[0], c.pos.y - eye[1], c.pos.z - eye[2]) : c.pos.distanceTo(eye);
       c.model.lod?.(camD > 62 ? 3 : camD > 40 ? 2 : camD > 22 ? 1 : 0);
       if (c.hitFlash > 0) c.hitFlash = Math.max(0, c.hitFlash - dt * 5);
-      c.model.update(dt, { hit: c.hitFlash || 0, speed: Math.hypot(c.vel.x, c.vel.z), chanting: c.chanting, pitch: c.pitch, frozen: c.frozen > 0, shield: c.shield, shieldEl: c.shieldEl, aura: c.aura?.el });
+      // Physics and AI stay at full rate. Only distant cosmetic animation is sampled less often.
+      c.modelDt = (c.modelDt || 0) + dt;
+      const visualInterval = this.royale && camD > 40 ? (camD > 140 ? 0.2 : 1 / 15) : 0;
+      if (c.modelDt < visualInterval) continue;
+      const visualDt = c.modelDt; c.modelDt = 0;
+      c.model.update(visualDt, { hit: c.hitFlash || 0, speed: Math.hypot(c.vel.x, c.vel.z), chanting: c.chanting, pitch: c.pitch, frozen: c.frozen > 0, shield: c.shield, shieldEl: c.shieldEl, aura: c.aura?.el });
       // afflictions burn brightest; enhancements glow softer
       const stEl = c.dots[0]?.el || Object.keys(c.enh)[0] || null;
-      c.model.status(stEl, c.dots.length ? 0.9 : 0.45, dt);
+      c.model.status(stEl, c.dots.length ? 0.9 : 0.45, visualDt);
+      if (this.royale && camD > 60) continue;
       if (c.chanting && Math.random() < 0.6) this.fx.element(c.brain?.favEl || 'arcane', c.model.handWorld(new THREE.Vector3()), { count: 1, speed: 0.5, size: 0.12, life: 0.5 });
       // footfall dust when running on the ground (earthy on paths, pale on grass)
       const run = Math.hypot(c.vel.x, c.vel.z);
