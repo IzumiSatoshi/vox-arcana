@@ -40,10 +40,22 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
 ## Character model
 
 Rival mages are anime-style VRM characters (Settings → **Anime mages**; off falls back to the classic
-primitive mage). The game loads `public/models/mage.vrm` once and clones it for every mage, adding the
-witch hat, staff and cape in code. To use your own character, export a **VRM 1.0** from VRoid Studio and
-replace that file. Blinking, the chanting mouth and the casting poses come from the standard VRM humanoid
-bones and expressions. The bundled file is a pixiv sample used as a placeholder; see
+primitive mage). The game loads `public/models/mage.vrm` once and clones it for every mage; each mage's
+colours tint the model's `Robe`, `Lining` and `Hat` materials, and the staff is added in code.
+
+The mage outfit is modelled by a script in headless Blender, so it can be rebuilt or restyled:
+
+```bash
+pip install bpy==4.2.0            # Blender as a Python module (Python 3.11), or use a Blender 4.2+ install
+# install the VRM Add-on for Blender (https://github.com/saturday06/VRM-Addon-for-Blender) and enable io_scene_vrm
+# the bundled body: https://github.com/pixiv/three-vrm/raw/dev/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm
+python tools/character/build_mage_outfit.py -- VRM1_Constraint_Twist_Sample.vrm public/models/mage.vrm
+```
+
+Run it on an undressed model: the script strips `Tops*`/`Bottoms*` materials and adds a new outfit.
+
+It fits the robe to any VRM 1.0 humanoid in T-pose (for example a VRoid Studio export). A model without
+a `Hat` material gets a code-built hat and cape instead. The bundled body is a pixiv sample; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
