@@ -437,6 +437,8 @@ function cloudMaterial(seed, tall, haze) {
   });
 }
 
+// ground cover scale: grass and meadow flowers were sized for the old bulky mage and made people read doll-sized
+const GRASS_H = 0.6, GRASS_W = 0.7, FLOWER_S = 0.55;
 export class World {
   constructor(scene, quality = 1) {
     this.scene = scene; this.quality = quality;
@@ -1503,8 +1505,8 @@ export class World {
         const ang = Math.random() * TAU, d = Math.random() * 0.35, x = cx + Math.cos(ang) * d, z = cz + Math.sin(ang) * d;
         p.set(x, this.gridH(x, z) - 0.04, z);
         e.set((Math.random() - 0.5) * 0.4 + Math.sin(ang) * d * 0.8, Math.random() * TAU, (Math.random() - 0.5) * 0.4 - Math.cos(ang) * d * 0.8); q.setFromEuler(e);
-        const h = tall * (0.6 + Math.random() * 0.6);
-        sc.set(0.8 + Math.random() * 0.6, h, 0.8 + Math.random() * 0.4);
+        const h = tall * (0.6 + Math.random() * 0.6) * GRASS_H;
+        sc.set((0.8 + Math.random() * 0.6) * GRASS_W, h, (0.8 + Math.random() * 0.4) * GRASS_W);
         m.compose(p, q, sc);
         c.setHSL(hue + (Math.random() - 0.5) * 0.03, 0.42 + Math.random() * 0.12, 0.36 + Math.random() * 0.12);
         if (Math.random() < 0.012) c.setHSL([0.0, 0.12, 0.6, 0.8, 0.95][Math.floor(Math.random() * 5)], 0.8, 0.72);
@@ -1548,7 +1550,7 @@ export class World {
     const proto = new THREE.InstancedMesh(bladeGeo, mat, N), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color();
     for (let k = 0; k < N; k++) {
       p.set(Math.random() * T, 0, Math.random() * T); e.set((Math.random() - 0.5) * 0.5, Math.random() * TAU, (Math.random() - 0.5) * 0.5); q.setFromEuler(e);
-      const h = 0.35 + Math.random() * 0.4; sc.set(0.8 + Math.random() * 0.5, h, 0.8 + Math.random() * 0.4);
+      const h = (0.35 + Math.random() * 0.4) * GRASS_H; sc.set((0.8 + Math.random() * 0.5) * GRASS_W, h, (0.8 + Math.random() * 0.4) * GRASS_W);
       proto.setMatrixAt(k, m4.compose(p, q, sc));
       c.setHSL(0.24 + Math.random() * 0.05, 0.42 + Math.random() * 0.12, 0.34 + Math.random() * 0.12); proto.setColorAt(k, c);
     }
@@ -1564,7 +1566,7 @@ export class World {
       const FN = Math.round(N * 0.22), fmat = meadowMaterial(true, { tex, n, size }), fp = new THREE.InstancedMesh(this.flowerGeo, fmat, FN);
       for (let k = 0; k < FN; k++) {
         p.set(Math.random() * T, 0, Math.random() * T); e.set((Math.random() - 0.5) * 0.3, Math.random() * TAU, (Math.random() - 0.5) * 0.3); q.setFromEuler(e);
-        const s2 = 0.75 + Math.random() * 0.5; sc.set(s2, s2 * (0.75 + Math.random() * 0.4), s2);
+        const s2 = (0.75 + Math.random() * 0.5) * FLOWER_S; sc.set(s2, s2 * (0.75 + Math.random() * 0.4), s2);
         fp.setMatrixAt(k, m4.compose(p, q, sc)); fp.setColorAt(k, c.setRGB(Math.random(), 1, 1));
       }
       for (let k = 0; k < 25; k++) {
@@ -1602,7 +1604,7 @@ export class World {
         const d = Math.sqrt(Math.random()) * 1.6, b = Math.random() * TAU, x = cx + Math.cos(b) * d, z = cz + Math.sin(b) * d;
         if ((Math.abs(Math.sin(Math.atan2(z, x) * 2)) < 0.11 && Math.hypot(x, z) < 100) || this.gridUp(x, z) < 0.8) continue; // off the dirt paths and cliffs
         p.set(x, this.heightAt(x, z) - 0.03, z); e.set((Math.random() - 0.5) * 0.35, Math.random() * TAU, (Math.random() - 0.5) * 0.35); q.setFromEuler(e);
-        const s = 0.7 + Math.random() * 0.6; sc.set(s, s * (0.7 + Math.random() * 0.5), s);
+        const s = (0.7 + Math.random() * 0.6) * FLOWER_S; sc.set(s, s * (0.7 + Math.random() * 0.5), s);
         list.push([m.compose(p, q, sc).clone(), c.setHSL(hu + (Math.random() - 0.5) * 0.03, sa, li + (Math.random() - 0.5) * 0.08).clone()]);
       }
     }
