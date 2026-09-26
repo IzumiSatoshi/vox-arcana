@@ -4,7 +4,7 @@ import { energyMaterial, barrierMaterial, addOutline, TIME } from './shaders.js'
 import { MagicCircle } from './magicCircle.js';
 import { ELEMENTS } from './elements.js';
 import { elementKit, surfaceMaterial } from './vfxkit.js';
-import { AnimeRig, animeMageReady } from './anime-mage.js';
+import { AnimeRig, FirstPersonArms, animeMageReady } from './anime-mage.js';
 
 const cyl = (rt, rb, h, seg = 20) => { const g = new THREE.CylinderGeometry(rt, rb, h, seg); g.translate(0, -h / 2, 0); return g; }; // hangs down from its pivot
 
@@ -268,7 +268,7 @@ export class ViewModel {
     // gloved hand wrapped round the shaft, and the coat sleeve with its gilt cuff leading off-screen
     const glove = new THREE.MeshStandardMaterial({ color: 0x3b2a36, roughness: 0.6, metalness: 0.05, envMap: _env, envMapIntensity: 0.35 });
     const sleeveM = new THREE.MeshStandardMaterial({ color: 0x2c3f78, roughness: 0.85, envMap: _env, envMapIntensity: 0.2 });
-    const hand = new THREE.Group(); hand.position.y = -0.075; staff.add(hand);
+    const hand = (this.gloveHand = new THREE.Group()); hand.position.y = -0.075; staff.add(hand);
     const palm = new THREE.Mesh(new THREE.SphereGeometry(0.042, 16, 12), glove); palm.scale.set(1.1, 1.5, 1.0); palm.position.set(0.03, 0, 0.012); hand.add(palm);
     for (let k = 0; k < 4; k++) { // curled fingers: partial tori hugging the shaft
       const f = new THREE.Mesh(new THREE.TorusGeometry(0.031, 0.0115, 8, 16, Math.PI * 1.25), glove);
@@ -299,6 +299,7 @@ export class ViewModel {
     this.light = new THREE.PointLight(0x9fd8ff, 0.3, 2.5, 2); this.light.position.y = 0.11; head.add(this.light);
     this.group.traverse((m) => { if (m.isMesh) m.renderOrder = 20; });
     this.bob = 0; this.kick = 0; this.flick = 0; this.charge = 0; this.color = new THREE.Color(0x9fd8ff);
+    this.camera = camera; this.arms = null;
   }
   setElement(el) {
     const c = new THREE.Color(ELEMENTS[el]?.color ?? 0x9fd8ff); this.color.copy(c);
@@ -313,7 +314,7 @@ export class ViewModel {
     if (this.sigil) { this.sigil.dispose(); this.sigil = null; }
     if (tier > 0) { this.sigil = new MagicCircle({ seed: 3, tier, color: this.color, radius: 0.09 + tier * 0.012, intensity: 1.4 }); this.sigil.group.position.set(0, 0.11, -0.12); this.sigil.group.traverse((m) => { if (m.isMesh) m.renderOrder = 21; }); this.head.add(this.sigil.group); }
   }
-  set visible(v) { this.group.visible = v; }
+  set visible(v) { this.group.visible = v; if (this.arms) this.arms.visible = v && MageModel.anime; }
   tipWorld(out = new THREE.Vector3()) { return this.crystal.getWorldPosition(out); }
   update(dt, { speed = 0, chanting = false, charge = 0, grounded = true, voiceLevel = 0 }) {
     const t = TIME.value;
@@ -323,7 +324,7 @@ export class ViewModel {
     this.charge += ((chanting ? 1 : 0) - this.charge) * Math.min(1, dt * 8);
     const b = grounded ? Math.min(1, speed / 7) : 0.2, c = this.charge, k = Math.sin(Math.min(1, this.kick) * Math.PI * 0.5), f = this.flick;
     const sway = Math.sin(t * 1.4) * 0.004;
-    this.group.position.set(0.3 - c * 0.12 + Math.cos(this.bob) * 0.012 * b, -0.36 + c * 0.1 + Math.abs(Math.sin(this.bob)) * 0.02 * b + sway - k * 0.03, -0.62 - k * 0.14 - f * 0.06);
+    this.group.position.set(0.3 - c * 0.12 + Math.cos(this.bob) * 0.012 * b, -0.36 + c * 0.1 + Math.abs(Math.sin(this.bob)) * 0.02 * b + sway - k * 0.03, -0.62 - k * 0.14 - f * 0.06 + (this.arms?.root.visible ? 0.06 : 0));
     this.group.rotation.set(0.12 + c * 0.25 - k * 0.55 - f * 0.25, -0.1 + c * 0.15, -0.1 - c * 0.12 + Math.sin(t * 2) * 0.01);
     this.crystal.rotation.y += dt * (1.5 + c * 8 + voice.spin);
     this.haloRing.rotation.x = Math.PI / 2 + Math.sin(t * 1.3) * 0.2; this.haloRing.rotation.z += dt * (0.5 + c * 3);
@@ -334,5 +335,14 @@ export class ViewModel {
     this.crystalMat.emissiveIntensity = 0.7 + c * 1.6 + k * 2.4 + voice.glow;
     this.light.intensity = 0.3 + c * (0.6 + charge * 1.2) + k * 1.5 + voice.glow * 0.6;
     if (this.sigil) { this.sigil.target = c; this.sigil.update(dt); }
+    // anime arms: the character's own hands take the staff (built once the VRM has loaded); the glove is the fallback
+    if (!this.arms && MageModel.anime && animeMageReady()) this.arms = new FirstPersonArms(animeMageReady(), this.camera);
+    const anime = !!this.arms && MageModel.anime && this.group.visible;
+    this.gloveHand.visible = !anime;
+    if (this.arms) {
+      this.arms.visible = anime;
+      if (anime) { this.group.updateMatrixWorld(true); this.arms.update(dt, this.staff.localToWorld(_grip.set(0, -0.075, 0)), _axis.set(0, 1, 0).transformDirection(this.staff.matrixWorld), c, k); }
+    }
   }
 }
+const _grip = new THREE.Vector3(), _axis = new THREE.Vector3();
