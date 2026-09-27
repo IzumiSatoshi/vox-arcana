@@ -29,6 +29,7 @@ import { ELEMENTS, SHAPES, ELEMENT_KEYS, elName, shapeName, reactName } from './
 import { clamp, rand, TAU } from './util.js';
 import { warmSpellShaders } from './warmup.js';
 import { OnlineDuel } from './online.js';
+import { onlineText } from './online-i18n.js';
 import { escapeHTML } from './safe-html.js';
 
 const $ = (id) => document.getElementById(id);
@@ -416,12 +417,11 @@ class Game {
       const online = this.mode === 'online' || this.backTo === 'online-lobby';
       const note = $('settings-online-note');
       note.classList.toggle('hidden', !online);
-      note.textContent = getLang() === 'ja'
-        ? (this.mode === 'online' ? '設定中も対戦は進行します。魔法の解釈はルームの設定が適用されます。' : 'ルームに参加したまま設定を変更できます。魔法の解釈はルームの設定が適用されます。')
-        : (this.mode === 'online' ? 'The duel continues while settings are open. Spell interpretation is set by the room.' : 'You stay in your room while adjusting settings. Spell interpretation is set by the room.');
+      note.textContent = onlineText(this.mode === 'online'
+        ? 'The duel continues while settings are open. Spell interpretation is set by the room.'
+        : 'You stay in your room while adjusting settings. Spell interpretation is set by the room.');
       $('settings').querySelector('[data-action="close-settings"]').textContent = this.backTo === 'online-lobby'
-        ? (getLang() === 'ja' ? 'ロビーに戻る' : 'Back to lobby')
-        : this.backTo === 'pause' ? (getLang() === 'ja' ? '対戦メニューに戻る' : 'Back to duel menu') : t('menu.back');
+        ? onlineText('Back to lobby') : this.backTo === 'pause' ? onlineText('Back to duel menu') : t('menu.back');
       for (const key of ['set-provider', 'set-jev', 'set-loadmodel']) $(key).disabled = online;
       $('settings').querySelector('.settings-advanced').classList.toggle('hidden', online);
       $('set-botvoice').closest('label').classList.toggle('hidden', online);
@@ -961,6 +961,8 @@ class Game {
   applyLanguage(ui) {
     this.settings.ui = uiLanguage(ui); setLang(this.settings.ui); saveSettings(this.settings);
     document.querySelectorAll('.lang-switch button').forEach((b) => b.classList.toggle('on', b.dataset.lang === ui));
+    this.online?.refreshLanguage();
+    if (!$('settings').classList.contains('hidden')) this.showScreen('settings');
     this.uiLanguagePicker?.setValue(this.settings.ui);
     $('set-lang-help').textContent = t('set.voice.help');
     this.refreshJevLabels();
@@ -970,7 +972,7 @@ class Game {
     const ja = ui === 'ja';
     $('howto-royale').innerHTML = royaleGuide(ja);
     $('howto-reactions').innerHTML = REACTIONS.map(([n, c, en, jp]) => `<li><b style="color:${c}">${reactName(n)}</b> ${ja ? jp : en}</li>`).join('');
-    if (this.player && this.player.name && !this.settings.name) { this.player.name = t('you'); $('self-name').textContent = this.player.name; }
+    if (this.mode !== 'online' && this.player && this.player.name && !this.settings.name) { this.player.name = t('you'); $('self-name').textContent = this.player.name; }
   }
   bindMenus() {
     const s = this.settings;

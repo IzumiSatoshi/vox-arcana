@@ -2,13 +2,12 @@ import * as THREE from 'three';
 import { Combatant } from './combat.js';
 import { SpellSystem } from './spells.js';
 import { audio } from './audio.js';
-import { getLang } from './i18n.js';
+import { onlineText as label, translateOnlineMessage } from './online-i18n.js';
 import { duelAim } from './duel-aim.js';
 import { P2PDuelTransport } from './p2p.js';
 import { lobbyMarkup, updateConnection, renderRooms, renderRoom, invitationCode } from './online-lobby.js';
 
 const $ = id => document.getElementById(id);
-const label = (en, ja) => getLang() === 'ja' ? ja : en;
 const fields = ['hp', 'maxHp', 'mana', 'maxMana', 'stamina', 'shield', 'shieldTime', 'shieldEl', 'frozen', 'stun', 'defDown', 'mud', 'weaken', 'curse', 'haste', 'flying', 'cloak', 'alive', 'grounded', 'chanting', 'chantText', 'channeling', 'enh', 'aura', 'dots'];
 function apply(c, s, position = true) {
   for (const key of fields) if (s[key] != null) c[key] = structuredClone(s[key]);
@@ -20,7 +19,7 @@ function apply(c, s, position = true) {
 export class OnlineDuel {
   constructor(game) {
     this.g = game; this.seq = 0; this.pending = new Map(); this.phase = 'waiting'; this.samples = [];
-    const card = document.createElement('button'); card.className = 'mode-card'; card.type = 'button';
+    const card = this.modeCard = document.createElement('button'); card.className = 'mode-card'; card.type = 'button';
     card.innerHTML = '<span class="mode-icon" aria-hidden="true">◎</span><span class="mode-copy"><small>04 / PvP</small><strong></strong><span></span></span><span class="mode-arrow" aria-hidden="true">↗</span>';
     card.querySelector('strong').textContent = label('Online duel', 'オンライン対戦');
     card.querySelector('.mode-copy > span').textContent = label('Create a room or challenge another player.', 'ルームを作成して、世界のプレイヤーと対戦。');
@@ -30,6 +29,10 @@ export class OnlineDuel {
     panel.innerHTML = lobbyMarkup();
     document.body.append(panel);
     const badge = document.createElement('div'); badge.id = 'online-ping'; badge.className = 'hidden'; badge.setAttribute('role', 'status'); document.body.append(badge);
+    this.bindLobby();
+  }
+  bindLobby() {
+    const game = this.g;
     for (const panel of ['host', 'join']) $('online-show-' + panel).onclick = () => this.showRoomForm(panel);
     $('online-create').onclick = () => {
       if (!$('online-public').checked && !$('online-private').checked) return;
@@ -69,15 +72,37 @@ export class OnlineDuel {
     };
     updateConnection(this);
   }
-  showRoomForm(panel) {
+  refreshLanguage() {
+    const values = Object.fromEntries(['online-name', 'online-code', 'online-wins'].map(id => [id, $(id).value]));
+    const checked = Object.fromEntries(['online-public', 'online-private', 'online-relay'].map(id => [id, $(id).checked]));
+    const form = ['host', 'join'].find(kind => !$('online-' + kind + '-form').classList.contains('hidden'));
+    const status = $('online-status').textContent, kind = $('online-status').dataset.kind;
+    const retry = !$('online-retry').classList.contains('hidden');
+    const scroll = $('online-lobby').scrollTop;
+    $('online-lobby').innerHTML = lobbyMarkup();
+    this.bindLobby();
+    for (const [id, value] of Object.entries(values)) $(id).value = value;
+    for (const [id, value] of Object.entries(checked)) $(id).checked = value;
+    if (form) this.showRoomForm(form, false);
+    if (checked['online-public'] || checked['online-private']) $('online-public').onchange();
+    this.modeCard.querySelector('strong').textContent = label('Online duel');
+    this.modeCard.querySelector('.mode-copy > span').textContent = label('Create a room or challenge another player.');
+    if (this.rooms) renderRooms(this, this.rooms);
+    if (this.route) this.region = `P2P · ${label(this.route)}`;
+    this.renderRoom(); updateConnection(this); this.status(translateOnlineMessage(status), kind);
+    $('online-retry').classList.toggle('hidden', !retry);
+    $('online-lobby').scrollTop = scroll;
+  }
+  showRoomForm(panel, focus = true) {
     for (const kind of ['host', 'join']) {
       $('online-' + kind + '-form').classList.toggle('hidden', kind !== panel);
       $('online-show-' + kind).setAttribute('aria-expanded', String(kind === panel));
     }
+    if (!focus) return;
     if (panel === 'join') $('online-code').focus();
     else $('online-public').focus();
   }
-  status(text, kind = 'info') { $('online-status').textContent = text; $('online-status').dataset.kind = kind; }
+  status(text, kind = 'info') { $('online-status').textContent = translateOnlineMessage(text); $('online-status').dataset.kind = kind; }
   send(message) {
     if (this.ws?.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= 65536) return;
     if (['create', 'join'].includes(message.type)) {
@@ -121,7 +146,7 @@ export class OnlineDuel {
     if (m.type === 'jevCalls') this.jevCalls = m.calls;
     if (m.type === 'hello') { if (m.protocol !== 1) { this.status('Please refresh: incompatible game version.'); this.disconnect(); return; }
       this.id = m.id; this.region = m.region; this.interpreter = m.interpreter; this.status(''); updateConnection(this); }
-    if (m.type === 'route') { this.region = `P2P · ${m.route}`; updateConnection(this); }
+    if (m.type === 'route') { this.route = m.route; this.region = `P2P · ${label(m.route)}`; updateConnection(this); }
     if (m.type === 'latency') {
       this.ping = m.ping; this.opponentPing = m.opponentPing;
       if (Number.isFinite(m.ping)) { this.samples.push(m.ping); if (this.samples.length > 8) this.samples.shift(); }
@@ -130,7 +155,7 @@ export class OnlineDuel {
       $('online-ping').textContent = `${this.region} · ${m.ping == null ? '…' : m.ping + ' ms'}`; $('online-ping').title = text; updateConnection(this);
       if (this.room) this.renderRoom();
     }
-    if (m.type === 'rooms') renderRooms(this, m.rooms);
+    if (m.type === 'rooms') { this.rooms = m.rooms; renderRooms(this, m.rooms); }
     if (m.type === 'room') { if (this.lobbyBusy) this.status(''); this.lobbyBusy = false; clearTimeout(this.lobbyTimer); updateConnection(this); this.room = m.room; this.phase = m.room.phase; this.renderRoom(); }
     if (m.type === 'round') this.startRound(m);
     if (m.type === 'state' && this.active) {
@@ -139,7 +164,7 @@ export class OnlineDuel {
       this.pending = new Map(m.players.map(p => [p.id, p]));
       if (m.boxes) this.g.world.boxes = m.boxes;
       const side = m.players.findIndex(p => p.id === this.id);
-      this.g.hud.round(`${label('Round', 'ラウンド')} ${m.round} · ${label(`First to ${this.room?.winsToWin ?? 2}`, `${this.room?.winsToWin ?? 2}本先取`)} · ${m.score[side]} – ${m.score[1 - side]}${m.phase === 'countdown' ? ' · ' + m.countdown : ''}`);
+      this.g.hud.round(`${label('Round', 'ラウンド')} ${m.round} · ${label('First to {n} wins', null, { n: this.room?.winsToWin ?? 2 })} · ${m.score[side]} – ${m.score[1 - side]}${m.phase === 'countdown' ? ' · ' + m.countdown : ''}`);
     }
     if (m.type === 'cast' && this.active) {
       const c = this.proxies.find(p => p.id === m.caster); if (!c) return;
@@ -160,7 +185,7 @@ export class OnlineDuel {
       if (target) this.g.onDamage(target, { dmg: m.damage, absorbed: 0, reaction: m.reaction }, new THREE.Vector3().fromArray(m.pos), m.element, { src: source });
     }
     if (m.type === 'interpretation') { this.g.noteJev(m.result); if (m.result.raw) this.g.hud.jevReply(m.result.raw, m.text, false); }
-    if (m.type === 'castError' || m.type === 'error') { this.lobbyBusy = false; clearTimeout(this.lobbyTimer); updateConnection(this); this.status(m.error, 'error'); if (this.active) this.g.hud.chant(m.error, 'fizzle'); }
+    if (m.type === 'castError' || m.type === 'error') { this.lobbyBusy = false; clearTimeout(this.lobbyTimer); updateConnection(this); this.status(m.error, 'error'); if (this.active) this.g.hud.chant(translateOnlineMessage(m.error), 'fizzle'); }
     if (m.type === 'result') {
       this.phase = m.finished ? 'finished' : 'between';
       const side = this.room.players.findIndex(p => p.id === this.id);

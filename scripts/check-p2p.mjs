@@ -91,6 +91,19 @@ try {
     await host.locator('#online-wins').fill('0');
     assert.equal(await host.locator('#online-create').isDisabled(), true);
     await host.locator('#online-wins').fill('3');
+    await host.locator('#online-name').fill('Language host');
+    await host.evaluate(() => { document.getElementById('online-code').value = 'ABCDEF123456'; });
+    for (const lang of ['ja','es','fr','de','zh-Hans','ko','pt','hi','en']) {
+      await host.evaluate(lang => game.applyLanguage(lang), lang);
+      assert.equal(await host.locator('#online-name').inputValue(), 'Language host');
+      assert.equal(await host.locator('#online-code').inputValue(), 'ABCDEF123456');
+      assert.equal(await host.locator('#online-wins').inputValue(), '3');
+      assert.equal(await host.locator('#online-private').isChecked(), true);
+      assert.equal(await host.locator('#online-host-form').isVisible(), true);
+      const expected = await host.evaluate(async () => (await import('/js/online-i18n.js')).onlineText('Host a room'));
+      assert.ok((await host.locator('#online-show-host').textContent()).includes(expected));
+    }
+    console.log('PASS: all nine UI languages switch live without losing host choices');
     await host.locator('#online-create').click();
     await host.waitForFunction(() => peer.room?.code);
     assert.equal(await host.evaluate(() => peer.room.public), false);
@@ -102,6 +115,16 @@ try {
   if (process.env.P2P_UI) for (const page of pages) {
     assert.equal(await page.evaluate(() => peer.room.winsToWin), 3);
     assert.match(await page.locator('#online-rules').textContent(), /3/);
+  }
+  if (process.env.P2P_UI) {
+    const before = await guest.evaluate(() => ({id:peer.id,code:peer.room.code,voice:game.voice.lang}));
+    await guest.evaluate(() => game.applyLanguage('ja'));
+    assert.match(await guest.locator('#online-rules').textContent(), /3本先取/);
+    assert.match(await guest.locator('#online-ready-note').textContent(), /準備/);
+    assert.deepEqual(await guest.evaluate(() => ({id:peer.id,code:peer.room.code,voice:game.voice.lang})),before);
+    assert.equal(await guest.evaluate(() => peer.connected),true);
+    await guest.evaluate(() => game.applyLanguage('en'));
+    console.log('PASS: changing language in an occupied room preserves the connection');
   }
   console.log('PASS: two real browsers connected over WebRTC and share the selected win target');
   const pollCount = requests.poll;

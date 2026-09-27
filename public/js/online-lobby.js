@@ -1,9 +1,8 @@
-import { getLang } from './i18n.js';
+import { onlineText as text } from './online-i18n.js';
 import { MAX_WINS } from './generated/p2p-protocol.js';
 
 const $ = id => document.getElementById(id);
-const text = (en, ja) => getLang() === 'ja' ? ja : en;
-const winsLabel = room => text(`First to ${room.winsToWin ?? 2} wins`, `${room.winsToWin ?? 2}本先取`);
+const winsLabel = room => text('First to {n} wins', null, { n: room.winsToWin ?? 2 });
 const arrow = '<span aria-hidden="true">↗</span>';
 
 export function lobbyMarkup() {
@@ -36,7 +35,7 @@ export function lobbyMarkup() {
           </fieldset>
           <label class="online-field-label" for="online-wins">${text('WINS TO TAKE THE MATCH', '勝利に必要な本数（n本先取）')}</label>
           <input id="online-wins" type="number" min="1" max="${MAX_WINS}" step="1" value="2" required aria-describedby="online-wins-help">
-          <p class="online-private-note" id="online-wins-help">${text(`Choose 1–${MAX_WINS}. The first player to reach this many wins takes the match.`, `1〜${MAX_WINS}本。先にこの本数を勝ち取ったプレイヤーの勝利です。`)}</p>
+          <p class="online-private-note" id="online-wins-help">${text('Choose 1–{n}. The first player to reach this many wins takes the match.', null, { n: MAX_WINS })}</p>
           <label class="online-relay-choice"><input type="checkbox" id="online-relay"><span><strong>${text('Hide player IP addresses — use relay', 'IPアドレスを相手に隠す（リレー接続）')}</strong><small>${text('Optional. Direct connections expose your public IP to your opponent. Relay requires site support and may add latency.', '任意。直接接続では公開IPアドレスが相手に伝わります。リレーにはサイト側の対応が必要で、遅延が増える場合があります。')}</small></span></label>
           <button class="online-button online-primary" id="online-create" disabled>${text('Create room', 'ルームを作成')} ${arrow}</button>
           <p class="online-private-note" id="online-visibility-note">${text('Choose Public or Private before creating your room.', '公開・非公開を選択すると、ルームを作成できます。')}</p>
