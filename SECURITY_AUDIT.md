@@ -1,133 +1,60 @@
-# Security audit — 2026-09-24
+# Security audit — Vox Arcana online duels
 
-> Historical snapshot: the online match and WebSocket relay described below were removed after this audit. The other findings concern separate HTTP/API behavior and have not been re-audited here.
+Date: 2026-09-27. Scope: the current source checkout, WebRTC peer messages, room signaling, spell API/cache, HTML rendering, deployment headers, and installed npm dependencies. This is an application code review with regression and browser tests, not a browser/OS penetration test or a guarantee of security. Cheating and host-authoritative match fairness are outside the requested scope.
 
-## Verdict and scope
+## Can an opponent hack a player's PC?
 
-The current Node server is not ready for untrusted online players or public exposure. The hosted spell API also needs controls against unauthorized AI spending. This is an audit of the current saved working tree, including uncommitted deployment changes, not just the last commit. Application code was not changed.
+No intended game feature gives an opponent filesystem access, shell execution, file transfers, screen sharing, or microphone audio. Online play exchanges JSON on WebRTC data channels. Microphone capture remains local to the recognition workflow; the browser's speech service may process audio, but it is not sent to the opponent.
 
-Reviewed the Node HTTP/static server, API handler and Vercel entry point, WebSocket relay and client, remote game-state handling, HTML output, local inference, speech integration, build configuration, and dependency audit. No live deployment attacks, real paid inference, destructive load tests, or browser JavaScript payload execution were performed. Deployment access protection, firewall rules, production headers, and provider spending limits were not independently verified. External controls could reduce exposure but are not present in the reviewed application code.
+However, the reviewed version had a **high-severity application-level HTML injection risk**: a modified host could supply a spell name or cost that reached an HTML template on the guest. That could run script with the game's website privileges, interfere with the game, read its site storage, and make requests as that page. It is not, by itself, an OS escape, but it was a real trust-boundary mistake. Fixed before this release.
 
-## What “online match” actually is
+A current browser still supplies the sandbox, WebRTC implementation, WebGL/driver integration, and permission enforcement. Unknown browser/OS/driver vulnerabilities cannot be excluded by this review. Keep browsers and the OS updated.
 
-`public/js/net.js` connects to `/ws` on the same host as the game. Players enter a name and room string (default `arena`). The Node server groups sockets by that string and forwards messages to other members. There are no accounts, room passwords, invitation tokens, matchmaking service, two-player limit, or authoritative game server.
+## Findings and fixes
 
-Clients send movement, health, scores, casts, and up to 120 characters of the current chant transcript; receivers render/simulate those messages. The relay does not carry raw microphone audio. Speech recognition and Jev interpretation are separate data paths: browser recognition can use the browser's service, while Jev receives text and cast metadata. Selecting local spell interpretation alone does not guarantee local speech recognition.
+| Severity | Finding | Change / status |
+| --- | --- | --- |
+| High | Host-controlled spell fields could reach HTML templates | Spell names, costs, magnitude, damage, and seeds are rebuilt locally from bounded parameters; text in remaining HTML templates is escaped. Host-supplied executable markup is not trusted. |
+| High availability impact | Guest accepted insufficiently checked host snapshots and spell payloads | Validate message types, finite numbers, enums, positions, players, state arrays, nested depth, and object keys before dispatch. Reject prototype keys. Bound spell effects and disconnect on excessive messages. |
+| Medium | Anonymous HTTP requests could consume Jev/Redis/TURN resources | Add per-address request limits and a shared global spell-request cap. Redis-backed deployments use atomic shared counters and fail closed if limit storage fails. Limits also apply to cache hits, and may affect users sharing an IP. |
+| Medium | Direct WebRTC exposes the public IP to the opponent | Optional host setting requires TURN relay for both players. No silent direct fallback. The local connection policy, not a host-supplied label, determines the relay label on the guest. |
+| Medium defense in depth | No production script-execution or embedding policy | Add CSP, frame denial, no-referrer, MIME-sniffing prevention, and camera/geolocation restrictions. Only the exact import map is allowed as an inline script; inline event handlers and eval are blocked. Microphone remains allowed for the game itself. |
+| Low, local server | Static path prefix comparison and malformed URL handling | Require the public-directory path separator boundary and reject malformed path escapes. |
 
-`api/index.js` creates the hosted handler with `hosted: true`; `/api/status` advertises `online: false`, and `main.js:137` disables the online button. The Vercel deployment does not run the Node `/ws` relay. Locally, `server.listen(PORT)` omits a host and binds to unspecified network interfaces, subject to firewall/network rules; the printed localhost URL does not restrict access to localhost.
+## Request and resource limits
 
-## Findings
+- Spell requests: 120/minute per address and 600/minute globally. These are request limits, not a guaranteed monetary budget.
+- Room operations: 240/minute per address, including at most 10 creates and 30 joins; existing global create/join limits remain.
+- Cache downloads: 30/minute per address.
+- Peer messages: existing 150/second cap plus aggregate payload cap; individual messages larger than 65,536 string units disconnect. Nested structures and arrays have additional limits.
+- Cast/round effects: at most 60 events in a rolling ten-second window. Normal basic attacks and the normal spell cadence remain below this.
+- Without Redis, HTTP counters are only per process. Vercel production uses Redis; a distributed deployment without shared counters needs edge enforcement.
 
-### 1. High — Remote player names are inserted as HTML
+## Remaining risks and recommended operating choices
 
-**Locations:** `public/js/main.js:610`, `:631`, `:653`; `public/js/hud.js:218`, `:268`; `server.js:86`.
+1. **Direct-mode IP privacy.** An IP can indicate an ISP and approximate location and give an attacker a target for traffic flooding. It does not reveal passwords or grant file access. Use the optional relay setting for strangers when IP privacy matters. Relay adds bandwidth cost and may add latency. TURN credentials are temporary; the TURN service and site still necessarily see network information. [MDN: ICE addresses and relay policy](https://developer.mozilla.org/en-US/docs/Web/API/RTCIceCandidate/address).
+2. **Tab disruption / resource exhaustion.** A hostile peer can still stop responding, disconnect, or send a stream of expensive but allowed game events. Validation and limits reduce abuse; they cannot guarantee smooth rendering on every GPU. The host can end or falsify a match by design. This is not equivalent to PC compromise.
+3. **API and TURN billing abuse.** The game is anonymous. Non-browser clients can forge Origin headers and distribute traffic across IPs. Request limits reduce abuse but do not replace provider spending caps, Vercel Firewall rules, or monitoring. The global cap can also be exhausted to deny service. No billing/dashboard configuration was changed by this audit.
+4. **Room codes are invitations, not accounts.** Anyone with a private room's code/link can join its open slot. Codes contain 48 random bits, member tokens contain 192 random bits, and access is checked server-side. Public room listing omits member tokens, signaling descriptions, and TURN secrets. Names are not verified identities.
+5. **Shared spell-cache privacy.** Submitted spell text can enter the shared language cache and appear in cache downloads. Players should not chant secrets or personal information. This behavior is intentional for the shared-cache design; private rooms do not make spells private.
+6. **Third-party/browser trust.** Pinned Three.js/VRM libraries are loaded from jsDelivr; fonts, hosting, speech recognition and TURN have their own trust/privacy boundaries. No known npm advisories were reported for the installed dependency tree at audit time. This does not cover every CDN asset, browser bug, or future advisory.
+7. **Local server exposure.** The development server currently listens on the default Node interface. Do not expose it directly to the internet; Vercel is the public deployment. Local API limits are process-local when Redis is absent.
 
-A room member can send a `state` message with an arbitrary HTML name. The receiver copies it into the combatant and renders it using scoreboard `innerHTML` every frame. Join/death/leave feeds also interpolate names into HTML. The join-time 24-character limit does not constrain subsequent state names. Scores are also interpolated without type validation.
+WebRTC data transport is encrypted with DTLS, but encryption does not make an adversarial peer's application messages safe. [RFC 8827](https://www.rfc-editor.org/rfc/rfc8827.html). Per-address limits in production rely on Vercel's trusted forwarded-address headers; do not copy that trust assumption to an arbitrary proxy deployment. [Vercel request headers](https://vercel.com/docs/headers/request-headers).
 
-**Impact:** DOM XSS in other players' game origin, allowing script to tamper with the game, read same-origin browser storage, and invoke its APIs. This does not directly expose the server-side API key, but permits use of the API. No application CSP was found in the reviewed configuration; production-injected headers were not checked.
+## Validation
 
-**Evidence:** The isolated probe relayed a harmless marker payload and executed the real scoreboard method against a fake DOM element; the HTML reached `innerHTML` unchanged. Actual browser execution was not tested.
+- Full suite: 217 tests passed before the final relay-policy regression was added; that regression and all 13 focused security/signaling checks passed afterward.
+- All registered spell forms and basic attacks were checked against the peer validator.
+- Full browser PvP check passed with real WebRTC, host worker, previews, cached/uncached casts, live chant text, rematch, and disconnect.
+- Malformed JSON structures, HTML-bearing spell fields, oversized state arrays, rate-limit exhaustion, unavailable shared limit storage, and relay unavailability have automated checks.
+- `npm audit` and `npm audit --omit=dev`: zero reported vulnerabilities.
+- The malicious-peer test in two real browsers confirmed that hostile HTML is neutralized and malformed oversized state disconnects. Production verification is recorded in the completion notes. No physical microphone or OS exploitation test was performed.
 
-**Fix:** Build rows and feeds with DOM nodes and `textContent` for every player-controlled value. Validate field types and lengths at the relay and client. Add a suitable CSP as defense in depth.
+Players with an already-open tab must refresh after deployment; publishing new JavaScript does not replace code already running in a tab.
 
-### 2. High — Unauthenticated requests can spend AI credits
 
-**Locations:** `api-handler.js:118`, `:134`, `:169`, `:181`.
+## Production verification
 
-Anyone who can reach `/api/spell` can trigger a credentialed upstream request. The optional Origin check restricts ordinary cross-origin browsers, but a direct HTTP client can omit Origin. There is no application authentication, caller quota, request-rate limit, or upstream concurrency ceiling. Different text bypasses the cache; simultaneous identical uncached requests are not coalesced either.
-
-**Impact:** Unauthorized AI consumption, cost, provider quota exhaustion, and degraded service. Applies to hosted and local APIs when credentials are configured and the endpoint is reachable.
-
-**Evidence:** Twelve concurrent unauthenticated requests without Origin generated twelve mocked upstream calls through the actual hosted handler. No paid requests were made.
-
-**Fix:** For a private prototype, require deployment access protection or a server-validated access session. Apply per-user/IP limits, a global upstream concurrency limit, request coalescing, and provider spending caps. For serverless hosting, use a shared rate-limit store rather than process-local counters.
-
-### 3. High — One malformed URL crashes the Node server
-
-**Location:** `server.js:35–38`.
-
-`decodeURIComponent(url.pathname)` is inside an async HTTP event callback without a catch. A path such as `/%` throws; the returned promise is not handled by the HTTP event emitter.
-
-**Impact:** A reachable client can stop the local game/API/relay process. A supervisor could restart it, but repeated requests could keep it unavailable. The Vercel handler does not use this static server.
-
-**Evidence:** Executed the original HTTP callback in a disposable Node 24.16.0 child process; the malformed path terminated it with exit code 1 and `URIError: URI malformed`.
-
-**Fix:** Catch URL parsing/decoding failures and return 400. Ensure the HTTP callback handles all rejected promises.
-
-### 4. High — The relay trusts arbitrary message types and spell parameters
-
-**Locations:** `server.js:85–87`; `public/js/net.js:13`; `public/js/main.js:613–617`, `:652–657`; `public/js/spells.js:812`, `:2461–2485`.
-
-After joining, clients can send any JSON message type and body. The server overwrites `from`, but forwards everything else, including the server-reserved `welcome` type. The client accepts any welcome message as its identity. Remote casts go straight to `spells.cast`, without the normal local cast validation, mana/cooldown enforcement, or bounded numeric schema. Remote state directly controls displayed health, position, and scores.
-
-**Impact:** Identity/state corruption, cheating, arbitrary cast spam, and potentially expensive rendering work in other players' browsers. For example, meteor count is computed directly from remote `spec.count` and drives object creation. Missing or invalid fields can also throw in client handlers. Full GPU exhaustion and combat exploits were not executed.
-
-**Evidence:** The relay probe forwarded a forged welcome with an attacker-chosen ID. Cast/state trust and unbounded object-count derivation were verified from source.
-
-**Fix:** Define explicit client/server message schemas. Reserve server message types, bound every number/string/array, reject non-finite numbers and unknown enum values, and impose cast/message limits. Derive spell statistics on the server. Competitive play additionally requires authoritative movement, resource, hit, and score validation; client-side clamps alone cannot prevent cheating.
-
-### 5. High — WebSocket memory and work are unbounded
-
-**Locations:** `server.js:60`, `:89–106`, `:118`.
-
-The handwritten frame parser has no maximum frame/message/fragment size or receive-buffer ceiling. It accepts declared 64-bit lengths and retains incoming bytes until completion. Rooms, connections, message rates, and outgoing socket queues are also uncapped. Socket write backpressure is ignored.
-
-**Impact:** Reachable clients can grow receive buffers, fragment storage, room membership, and output queues, potentially exhausting memory or CPU and affecting all games/API traffic in the process.
-
-**Evidence:** A 10-byte header declaring a 1 GiB message was accepted and retained without disconnect. The payload was deliberately not allocated or sent. Additional resource-limit omissions were verified from source.
-
-**Fix:** Replace the custom parser with a maintained WebSocket implementation configured with a small maximum payload. Add connection/room/message limits, handshake and idle timeouts, heartbeat handling, and slow-consumer termination based on queued bytes.
-
-### 6. Medium — WebSocket upgrades accept unrelated websites
-
-**Locations:** `server.js:110–118`, `:123`.
-
-The upgrade handler checks neither Origin nor authentication. An unrelated website can attempt to connect a visitor's browser to a reachable relay and join its rooms. Browser mixed-content/private-network protections may block particular routes; those protections are browser-dependent and do not replace server checks.
-
-**Impact:** Cross-site room access, message injection, and access to relayed state/transcripts where the connection succeeds. A room name is a routing label, not a security boundary.
-
-**Evidence:** The actual upgrade callback accepted `Origin: https://untrusted.example` and returned 101 in the isolated socket harness. A browser-to-LAN attack was not tested.
-
-**Fix:** Restrict Origin to explicit trusted origins, enforce session/room authorization, and match exactly `/ws`. Bind to loopback by default; make LAN exposure an explicit configuration. Use TLS for remotely accessible hosting.
-
-### 7. Medium — Switching rooms retains old subscriptions and leaks membership
-
-**Locations:** `server.js:67–83`.
-
-A second join changes `c.room` without removing the socket from its previous room set. It keeps receiving old-room traffic while sending into its new room. On disconnect, only the latest room removes it, leaving stale objects in earlier rooms. One connection can repeat this for many room names.
-
-**Impact:** Broken room isolation and retained socket/client objects. Room names already lack access control, so this is not a bypass of a claimed private-room authorization system.
-
-**Evidence:** A client joined A, switched to B, still received A's state message, and remained in A's member set after leaving.
-
-**Fix:** Reject duplicate joins or remove prior membership atomically before joining. Ensure all disconnect paths release membership, cap room occupancy, and delete empty rooms.
-
-### 8. Medium, conditional — Static path check allows sibling directories sharing the prefix
-
-**Locations:** `server.js:38–41`.
-
-`file.startsWith(PUBLIC)` accepts both the public directory and siblings such as `public-private`. On Windows, an encoded backslash traversal such as `/..%5cpublic-private%5cmarker.txt` survives URL pathname parsing and resolves into that sibling while passing the prefix check.
-
-**Impact:** Files outside the intended static root can be read if such a sibling exists and contains readable files. This is not arbitrary disk access, and no sensitive sibling file was demonstrated.
-
-**Evidence:** The actual path operations accepted the sibling target in a Windows probe; no outside file was read.
-
-**Fix:** Use `path.relative` and reject `..`, parent-prefixed, or absolute relative results, or use a maintained static-file server. Account for symlinks if the served directory can contain them.
-
-## Other observations
-
-- Credential handling is server-side in the reviewed code. Static builds copy `public`, not server credentials; environment files and local credential configuration are ignored. A narrow embedded-secret pattern scan of public/API/scripts sources found no matches. This is not a complete repository-history or production-bundle secret audit.
-- API input limits and finite-number checks exist; cross-origin POSTs with mismatching Origin are rejected. These are useful controls but do not provide authentication or quotas.
-- Local inference has an eight-request pending cap and shared loading work. Its load endpoint is still unauthenticated for reachable direct clients and can trigger a model download/initialization.
-- Chant text is logged on the server, and raw upstream error excerpts are returned to callers and included in public `/api/status`. Prefer minimal logs and generic public errors, with details in restricted server logs.
-- Three.js loads from a version-pinned third-party CDN; npm audit does not cover that browser dependency or remote model artifacts. Consider bundling browser code and pinning model revisions for reproducible deployment.
-
-## Validation and next steps
-
-- `npm test`: **83 passed, 0 failed**.
-- `npm audit --json`: **0 reported vulnerabilities** at audit time. This checks registry advisories for the npm dependency graph, not application security or all externally loaded assets.
-- `node scripts/security-audit.mjs`: **all eight isolated behavior probes confirmed**. This script makes no network requests and uses dummy credentials. Its assertions describe vulnerabilities and are expected to fail once those behaviors are fixed; it is intentionally outside the normal regression-test suite.
-
-First restrict access to any deployed spell API and keep the relay unavailable to untrusted users. Then fix HTML output and request error handling, replace/harden the WebSocket layer, and add server-side protocol validation and quotas. Do not treat the current relay as secure competitive multiplayer.
-
-Only this report and the isolated audit script were added. No fixes, deployment changes, secret rotation, or production setting changes were performed.
+Deployment: `https://jev-spell.vercel.app` (Vercel deployment `dpl_EPTiqyGyYWytbrzy4hTBT283Be2M`). Live responses include the expected CSP, X-Frame-Options and nosniff headers. Two test browsers successfully connected in an unlisted relay-only room; both confirmed the `relay` ICE policy and a Relay route. The test room was closed afterward. Browser checks confirmed that CSP allows normal game loading and blocks injected inline event handlers. The new lobby was checked at desktop and mobile widths.
+The production API returned HTTP 200 with shared Redis healthy. A live Jev fire-orb cast succeeded, and the production browser check reported no runtime errors.

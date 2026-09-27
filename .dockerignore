@@ -1,0 +1,10 @@
+node_modules
+.git
+.env*
+.vercel
+.cache
+logs
+reports
+art
+dist
+jev.config.json

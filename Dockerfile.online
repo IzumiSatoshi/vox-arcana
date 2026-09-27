@@ -1,0 +1,12 @@
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY online ./online
+COPY public/js ./public/js
+COPY scripts/balance/environment.js ./scripts/balance/environment.js
+COPY api-handler.js spell-ontology.js spell-cache.js p2p-signaling.js ./
+ENV PORT=8788
+EXPOSE 8788
+USER node
+CMD ["node", "online/server.js"]

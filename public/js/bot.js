@@ -1,10 +1,12 @@
 // Rival archmage AI. Chants generated incantations (spoken via speechSynthesis),
 // exploits elemental reactions, dodges projectiles and uses defensive magic.
 import * as THREE from 'three';
-import { localParse, buildSpec, askJev, generateIncantation, boltSpec } from './spellbook.js';
+import { localParse, buildSpec, generateIncantation, boltSpec } from './spellbook.js';
 import { rand, pick, clamp, mulberry32 } from './util.js';
 import { ELEMENT_KEYS } from './elements.js';
 import { getLang } from './i18n.js';
+import { spendSpellMana } from './mana.js';
+import { planTactics } from './tactics.js';
 
 const DIFF = {
   easy: { dodge: 0.2, aim: 2.6, cd: [5.5, 8], grand: 0.25, speed: 5, bolt: [2.2, 3.5] },
@@ -23,6 +25,7 @@ export class BotBrain {
     this.chant = null; this.rng = mulberry32(Date.now() & 0xffff);
     this.aimDir = new THREE.Vector3(0, 0, -1); this.aimPoint = new THREE.Vector3();
     this.jumpT = rand(2, 5);
+    this.tactical = difficulty === 'easy' ? false : 'adaptive';
     c.getAim = () => ({ origin: c.eye(new THREE.Vector3()), dir: this.aimDir, point: this.aimPoint });
   }
   // nearest foe (battle royale has many); a cloaked caster is only chosen when nothing else is left
@@ -76,6 +79,12 @@ export class BotBrain {
       return { wish, jump: c.dropping ? false : jump, speed: this.d.speed * 1.1, glide };
     }
     if (!tgt) return { wish, jump };
+    const tactic = planTactics(this, tgt);
+    if (tactic.aim) this.boltCd = Math.min(this.boltCd, 0.3);
+    this.tacticChoice = tactic.cast || null;
+    if (tactic.urgent && this.tacticCasting !== tactic.cast.shape) {
+      this.cancelChant(); this.castCd = 0;
+    }
     // ---------- aim with lead + inaccuracy
     const tc = tgt.center();
     const eye = c.eye(new THREE.Vector3());
@@ -84,6 +93,7 @@ export class BotBrain {
     const err = new THREE.Vector3(rand(-1, 1), rand(-0.5, 0.5), rand(-1, 1)).multiplyScalar(this.d.aim * (0.3 + dist / 40));
     this.aimPoint.lerp(tc.clone().add(lead).add(err), Math.min(1, dt * 5));
     if (this.forceAim) this.aimPoint.copy(this.forceAim); // a movement spell aimed at safety, not at the foe
+    else if (tactic.aim) this.aimPoint.copy(tactic.aim);
     this.aimDir.subVectors(this.aimPoint, eye).normalize();
     c.yaw = Math.atan2(-this.aimDir.x, -this.aimDir.z); c.pitch = Math.asin(clamp(this.aimDir.y, -1, 1));
     // ---------- movement: keep preferred range, strafe, dodge
@@ -109,6 +119,12 @@ export class BotBrain {
     let dashDir = null;
     if (this.dodgeCd <= 0) {
       for (const th of g.spells.threatsFor(c)) {
+        if (th.lock) {
+          if (th.target !== c) continue;
+          const away = c.pos.clone().sub(th.origin).setY(0).normalize();
+          dashDir = new THREE.Vector3(-away.z, 0, away.x).multiplyScalar(this.strafe);
+          break;
+        }
         if (th.area) {
           const d = Math.hypot(th.pos.x - c.pos.x, th.pos.z - c.pos.z);
           if (d < th.radius + 1) { dashDir = c.pos.clone().sub(th.pos).setY(0).normalize(); break; }
@@ -132,13 +148,15 @@ export class BotBrain {
     if (this.chant) this.updateChant(dt, tgt);
     else if (c.canAct()) {
       const hpFrac = c.hp / c.maxHp;
-      if (this.castCd <= 0) this.startChant(tgt, hpFrac);
+      if (this.castCd <= 0 && !tactic.saveMana) this.startChant(tgt, hpFrac);
       else if (this.boltCd <= 0 && dist < 50) {
         this.boltCd = rand(...this.d.bolt);
-        if (c.mana > 6) { c.mana -= 4; g.spells.cast(boltSpec(this.favEl || pick(ELEMENT_KEYS)), c); c.model.castAnim = 0.6; c.model.setElement(this.favEl || 'arcane'); }
+        const bolt = boltSpec(this.favEl || pick(ELEMENT_KEYS));
+        if (spendSpellMana(c, bolt)) { g.spells.cast(bolt, c); c.model.castAnim = 0.6; c.model.setElement(this.favEl || 'arcane'); }
       }
     }
-    const out = { wish: wish.lengthSq() ? wish.normalize() : wish, jump, speed: this.d.speed * (this.chant ? 0.6 : 1) };
+    const out = { wish: tactic.wish || (wish.lengthSq() ? wish.normalize() : wish), jump: tactic.wish ? false : jump, speed: this.d.speed * (this.chant ? 0.6 : 1) };
+    if (tactic.dash) this.dash = tactic.dash;
     if (this.dash) { out.dash = this.dash; this.dash = null; }
     return out;
   }
@@ -165,6 +183,8 @@ export class BotBrain {
       if (shape === 'whip' && dist > 13) shape = dist > 22 ? 'rush' : 'orb';
       if (shape === 'drain' && dist > 32) shape = 'mark';
     }
+    if (this.tacticChoice) { ({ element, shape } = this.tacticChoice); this.forceAim = this.tacticChoice.point || null; }
+    this.tacticCasting = shape;
     this.favEl = element;
     c.model?.setElement(element);
     // spend grandeur according to mana
@@ -180,12 +200,10 @@ export class BotBrain {
     chant.voicePending = true;
     const voiced = this.g.onBotChant?.(c, text, () => { chant.voicePending = false; });
     if (!voiced) chant.voicePending = false;
-    // ask Jev during the chant so the latency is hidden
+    // NPC spells always use the local parser; they never request Jev.
     const meta = { chantSeconds: this.chant.dur, loudness: 0.4 + grand * 0.5 };
     this.chant.meta = meta;
     this.chant.local = localParse(text);
-    this.useJev = this.g.settings.botJev && this.g.jevOnline && this.g.mode !== 'menu';
-    if (this.useJev) askJev(text, { ...meta, provider: this.g.settings.spellProvider, language: this.g.voice?.lang || this.g.settings.lang }).then((j) => { if (this.chant === chant) chant.jev = j; });
   }
   updateChant(dt, tgt) {
     const ch = this.chant, c = this.c;
@@ -193,22 +211,20 @@ export class BotBrain {
     ch.t += dt;
     const shown = Math.min(ch.words.length, Math.floor((ch.t / ch.dur) * ch.words.length) + 1);
     c.chantText = ch.words.slice(0, shown).join(ch.joiner);
-    if (!ch.voicePending && ch.t >= ch.dur && (ch.jev || !this.useJev || ch.t > ch.dur + 1.2)) {
+    if (!ch.voicePending && ch.t >= ch.dur) {
       const spec = buildSpec(ch.text, ch.local, ch.jev, ch.meta);
-      const cost = spec.cost;
-      if (c.mana >= cost) {
-        c.mana = Math.max(0, c.mana - cost);
+      if (spendSpellMana(c, spec)) {
         this.g.spells.cast(spec, c);
         this.g.onCast?.(c, spec);
         c.model.castAnim = 1;
       }
       this.castCd = rand(...this.d.cd) + spec.mag * 1.5;
-      this.chant = null; c.chanting = false; c.chantText = ''; this.forceAim = null;
+      this.chant = null; c.chanting = false; c.chantText = ''; this.forceAim = null; this.tacticCasting = null;
     }
   }
   cancelChant() {
     if (!this.chant) return;
-    this.chant = null; this.c.chanting = false; this.c.chantText = ''; this.castCd = 1.5;
+    this.chant = null; this.c.chanting = false; this.c.chantText = ''; this.castCd = 1.5; this.tacticCasting = null;
     this.g.onBotChantCancel?.(this.c);
   }
 }

@@ -324,3 +324,12 @@ test('manual and hands-free callbacks receive punctuation-free STT', async () =>
   const seen=[]; v.onAuto=text=>seen.push(text);v.handsFree=true;
   v.rec.result([['「氷の槍」！',true]]); assert.deepEqual(seen,['氷の槍']);v.dispose();
 });
+
+test('recognition end notifies a pending cast after the last result event', async () => {
+  const v=await setup();v.beginChant();const rec=v.rec;
+  rec.result([['fire']]);const res=v.endChant({waitForWords:true});
+  const events=[];v.onText=()=>events.push({text:v.textOf(res.win),ended:res.win.ended});
+  rec.result([['fire tornado',true]]);rec.onend();
+  assert.deepEqual(events,[{text:'fire tornado',ended:false},{text:'fire tornado',ended:true}]);
+  v.finishChant(res.win);v.dispose();
+});

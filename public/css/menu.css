@@ -73,3 +73,5 @@ summary { cursor:pointer; color:#dbb878; padding:8px 0; }
 .mode-card:disabled { cursor:not-allowed; }
 @media(max-width:750px) { .menu-shell { padding:40px 20px; } .menu-hero h1 { font-size:86px; } .menu-rail { margin-top:28px; } }
 @media(prefers-reduced-motion:reduce) { .mode-card:hover { transform:none; } }
+.menu-mic .menu-browser-notice{margin:10px 0 14px;padding:9px 11px;border-left:2px solid #dfbb80;background:#dfbb8014;color:#ebd9b7;font-size:11px;line-height:1.5}
+.settings-compact .settings-online-note { margin:0 0 18px; padding:12px 14px; border:1px solid #b8ab7f40; border-radius:4px; background:#d9b77d08; color:#c4d0d2; font:12px/1.7 'Noto Sans JP',system-ui,sans-serif; }

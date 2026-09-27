@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import { ELEMENTS, reactionFor, paletteFor, COMBOS } from './elements.js';
 import { rand, clamp } from './util.js';
+import { manaRegenRate } from './mana.js';
 
 const _a = new THREE.Vector3();
+
+// Shared by the interactive game and headless matches.
+export function interruptBotOnDamage(target, res) {
+  if (target.brain?.chant && res.dmg > 70 && Math.random() < 0.4) target.brain.cancelChant();
+}
 
 // Elemental self-enhancements (from the Enhance form). power 0..1
 export const ENHANCE = {
@@ -66,7 +72,7 @@ export class Combatant {
     const e = this.enhP('earth'); if (e !== null) m *= 0.8 - 0.25 * e;
     return m;
   }
-  costMult() { let m = this.costBonus || 1; if (this.enhP('arcane') !== null) m *= 0.75; if (this.enhP('lightning') !== null) m *= 0.9; return m; }
+  costMult() { let m = this.costBonus || 1; if (this.enhP('arcane') !== null) m *= 0.75; if (this.enhP('lightning') !== null) m *= 0.9; return clamp(m, 0.45, 2); }
   resetStats() {
     this.hp = this.maxHp; this.mana = this.maxMana; this.stamina = 100; this.shield = 0; this.aura = null;
     this.frozen = 0; this.stun = 0; this.defDown = 0; this.mud = 0; this.weaken = 0; this.curse = 0; this.dots.length = 0;
@@ -74,7 +80,7 @@ export class Combatant {
   }
   updateStatus(dt, game) {
     if (!this.alive) return;
-    this.mana = Math.min(this.maxMana, this.mana + dt * (this.chanting ? 4 : 9) * (this.manaRegen || 1));
+    this.mana = Math.min(this.maxMana, this.mana + dt * manaRegenRate(this));
     this.stamina = Math.min(100, this.stamina + dt * 22);
     if (this.aura) { this.aura.t -= dt; if (this.aura.t <= 0) this.aura = null; }
     if (this.frozen > 0) { this.frozen -= dt; if (this.frozen <= 0 && this.model) game.fx.explosion('ice', this.center(), 1.2, 0.2, null, { noDecal: true }); }
@@ -85,7 +91,6 @@ export class Combatant {
       e.t -= dt;
       if (el === 'water') this.heal(dt * (2 + 4 * e.p));
       if (el === 'nature') { this.heal(dt * (1.5 + 3 * e.p)); this.dots = this.dots.filter((d) => d.el !== 'poison'); }
-      if (el === 'light') this.mana = Math.min(this.maxMana, this.mana + dt * (8 + 12 * e.p));
       if (e.t <= 0) delete this.enh[el];
     }
     for (let i = this.dots.length - 1; i >= 0; i--) {
@@ -113,6 +118,13 @@ function addDot(t, el, dps, dur, src) {
 // Central damage + reaction resolution. Only authoritative targets actually lose HP.
 export function applyHit(game, target, hit) {
   if (!target.alive) return null;
+  if (target.structure) {
+    const dmg = Math.max(0, hit.dmg * (hit.src?.outgoing?.() ?? 1) * (hit.src?.allDmg ?? 1));
+    const lost = Math.min(target.hp, dmg);
+    target.damage(dmg, hit.point || target.center());
+    game.onStructureDamage?.(target, lost, hit);
+    return { dmg: lost, absorbed: 0, reaction: null, chain: 0 };
+  }
   const fx = game.fx;
   if (!target.authoritative) { if (!hit.dot) game.onVisualHit?.(target, hit); return null; }
   let mult = hit.src && !hit.dot ? hit.src.outgoing() : 1, reaction = null, trueDmg = false, finisher = null;

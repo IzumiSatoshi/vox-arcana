@@ -174,6 +174,8 @@ export class Voice {
         this.onStatus?.('idle');
         if (session.prepared && this.want && this.active && this.prewarm) this.retry = setTimeout(() => this.prepareNext(), this.error ? 1000 : 250);
       }
+      // Deliver completion even when the last transcript arrived earlier.
+      if (win && session.stopping) this.onText?.();
     };
     rec.onerror = (e) => {
       if (this.session !== session || e.error === 'no-speech' || e.error === 'aborted') return;
@@ -295,6 +297,8 @@ export class Voice {
     const rms = Math.sqrt(s / this.buf.length), lv = clamp((rms - 0.01) / 0.22);
     this.dbfs = rms > 1e-5 ? 20 * Math.log10(rms) : -100;
     this.level = smoothVoiceLevel(this.level, lv, dt);
+    // Use unsmoothed microphone energy so visual smoothing does not delay silence detection.
+    if (this.win && lv > 0.08) this.lastSpeechAt = performance.now();
     const n = this.wave.length, bin = Math.floor(this.buf.length / n);
     for (let bar = 0; bar < n; bar++) {
       let energy = 0;

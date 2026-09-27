@@ -1,6 +1,6 @@
 # Vox Arcana: a voice-cast magic duel
 
-A browser FPS magic game where you fight AI opponents by **speaking incantations** or typing spells.
+A browser FPS magic game where you fight AI opponents or another player by **speaking incantations** or typing spells.
 Your words go through the Web Speech API, then **Jev** (TypeSafe's System One decision model) turns them into a
 procedurally generated spell: an element, a form, and a dozen continuous parameters.
 
@@ -9,6 +9,11 @@ procedurally generated spell: an element, a form, and a dozen continuous paramet
 > a Legendary **Stone-Fireball**: a gathered sun of flame with a sigil, 2.5× damage and a huge blast.
 
 ## What's new
+
+- **Online duels:** public/private two-player rooms, invite links, ready checks,
+  first-to-two matches, rematches, ping and jitter. The room creator's browser
+  hosts combat over WebRTC; Vercel handles room setup and Jev. See
+  [ONLINE_DUEL.md](ONLINE_DUEL.md) for setup and costs.
 
 - **10 new spell forms** (33 in total). Jev understands all of them in English and Japanese, and so do the keyword parser and the rival AI:
   - **whip** (鞭) and **prison** (牢獄)
@@ -74,12 +79,15 @@ npm ci
 npm start
 ```
 
+For smooth voice casting, use Microsoft Edge. Speech recognition can be delayed or unavailable in other browsers; press Enter to type spells instead.
+
 Then open **http://localhost:8787** in **Chrome or Edge**, which have the Web Speech API. Allow the microphone.
 
 - Requires Node.js 24.x. Three.js and fonts load from CDNs, so the default setup needs internet access.
 - No API key is required for keyword interpretation: disable **Use selected model** in Settings. You can type spells with Enter without microphone access. The experimental local MiniLM option also needs no API key, but downloads model files on first use.
 - For Jev, copy `.env.example` to `.env`, set your own `JEV_API_KEY`, and run `node --env-file=.env server.js`. Plain `npm start` does not load `.env` automatically. Never commit credentials.
-- The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the endpoint and model with
+- Select the server route with `JEV_ENDPOINT=direct` (your Jev account) or `JEV_ENDPOINT=gateway` (Vercel AI Gateway). Players cannot change this selection. Restart locally or redeploy on Vercel after changing it. See [DEPLOYMENT.md](DEPLOYMENT.md#spell-api-endpoint) for hosted credentials and billing.
+- The Jev key is read from `../api_key/jev_api.txt`. You can override this with the `JEV_API_KEY` env var, and the direct API URL and model with
   `JEV_URL` / `JEV_MODEL` or a `jev.config.json` (`{ "url": "...", "model": "...", "keyFile": "..." }`).
 - Set `JEV_DEBUG=1` to print Jev's raw answers in the server console.
 - With Jev enabled, player casts use only Jev interpretation. A failed request shows an error; it does not cast via keywords. Disable Jev in Settings to use the local keyword parser. Browser offline speech recognition is a separate voice-to-text setting.
@@ -138,19 +146,17 @@ Optional **hands-free mode** (Settings) casts whenever you say something that co
 
 1. **Voice**: each chant owns an isolated Web Speech recognition session with live interim results. Normal browser
    microphone recognition is the default. Previous sessions and delayed corrections cannot reappear in a new chant.
-   Offline recognition and next-session preparation are separate opt-ins in Settings. Preparation now starts ordinary
-   microphone recognition between casts. Idle words are discarded; pause/menu stops listening. Each completed cast
-   retires its recognizer before preparing a fresh one. No generated audio track is used for microphone gameplay.
-   Existing settings migrate once to disable those previously automatic options. The orb, staff glow and charging
+   Offline recognition remains optional. Next-session preparation is always enabled, and hands-free casting is
+   always disabled. Preparation starts ordinary microphone recognition between casts. Idle words are discarded;
+   pause/menu stops listening. Each completed cast retires its recognizer before preparing a fresh one.
+   Older saved preferences cannot override these fixed behaviors. The orb, staff glow and charging
    particles respond to microphone volume before any text arrives. Previews use Jev results when enabled, or the
    keyword parser when Jev is disabled. STT punctuation is removed before display and interpretation. Hold the key before speaking; startup and transcription time depend on the browser.
-2. **Speculative Jev**: instant cast is enabled by default. Each changed STT transcript goes directly to Jev,
-   without the normal 160 ms throttle or three-request cap. Release casts the newest valid interpretation already
-   received, ordered by transcript revision rather than reply arrival. The preview shows that spell. If no magic is
-   ready, the game waits for interpretation. Disable instant cast to wait for the exact submitted text instead. If words are missing or still incomplete,
-   a grace window of up to 1.8 seconds accepts delayed spell words; pressing again cancels it immediately.
-   Direct microphone sessions call `SpeechRecognition.stop()` on release to request pending words. Synthetic
-   audio-track test sessions receive silence until pending words arrive. Hands-free mode uses continuous final results.
+2. **Speculative Jev**: after a fixed 300 ms pause in speech/transcript updates, request an interpretation and
+   display its preview. Cached results appear immediately. Releasing with an exact valid preview casts immediately.
+   Otherwise, wait for recognition to finish, then interpret the final transcript. A stalled recognition cancels
+   after five seconds; either mouse button cancels the pending cast immediately. Direct microphone sessions call
+   `SpeechRecognition.stop()` on release to request pending words.
 3. **Jev** (`/api/spell` → `POST https://api.typesafe.ai/v1/systemone`): one request with typed questions:
    - `choice`: element (10), secondary element, form (14)
    - `score`: power, tier/rank, speed, size, temperature, weight, sharpness, count, duration, chaos
@@ -327,6 +333,38 @@ spell, `VA.cam([x, y, z], [tx, ty, tz])` places it by hand, and `VA.cam()` retur
 `VA.gallery({ shape: 'wave', element: 'water' })` stages an empty field, casts, steps the simulation deterministically and frames the
 spell (it works even in a background tab). `VA.sheet('tornado')` renders that form for all 11 elements in one labelled contact
 sheet. `VA.sheet()` closes it, and `VA.step(seconds)` advances time by hand.
+
+## Headless balance simulations
+
+Run automated bot-vs-bot matches with Node 24, without a browser, microphone, server or API key:
+
+```sh
+npm install
+npm run balance
+npm run balance -- --suite forms --pairs 10 --out reports/balance/forms
+npm run balance -- --suite elements --pairs 10 --out reports/balance/elements
+npm run balance -- --profiles form:chain,form:orb --pairs 30 --arena flat --out reports/balance/chain-orb
+npm run balance -- --profiles form:chain,tactic:guard,tactic:adaptive --pairs 10 --arena cover --out reports/balance/counters
+```
+
+`--pairs 10` plays ten seeds twice per matchup, swapping the bots' spawn positions and update order (20 games). The default compares six strategies in a round robin. `forms` tests all 33 forms against the normal rival; `elements` tests all 11 elements as orb specialists against that rival. `ai` compares easy/normal/hard rivals and a basic-bolt-only bot.
+
+Reports contain win rates, draws/timeouts, match duration, effective HP damage, mana efficiency, healing, crowd-control time, interrupted/failed casts, structure damage/destruction, and per-element/form damage. Mana efficiency includes funnel upkeep. Each output folder contains `report.md`, `summary.json`, `matches.csv`, and individual match JSON files. Existing reports are preserved; choose a new output folder for a new run. Generated reports are ignored by Git.
+
+Replay a match with a timed cast/damage log:
+
+```sh
+npm run balance -- --replay reports/balance/forms/matches/0001.json --out reports/balance/replay
+npm run balance -- --help
+```
+
+The simulation runs the game's real spell and combat modules, rival AI, animated cast origins, movement, terrain collision, and delayed effects. Every match gets an isolated worker and seeded random numbers; timers use simulated time. Runtime errors fail the run instead of silently dropping spells. Completed matches are saved incrementally and carry the source fingerprint.
+
+**Scope:** these are duel rounds on terrain without scenery obstacles, flat ground with `--arena flat`, or two cover pillars with `--arena cover`. There is no storm, loot, speech playback or live Jev interpretation. Native rivals use their existing offline parser and chant timing. Controlled form/element profiles use synthetic spell parameters through the same finalized-spec builder: power/tier 0.5, other numeric axes 0.5, and a two-second chant. Fixed form/element profiles retain normal movement and basic bolts, with tactical choices disabled. `tactic:guard` prepares barriers; `tactic:adaptive` reacts to observed threats, flanks barriers, attacks drones and escapes prisons. Both use chain as their default offense and the same synthetic parameters and chant time as controlled forms. Native normal/hard rivals also use counter decisions. A form specialist can perform poorly because it never combines that form with another spell. Use `--power`, `--tier`, `--chant-seconds`, `--distance`, `--seed`, `--seconds`, and `--hz` to test sensitivity. Changing chant time changes action frequency, never a spell's stats.
+
+Treat results as candidates for further playtesting. Compare matched opponents and inspect replays before changing values; a timeout is always a draw. The paired standard error describes variation across seeds and is not a confidence interval. The game rules are unchanged by the harness; body physics and bot hit interruption are shared with the browser game.
+
+See [BALANCE_CHANGES.md](BALANCE_CHANGES.md) for the mana/counter changes and measured results, and [BALANCE_REPORT.md](BALANCE_REPORT.md) for the original baseline.
 
 ## Voice diagnostics
 

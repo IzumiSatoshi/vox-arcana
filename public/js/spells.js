@@ -11,7 +11,8 @@ import { Ribbon, boltPoints } from './fx.js';
 import { MagicCircle } from './magicCircle.js';
 import { ELEMENTS, paletteFor } from './elements.js';
 import { weakenSpec } from './spellbook.js';
-import { applyHit } from './combat.js';
+import { applyHit, Combatant } from './combat.js';
+import { spendMana, funnelUpkeep } from './mana.js';
 import { rand, clamp, lerp, mulberry32, TAU, fbm, pick } from './util.js';
 
 // ------------------------------------------------------------ shared geometry
@@ -173,10 +174,11 @@ class Spell {
   remove(o) { this.g.scene.remove(o); disposeObj(o); const i = this.objs.indexOf(o); if (i >= 0) this.objs.splice(i, 1); }
   trail(color, core, width, max, intensity) { const t = new Trail(this, color, core, width, max, intensity); this.trails.push(t); return t; }
   // a decoy's spells belong to its owner's side: they never touch the owner or the owner's other doubles
-  targets() { const me = this.caster.owner || this.caster; return this.g.combatants.filter((c) => c.alive && c !== this.caster && c !== me && !(c.decoy && c.owner === me) && !(me.team && (c.owner || c).team === me.team)); } // no friendly fire in duos
+  targets() { const me = this.caster.owner || this.caster; return [...this.g.combatants, ...this.sys.structures].filter((c) => c.alive && c !== this.caster && c !== me && !((c.decoy || c.structure) && c.owner === me) && !(me.team && (c.owner || c).team === me.team)); } // no friendly fire in duos
   nearestTarget(from, dir = null, cone = 0.6, range = 80) {
     let best = null, bd = Infinity;
     for (const t of this.targets()) {
+      if (t.structure) continue; // automatic locks select mages; aim attacks at summon bodies/cores
       const c = t.center(); const d = c.distanceTo(from);
       if (d > range) continue;
       if (dir) { const dot = _v.subVectors(c, from).normalize().dot(dir); if (dot < cone) continue; }
@@ -213,18 +215,20 @@ class Spell {
   }
   // blocks by walls / wards
   barrierHit(a, b) {
+    let nearest = null;
     for (const bar of this.sys.barriers) {
       if (bar.owner === this.caster) continue;
       const t = bar.segment(a, b);
-      if (t !== null) return { bar, t };
+      if (t !== null && (!nearest || t < nearest.t)) nearest = { bar, t };
     }
-    return null;
+    return nearest;
   }
   updateCommon(dt) {
     for (let i = this.trails.length - 1; i >= 0; i--) if (!this.trails[i].update()) this.trails.splice(i, 1);
   }
   finished() { return this.done && this.trails.length === 0; }
   dispose() {
+    this.sys.removeStructures(this);
     for (const p of this.projectiles) if (p.haze) p.haze.alive = false;
     if (this.hazeH) this.hazeH.alive = false;
     if (this.lens) this.g.fx.distortScene.remove(this.lens);
@@ -439,6 +443,8 @@ class BarrageSpell extends Spell {
 class FunnelSpell extends Spell {
   constructor(...a) {
     super(...a);
+    // A recast replaces the existing swarm; it cannot stack free autonomous fire.
+    for (const old of this.sys.active) if (old.caster === this.caster && old.spec.shape === 'funnels') old.life = old.t;
     const s = this.spec;
     this.n = Math.round(clamp(2 + s.count * 4 + this.m * 2, 2, 8));
     this.life = 4 + s.duration * 6 + this.m * 2;
@@ -455,16 +461,23 @@ class FunnelSpell extends Spell {
       g.scale.setScalar(1.2 + this.m * 0.6);
       g.position.copy(origin); this.add(g);
       const tr = this.trail(this.pal.color, this.pal.core, 0.08, 16, 2);
-      this.drones.push({ g, tr, cd: 0.9 + i * 0.13, phase: (i / this.n) * TAU, vel: new THREE.Vector3() });
+      const drone = { g, tr, cd: 0.9 + i * 0.13, phase: (i / this.n) * TAU, vel: new THREE.Vector3(), dead: false };
+      drone.body = this.sys.addStructure(this, { pos: g.position, radius: 0.65, hp: 12 + s.power * 12, kind: 'funnel',
+        onBreak: () => { drone.dead = true; tr.dead = true; g.visible = false; this.g.fx.explosion(this.el, g.position, 0.8, 0.2, this.pal); } });
+      this.drones.push(drone);
     }
     this.rate = 1.45 - s.speed * 0.5;
   }
   update(dt) {
     this.t += dt;
-    const s = this.spec, t = this.t, ending = t > this.life;
-    const target = this.caster.alive ? this.nearestTarget(this.caster.eye(new THREE.Vector3()), null, -1, 90) : null;
+    const s = this.spec, t = this.t;
+    if (!this.caster.alive || !this.drones.some(d => !d.dead)) this.life = Math.min(this.life, t - dt);
+    if (t <= this.life && !spendMana(this.caster, funnelUpkeep(s) * dt)) this.life = t - dt;
+    const ending = t > this.life;
+    const target = !ending ? this.nearestTarget(this.caster.eye(new THREE.Vector3()), null, -1, 60) : null;
     const home = this.caster.center();
     for (const d of this.drones) {
+      if (d.dead) continue;
       let want;
       if (t < 0.7 || ending || !target) {
         const a = d.phase + t * 3;
@@ -476,7 +489,9 @@ class FunnelSpell extends Spell {
       }
       const acc = want.clone().sub(d.g.position).multiplyScalar(6).sub(d.vel.clone().multiplyScalar(2.5));
       d.vel.addScaledVector(acc, dt);
+      const previous = d.g.position.clone();
       d.g.position.addScaledVector(d.vel, dt);
+      if (this.g.world.solid(d.g.position)) { d.g.position.copy(previous); d.vel.multiplyScalar(-0.2); }
       if (target) d.g.lookAt(target.center()); else d.g.lookAt(_v.copy(d.g.position).add(d.vel));
       d.tr.push(d.g.position);
       if (Math.random() < 0.3) this.emit(d.g.position, 1, 0.15, 0.3);
@@ -485,15 +500,19 @@ class FunnelSpell extends Spell {
       if (target && t > 0.8 && !ending && d.cd <= 0) {
         d.cd = this.rate * rand(0.8, 1.2);
         const from = d.g.position.clone(), to = target.center().add(new THREE.Vector3(rand(-0.2, 0.2), rand(-0.3, 0.3), rand(-0.2, 0.2)));
+        const distance = from.distanceTo(to);
+        const cover = this.g.world.raycast(from, to.clone().sub(from).normalize(), distance, 0.4);
+        if (cover.hit && cover.dist < distance - 0.3) continue;
         const bh = this.barrierHit(from, to);
         if (bh) { to.lerpVectors(from, to, bh.t); bh.bar.damage(8 * s.dmgMult, to); }
         this.g.fx.bolt(from, to, this.pal.color, { look: this.look, width: 0.05 + this.m * 0.03, dur: 0.14, jag: this.el === 'lightning' ? 0.18 : 0.02, branches: 0, flicker: false });
         this.g.fx.explosion(this.el, to, 0.5, 0.1, this.pal, { look: this.look, noDecal: true });
-        if (!bh) this.hit(target, 6.5, to);
+        if (!bh) this.hit(target, 3.5, to);
         this.g.audio.cast(this.el, 0.08, from, this.look);
       }
     }
     if (ending && t > this.life + 0.8 && !this.done) {
+      this.sys.removeStructures(this);
       for (const d of this.drones) { this.g.fx.explosion(this.el, d.g.position, 0.6, 0.1, this.pal, { look: this.look, noDecal: true }); d.tr.dead = true; this.remove(d.g); }
       this.drones.length = 0; this.done = true;
     }
@@ -1580,16 +1599,34 @@ class ChainSpell extends Spell {
     super(...a);
     const s = this.spec;
     this.strikes = Math.round(clamp(1 + s.count * 4 + this.m * 1.5, 1, 7));
-    this.interval = 0.16 - s.speed * 0.08; this.next = 0.05; this.n = 0;
+    this.windup = 1.1;
+    this.interval = 0.16 - s.speed * 0.08; this.next = this.windup; this.n = 0;
+    this.lock = this.nearestTarget(this.sys.castOrigin(this.caster), this.caster.getAim().dir, 0.96, 48);
+    if (this.lock?.isPlayer) this.g.hud?.banner(this.g.hud.tr('warn.chain'), '', this.windup);
+    this.telegraph = 0;
     this.width = 0.08 + this.m * 0.14 + s.size * 0.08;
   }
   update(dt) {
     this.t += dt; this.next -= dt;
     const s = this.spec;
+    if (!this.caster.canAct()) { this.done = true; return false; }
+    if (this.t < this.windup && this.lock?.alive) {
+      this.telegraph -= dt;
+      if (this.telegraph <= 0) {
+        this.telegraph = 0.12;
+        const p = this.lock.center();
+        this.g.fx.ring(p, this.pal.color, 1.1, 0.18);
+        this.g.fx.bolt(this.sys.castOrigin(this.caster), p, this.pal.color, { width: 0.018, dur: 0.14, jag: 0, branches: 0 });
+      }
+    }
     if (this.n < this.strikes && this.next <= 0) {
       this.next = this.interval; this.n++;
       const origin = this.sys.castOrigin(this.caster).clone(), aim = this.caster.getAim();
-      const target = this.nearestTarget(origin, aim.dir, 0.86, 60);
+      const locked = this.lock;
+      const delta = locked?.alive ? locked.center().sub(origin) : null;
+      const target = delta && delta.length() <= 48 && delta.normalize().dot(aim.dir) >= 0.96 ? locked : null;
+      // Losing lock wastes the remaining paid strikes; never snap to a new foe.
+      if (!target) this.lock = null;
       let end = target ? target.center() : aim.point.clone();
       const rc = this.g.world.raycast(origin, end.clone().sub(origin).normalize(), origin.distanceTo(end), 0.6);
       let blocked = rc.hit && rc.dist < origin.distanceTo(end) - 0.8;
@@ -1621,10 +1658,11 @@ class ChainSpell extends Spell {
       }
       this.light(end, 800, 30);
     }
-    if (this.n >= this.strikes && this.t > this.strikes * this.interval + 0.5) this.done = true;
+    if (this.n >= this.strikes && this.t > this.windup + this.strikes * this.interval + 0.5) this.done = true;
     this.updateCommon(dt);
     return !this.finished();
   }
+  threats() { return this.t < this.windup && this.lock?.alive ? [{ lock: true, target: this.lock, pos: this.lock.center(), origin: this.caster.center(), time: this.windup - this.t }] : []; }
 }
 
 // ------------------------------------------------------------ 12. STORM (area rain)
@@ -2686,6 +2724,8 @@ class BlinkSpell extends Spell {
     const dest = eye.clone().addScaledVector(dir, Math.max(0, rc.dist - 1)); dest.y -= 1.62;
     dest.y = Math.max(dest.y, this.g.world.groundAt(dest.x, dest.z, dest.y + 1.5));
     c.pos.copy(dest); c.vel.multiplyScalar(0.2);
+    // Teleportation is an escape: a prison must not clamp the mage back next tick.
+    for (const spell of this.sys.active) if (spell.trapped?.has(c)) spell.trapped.delete(c);
     const fx = this.g.fx;
     for (const q of [from, dest]) { fx.explosion(this.el, q.clone().setY(q.y + 1), 1.4, 0.3, this.pal, { look: this.look, noDecal: true }); fx.shockwave(q.clone().setY(q.y + 1), 5, 1.2, 0.35); }
     // afterimage streak
@@ -2774,7 +2814,21 @@ export { Spell, Trail, SPHERE, SPHERE_LO, OCTA, SMOOTH, ROCK, FLECK, COMET, SPIK
 
 // ------------------------------------------------------------ system
 export class SpellSystem {
-  constructor(game) { this.game = game; this.active = []; this.barriers = []; this.seeds = []; }
+  constructor(game) { this.game = game; this.active = []; this.barriers = []; this.seeds = []; this.structures = []; }
+  addStructure(spell, { pos, radius, hp, kind, onBreak }) {
+    const c = new Combatant({ id: `structure-${spell.id}-${this.structures.length}`, name: kind });
+    c.structure = true; c.kind = kind; c.owner = spell.caster.owner || spell.caster; c.spell = spell;
+    c.pos = pos; c.hp = c.maxHp = hp; c.radius = radius;
+    c.center = (out = new THREE.Vector3()) => out.copy(pos);
+    c.hits = (p, r = 0) => p.distanceToSquared(pos) <= (radius + r) ** 2;
+    c.distTo = p => Math.max(0, p.distanceTo(pos) - radius);
+    c.damage = dmg => { if (!c.alive) return; c.hp = Math.max(0, c.hp - dmg); if (!c.hp) { c.alive = false; onBreak?.(); } };
+    this.structures.push(c); return c;
+  }
+  removeStructures(spell) {
+    for (const c of this.structures) if (c.spell === spell) c.alive = false;
+    this.structures = this.structures.filter(c => c.spell !== spell);
+  }
   castOrigin(c) { return c.castOrigin ? c.castOrigin() : c.eye(new THREE.Vector3()); }
   cast(spec, caster) {
     const Cls = SHAPE_CLASS[spec.shape] || OrbSpell;
@@ -2893,5 +2947,5 @@ export class SpellSystem {
       if (!alive) { s.dispose(); this.active.splice(i, 1); }
     }
   }
-  clear() { for (const s of this.active) s.dispose(); this.active.length = 0; this.barriers.length = 0; }
+  clear() { for (const s of this.active) s.dispose(); this.active.length = 0; this.barriers.length = 0; this.structures.length = 0; }
 }

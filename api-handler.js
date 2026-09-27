@@ -1,16 +1,41 @@
+import { ApiRateLimit } from './api-rate-limit.js';
 import { ELEMENTS, SHAPES, TRAITS, SCORES } from './spell-ontology.js';
+import { SpellCache, spellCacheVersion } from './spell-cache.js';
+import { createP2PSignaling } from './p2p-signaling.js';
 
-export function createApiHandler({ hosted = false, localModel = { status: () => ({ phase: 'disabled' }) }, config: localConfig = {}, apiKey } = {}) {
+export function createApiHandler({ hosted = false, localModel = { status: () => ({ phase: 'disabled' }) }, config: localConfig = {}, apiKey, spellCache } = {}) {
   const config = {
     url: process.env.JEV_URL || localConfig.url || 'https://api.typesafe.ai/v1/systemone',
     model: process.env.JEV_MODEL || localConfig.model || 'jev-latest',
     timeoutMs: localConfig.timeoutMs || 6000,
   };
-  // Hosted traffic must use AI Gateway so the project spend budget applies.
-  const API_KEY = hosted ? null : process.env.JEV_API_KEY?.trim() || process.env.TYPESAFE_API_KEY?.trim() || apiKey;
+  const API_KEY = process.env.JEV_API_KEY?.trim() || process.env.TYPESAFE_API_KEY?.trim() || apiKey;
+  // Selection belongs to the server, never to the request body. Preserve defaults
+  // for existing installs; an explicit choice never falls back to another biller.
+  const endpoint = process.env.JEV_ENDPOINT ?? localConfig.endpoint ?? (hosted ? 'gateway' : API_KEY ? 'direct' : 'gateway');
+  const direct = endpoint === 'direct';
+  const validEndpoint = ['direct', 'gateway'].includes(endpoint);
+  const model = direct ? config.model : 'typesafe-ai/jev';
   // At runtime Vercel delivers OIDC through the request context, not the environment.
   const gatewayAvailable = (hosted && !!process.env.VERCEL) || !!process.env.AI_GATEWAY_API_KEY || !!process.env.VERCEL_OIDC_TOKEN;
-  const jevState = { keyLoaded: !!API_KEY || gatewayAvailable, lastOk: null, lastError: null, lastLatency: null, calls: 0 };
+  const jevState = { keyLoaded: validEndpoint && (direct ? !!API_KEY : gatewayAvailable), lastOk: null, lastLatency: null, calls: 0 };
+  function failure(errorCode, retryable = false) {
+    const messages = {
+      invalid_endpoint: 'The server endpoint setting must be direct or gateway.',
+      missing_credentials: 'The selected provider has no server credentials configured.',
+      authentication_failed: 'The selected provider rejected the server credentials. The site owner must check them.',
+      access_denied: 'The selected provider denied access. The site owner must check provider permissions.',
+      billing_error: 'The selected provider requires payment or additional credits.',
+      upstream_rate_limit: 'The selected provider rate limit was reached. Please wait before trying again.',
+      upstream_unavailable: 'The selected provider is temporarily unavailable. Please try again shortly.',
+      upstream_rejected: 'The selected provider rejected the spell request. The site owner must check the API configuration.',
+      invalid_response: 'The selected provider returned an invalid response. Please try again shortly.',
+      timeout: 'The selected provider took too long to respond. Please try again.',
+      provider_network_error: 'The server could not reach the selected provider. Please try again.',
+      service_error: 'Spell interpretation failed. Please try again shortly.',
+    };
+    return { ok: false, endpoint: validEndpoint ? endpoint : null, error: messages[errorCode], errorCode, retryable };
+  }
 
   // ---------------------------------------------------------------- spell ontology
   function buildQuestions() {
@@ -116,39 +141,44 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
   }
 
   // ---------------------------------------------------------------- Jev call
-  const cache = new Map();
+  const cache = spellCache || new SpellCache({ version: spellCacheVersion({ endpoint, model, questions: QUESTIONS, url: config.url }) });
+  const p2p = createP2PSignaling(cache, { hosted });
+  const limits = new ApiRateLimit(cache, hosted);
   async function askJev(text, language = 'en-US') {
-    const key = `${language}:${text.trim().toLowerCase()}`;
-    if (cache.has(key)) return { ...cache.get(key), cached: true, latency: 0 };
+    return cache.resolve(text, language, () => interpretJev(text, language));
+  }
+  async function interpretJev(text, language) {
     const state = [
       `Incantation spoken by a mage during a magic duel (voice recognition language: ${language}): "${text}"`,
       `Determine spell strength and characteristics solely from the meaning of the incantation.`,
     ].join('\n');
-    const direct = !!API_KEY;
-    // Vercel's project OIDC identity keeps hosted spend under the project budget.
-    let token = API_KEY || (hosted && process.env.VERCEL ? null : process.env.AI_GATEWAY_API_KEY?.trim());
-    if (!token && process.env.VERCEL) {
-      const { getVercelOidcToken } = await import('@vercel/oidc');
-      token = await getVercelOidcToken();
+    let token = direct ? API_KEY : (hosted && process.env.VERCEL ? null : process.env.AI_GATEWAY_API_KEY?.trim() || process.env.VERCEL_OIDC_TOKEN?.trim());
+    if (!direct && !token && process.env.VERCEL) {
+      try {
+        const { getVercelOidcToken } = await import('@vercel/oidc');
+        token = await getVercelOidcToken();
+      } catch { throw Object.assign(new Error('Gateway authentication failed'), { errorCode: 'authentication_failed' }); }
     }
-    if (!token) throw new Error('No Jev or AI Gateway credentials configured.');
+    if (!token) throw Object.assign(new Error('Missing credentials'), { errorCode: 'missing_credentials' });
     const t0 = performance.now();
     const res = await fetch(direct ? config.url : 'https://ai-gateway.vercel.sh/typesafe/v1/systemone', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: direct ? config.model : 'typesafe-ai/jev', state, questions: QUESTIONS }),
+      body: JSON.stringify({ model, state, questions: QUESTIONS }),
       signal: AbortSignal.timeout(config.timeoutMs),
     });
     const latency = Math.round(performance.now() - t0);
     const bodyText = await res.text();
-    if (!res.ok) throw Object.assign(new Error(`Jev HTTP ${res.status}: ${bodyText.slice(0, 300)}`), { upstreamStatus: res.status });
-    const json = JSON.parse(bodyText);
-    const answers = json.answers || json.decisions || json.output || {};
+    // Provider error bodies may contain credentials or request text. Never log
+    // or return them; classify only by status and locally generated error codes.
+    if (!res.ok) throw Object.assign(new Error('Provider request failed'), { upstreamStatus: res.status });
+    let json;
+    try { json = JSON.parse(bodyText); } catch { throw Object.assign(new Error('Invalid response'), { errorCode: 'invalid_response' }); }
+    const answers = json?.answers || json?.decisions || json?.output;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw Object.assign(new Error('Invalid response'), { errorCode: 'invalid_response' });
     const params = normalise(answers);
-    const out = { params, model: json.model || config.model, latency, raw: json };
+    const out = { params, endpoint, model: json.model || model, latency, raw: json };
     if (process.env.JEV_DEBUG) console.log(JSON.stringify(answers, null, 1));
-    if (cache.size > 300) cache.delete(cache.keys().next().value);
-    cache.set(key, out);
     return out;
   }
 
@@ -174,7 +204,29 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
       }
     if (url.pathname === '/api/status') {
       const publicJevState = { keyLoaded: jevState.keyLoaded, lastOk: jevState.lastOk, lastLatency: jevState.lastLatency };
-      return sendJson(res, 200, { jev: { ...publicJevState, model: hosted ? 'typesafe-ai/jev' : config.model }, local: localModel.status(), capabilities: { localModel: !hosted } });
+      const problem = !validEndpoint ? failure('invalid_endpoint') : !jevState.keyLoaded ? failure('missing_credentials') : null;
+      return sendJson(res, 200, { jev: { ...publicJevState, endpoint: validEndpoint ? endpoint : null, model, ...(problem && { errorCode: problem.errorCode, error: problem.error }) }, cache: cache.status(), local: localModel.status(), capabilities: { localModel: !hosted } });
+    }
+    if (url.pathname === '/api/p2p') {
+      if (req.method === 'GET') return sendJson(res, 200, { ok: true, ...p2p.status() });
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST required.' });
+      try {
+        const body = req.body && typeof req.body === 'object' ? req.body : JSON.parse(typeof req.body === 'string' ? req.body : await readBody(req));
+        if (!body || Array.isArray(body) || JSON.stringify(body).length > 32768) return sendJson(res, 400, { ok: false, error: 'Invalid room request.' });
+        await limits.check(req, '/api/p2p', body.action);
+        return sendJson(res, 200, { ok: true, ...await p2p.act(body) });
+      } catch (error) { return sendJson(res, error.status || 503, { ok: false, error: error.status ? error.message : 'Room service unavailable. Please retry.' }); }
+    }
+    if (url.pathname === '/api/spell-cache' && req.method === 'GET') {
+      try { await limits.check(req, '/api/spell-cache'); } catch (e) { return sendJson(res, e.status, { ok:false, error:e.message }); }
+      let language;
+      try {
+        const requested = url.searchParams.get('language') || 'en-US';
+        if (requested.length > 35) throw new Error('invalid language');
+        language = Intl.getCanonicalLocales(requested)[0];
+        if (!/^[a-z]{2,3}(?:-|$)/i.test(language)) throw new Error('invalid language');
+      } catch { return sendJson(res, 400, { ok: false, error: 'invalid recognition language' }); }
+      return sendJson(res, 200, { ok: true, ...await cache.top(language) });
     }
     if (url.pathname === '/api/local/load' && req.method === 'POST') {
       if (hosted) return sendJson(res, 503, { ok: false, error: 'Local MiniLM requires the local server.' });
@@ -207,22 +259,28 @@ export function createApiHandler({ hosted = false, localModel = { status: () => 
         try { return sendJson(res, 200, { ok: true, ...await localModel.interpret(text) }); }
         catch (e) { return sendJson(res, 503, { ok: false, error: e.message }); }
       }
-      if (!jevState.keyLoaded) return sendJson(res, 200, { ok: false, error: 'no Jev API key found' });
+      if (!validEndpoint) return sendJson(res, 200, failure('invalid_endpoint'));
+      if (!jevState.keyLoaded) return sendJson(res, 200, failure('missing_credentials'));
+      try { await limits.check(req, '/api/spell'); } catch (e) { return sendJson(res, e.status, { ok:false, error:e.message }); }
       jevState.calls++;
       try {
         const r = await askJev(text, language);
-        jevState.lastOk = Date.now(); jevState.lastLatency = r.latency; jevState.lastError = null;
+        jevState.lastOk = Date.now(); jevState.lastLatency = r.latency;
         const p = r.params;
         console.log(`[jev ${r.cached ? 'cache' : r.latency + 'ms'}] ${p.element}/${p.element2 || '-'} ${p.shape} pow=${p.power?.toFixed(2)} tier=${p.tier?.toFixed(2)}`);
         return sendJson(res, 200, { ok: true, ...r });
       } catch (e) {
-        jevState.lastError = String(e.message || e).slice(0, 300);
-        console.warn('[jev error]', jevState.lastError);
-        const retryable = /Jev HTTP (429|502|503|504)\b|timeout|timed out|fetch failed/i.test(jevState.lastError);
-        const errorCode = e.upstreamStatus === 429 ? 'upstream_rate_limit'
-          : [502, 503, 504].includes(e.upstreamStatus) ? 'upstream_unavailable'
-          : /timeout|timed out/i.test(jevState.lastError) ? 'timeout' : 'service_error';
-        return sendJson(res, 200, { ok: false, error: 'Spell interpretation is temporarily unavailable.', errorCode, retryable });
+        const errorCode = e.errorCode || (e.upstreamStatus === 401 ? 'authentication_failed'
+          : e.upstreamStatus === 403 ? 'access_denied'
+          : e.upstreamStatus === 402 ? 'billing_error'
+          : e.upstreamStatus === 429 ? 'upstream_rate_limit'
+          : e.upstreamStatus >= 500 ? 'upstream_unavailable'
+          : e.upstreamStatus === 408 || e.name === 'TimeoutError' || e.name === 'AbortError' ? 'timeout'
+          : e.upstreamStatus ? 'upstream_rejected'
+          : e instanceof TypeError ? 'provider_network_error' : 'service_error');
+        const retryable = ['upstream_rate_limit', 'upstream_unavailable', 'timeout', 'provider_network_error', 'invalid_response'].includes(errorCode);
+        console.warn('[jev error]', endpoint, errorCode);
+        return sendJson(res, 200, failure(errorCode, retryable));
       }
     }
       return sendJson(res, 404, { ok: false, error: 'API route not found' });

@@ -1,5 +1,7 @@
 import { cp, mkdir, readdir, access, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { buildP2P } from './build-p2p.js';
+await buildP2P();
 for (const dir of ['public/js', 'api']) {
   for (const name of await readdir(dir)) {
     if (!name.endsWith('.js')) continue;

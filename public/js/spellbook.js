@@ -3,6 +3,7 @@
 // 2) Jev (via /api/spell) decides element / shape / numeric parameters from natural language
 // 3) converted into a procedural spec without timing or voice-strength bonuses
 import { clamp, hashStr } from './util.js';
+import { baseManaCost } from './mana.js';
 import { ELEMENT_KEYS, SHAPE_KEYS, spellName } from './elements.js';
 
 const EL_WORDS = {
@@ -154,6 +155,8 @@ export function localParse(text) {
 
 // ---------------------------------------------------------------- Jev bridge
 export async function askJev(text, meta = {}) {
+  // Session requests, including retries and server-cache lookups. Browser-cache hits bypass this function.
+  if ((meta.provider || 'jev') === 'jev') askJev.calls = (askJev.calls || 0) + 1;
   const t0 = performance.now();
   try {
     const r = await fetch('/api/spell', {
@@ -166,8 +169,8 @@ export async function askJev(text, meta = {}) {
     if (r.ok === false) return { ok: false, error: `HTTP ${r.status}`, errorCode: 'service_error', retryable: [502, 503, 504].includes(r.status) };
     let j;
     try { j = await r.json(); } catch { return { ok: false, error: 'Invalid server response.', errorCode: 'service_error', retryable: true }; }
-    if (!j.ok) return { ok: false, error: j.error, errorCode: j.errorCode || 'service_error', retryable: !!j.retryable, rtt: performance.now() - t0 };
-    return { ok: true, params: j.params, raw: j.raw, latency: j.latency, cached: j.cached, model: j.model, provider: j.provider || 'jev', rtt: Math.round(performance.now() - t0) };
+    if (!j.ok) return { ok: false, endpoint: j.endpoint, error: j.error, errorCode: j.errorCode || 'service_error', retryable: !!j.retryable, rtt: performance.now() - t0 };
+    return { ok: true, params: j.params, raw: j.raw, latency: j.latency, cached: j.cached, cacheVersion: j.cacheVersion, model: j.model, endpoint: j.endpoint, provider: j.provider || 'jev', rtt: Math.round(performance.now() - t0) };
   } catch (e) {
     return { ok: false, error: String(e.message || e), errorCode: e.name === 'TimeoutError' ? 'timeout' : 'network_error', retryable: true, rtt: performance.now() - t0 };
   }
@@ -250,12 +253,11 @@ export function finalizeSpec(spec) {
   // Power grade: 0 minor · 1 standard · 2 greater · 3 ultimate. Each grade unlocks new procedural layers, not just size.
   spec.level = spec.basic ? 0 : spec.tierInt >= 8 || spec.mag >= 1.05 ? 3 : spec.tierInt >= 6 || spec.mag >= 0.85 ? 2 : spec.tierInt >= 4 || spec.mag >= 0.6 ? 1 : 0;
   spec.dmgMult = (0.35 + 2.2 * Math.pow(spec.mag, 2.2)) * [0.85, 1, 1.12, 1.3][spec.level];
-  spec.cost = Math.round(8 + 70 * Math.pow(spec.mag, 1.5));
+  spec.cost = baseManaCost(spec);
   spec.seed = spec.seed ?? hashStr(spec.text + ':' + spec.element + spec.shape);
   spec.substance ||= 'native'; spec.height ??= 0.5; spec.width ??= 0.5;
   spec.trajectory ||= 'straight'; spec.pattern ||= 'single'; spec.payload ||= 'explode'; spec.morph ||= 'orb'; spec.construct ||= 'platform';
   if (spec.homing > 0.6 && spec.trajectory === 'straight') spec.trajectory = 'homing';
-  if (['leap', 'flight', 'blink', 'construct', 'enhance', 'hand', 'ward'].includes(spec.shape)) spec.cost = Math.round(spec.cost * 0.7);
   spec.name = spellName(spec);
   return spec;
 }
@@ -292,6 +294,7 @@ const OPEN = {
   poison: ['Plague of the drowned kingdom', 'Venom of the thousand serpents', 'Miasma of the rotting marsh'],
 };
 const CORE = {
+  blink: ['blink forward', 'teleport ahead', 'rift step'],
   orb: ['{E}ball', '{E} orb', 'sphere of {e}'], barrage: ['{E} lances, a hundred strong', 'volley of {e} arrows', 'rain of {e} shards'],
   funnels: ['{E} familiars, hunt my foe', 'seeking {e} wisps', '{E} funnels'], beam: ['{E} cannon', '{E} ray', 'beam of pure {e}'],
   tornado: ['{E} tornado', 'cyclone of {e}', '{E} maelstrom'], meteor: ['{E} meteor', 'falling star of {e}', 'comet of {e}'],
@@ -318,6 +321,7 @@ const OPEN_JA = {
   poison: ['滅びし国の疫病よ', '千の蛇の猛毒よ', '腐れ沼の瘴気よ'],
 };
 const CORE_JA = {
+  blink: ['前方へ転移', '瞬間移動', '空間を跳べ'],
   orb: ['{E}の球', '{E}弾'], barrage: ['{E}の槍、百連', '{E}の矢の雨'], funnels: ['{E}の使い魔よ、敵を狩れ', '追尾する{E}の精霊'],
   beam: ['{E}の光線', '{E}の砲撃'], tornado: ['{E}の竜巻', '{E}の大旋風'], meteor: ['{E}の隕石', '天より降れ、{E}の星'],
   nova: ['{E}の大爆発', '{E}爆裂'], spikes: ['大地より出でよ、{E}の棘', '{E}の柱'], wall: ['{E}の壁', '{E}の城壁'], barrier: ['{E}の結界', '{E}のバリア'],

@@ -1,3 +1,5 @@
+import { stepBody } from './movement.js';
+import { effectiveManaCost, spendSpellMana } from './mana.js';
 import './style.js'; // global art direction: must patch shader chunks before anything compiles
 import * as THREE from 'three';
 import { TIME } from './shaders.js';
@@ -9,7 +11,7 @@ import { SpellSystem } from './spells.js';
 import './spells-extra.js';
 import { Royale, royaleGuide, royaleRecord } from './royale.js';
 import { FORM_GUIDE } from './form-guide.js';
-import { Combatant, ENHANCE } from './combat.js';
+import { Combatant, ENHANCE, interruptBotOnDamage } from './combat.js';
 import { MageModel, ViewModel, initViewEnv } from './characters.js';
 import { loadAnimeMage } from './anime-mage.js';
 import { MagicCircle } from './magicCircle.js';
@@ -22,28 +24,34 @@ import { t, setLang, getLang } from './i18n.js';
 import { UI_LANGUAGES, VOICE_LANGUAGES, uiLanguage, recognitionLanguage, defaultRecognitionLanguage } from './languages.js';
 import { bindLanguagePicker } from './language-picker.js';
 import { localParse, askJev, buildSpec, buildJevSpec, boltSpec, finalizeSpec } from './spellbook.js';
+import { requestCachedSpell, cachedSpellResult } from './jev-cache.js';
 import { ELEMENTS, SHAPES, ELEMENT_KEYS, elName, shapeName, reactName } from './elements.js';
 import { clamp, rand, TAU } from './util.js';
 import { warmSpellShaders } from './warmup.js';
+import { OnlineDuel } from './online.js';
+import { escapeHTML } from './safe-html.js';
 
 const $ = (id) => document.getElementById(id);
 const p0EarthFree = (c) => c.enhP('earth') === null;
 const hex = (n) => '#' + new THREE.Color(n).getHexString();
 
 // ------------------------------------------------------------------ settings
-const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, royaleTeams: 1, quality: 1, sens: 1, chantSize: 26, anime: true, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botJev: false, botJevDefaultsVersion: 1, botVoice: true, handsFree: false, localVoice: false, warmVoice: false, voiceDefaultsVersion: 2 };
+const DEFAULTS = { ui: uiLanguage(navigator.language || 'en'), lang: '', diff: 'normal', lobby: 8, royaleTeams: 1, quality: 1, sens: 1, chantSize: 26, anime: true, vol: 0.8, music: 0.175, useJev: true, spellProvider: 'jev', instantCast: false, botVoice: true, handsFree: false, localVoice: false, warmVoice: true, voiceDefaultsVersion: 2 };
 function loadSettings() {
   let s;
   try {
     const saved = JSON.parse(localStorage.getItem('voxarcana') || '{}');
     s = { ...DEFAULTS, ...saved };
-    // Apply the new rival default once; later manual opt-ins remain saved.
-    if (saved.botJevDefaultsVersion !== 1) { s.botJev = false; s.botJevDefaultsVersion = 1; saveSettings(s); }
+    // Discard the retired NPC API option, including old saved opt-ins.
+    delete s.botJev; delete s.botJevDefaultsVersion;
     // The previous release enabled experimental speech paths for everyone.
     // Migrate once so existing users also return to direct microphone capture.
-    if (saved.voiceDefaultsVersion !== 2) { s.localVoice = false; s.warmVoice = false; s.voiceDefaultsVersion = 2; saveSettings(s); }
+    if (saved.voiceDefaultsVersion !== 2) { s.localVoice = false; s.voiceDefaultsVersion = 2; saveSettings(s); }
   } catch { s = { ...DEFAULTS }; }
+  // These casting behaviors are fixed, including for older saved preferences.
+  s.jevPauseMs = 300; s.handsFree = false; s.warmVoice = true;
   s.ui = uiLanguage(s.ui);
+  s.fov = Number.isFinite(Number(s.fov)) && s.fov != null ? Math.max(50, Math.min(100, Number(s.fov))) : 78;
   s.lang = recognitionLanguage(s.lang) || recognitionLanguage(navigator.language) || defaultRecognitionLanguage(s.ui);
   return s;
 }
@@ -117,12 +125,44 @@ class Game {
     this.viewModel = new ViewModel(this.camera);
     this.viewModel.group.visible = false;
     this.bindInput(); this.bindMenus(); this.onResize();
+    this.online = new OnlineDuel(this);
+    this.cacheCheckAt = performance.now() + 60000;
     this.checkJev();
     this.startAttract();
     this.clock = new THREE.Clock();
-    $('loading').classList.add('hidden');
     this.loop();
-    this.shaderWarmup = warmSpellShaders(this); // compiles every spell shader in the background while the menu is up
+    this.shaderWarmup = this.prepareSession();
+  }
+
+  async prepareSession() {
+    const cacheWarmup = this.preloadSpellCache();
+    this.preparing = true;
+    $('loading').classList.remove('hidden');
+    $('loading-retry').classList.add('hidden');
+    $('loading-progress').value = 0;
+    $('loading-status').textContent = t('loading.spells');
+    // Prevent keyboard focus from reaching the menu behind the loading screen.
+    for (const id of ['menu', 'duel-setup', 'royale-setup']) $(id).inert = true;
+    try {
+      // Give the browser a chance to paint the loading screen before the first shader draw.
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+      this.warmupStats = await warmSpellShaders(this, {
+        onProgress: (done, total) => {
+          $('loading-progress').value = done / total;
+          $('loading-status').textContent = `${t('loading.spells')} ${Math.floor(done / total * 100)}%`;
+        },
+      });
+      await cacheWarmup;
+      this.clock.getDelta(); // Loading time must never advance combat.
+      this.preparing = false;
+      for (const id of ['menu', 'duel-setup', 'royale-setup']) $(id).inert = false;
+      $('loading').classList.add('hidden');
+    } catch (error) {
+      console.error('Session preparation failed:', error);
+      $('loading-status').textContent = t('loading.failed');
+      $('loading-retry').classList.remove('hidden');
+      $('loading-retry').onclick = () => { this.shaderWarmup = this.prepareSession(); };
+    }
   }
 
   // ------------------------------------------------------------ rendering
@@ -142,7 +182,7 @@ class Game {
       dispose.call(this);
     };
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.03, 4000);
+    this.camera = new THREE.PerspectiveCamera(this.settings.fov, innerWidth / innerHeight, 0.03, 4000);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
     addEventListener('resize', () => this.onResize());
@@ -158,9 +198,51 @@ class Game {
   screenFlash(color = '#fff', a = 0.5) { $('screen-flash').style.background = color; this.hud.flash = Math.max(this.hud.flash, a * (this.settings.calm ? 0.35 : 1)); }
 
   // ------------------------------------------------------------ Jev status
+  adoptCacheVersion(version) {
+    if (!version || version === this.cacheVersion || this.retiredCacheVersions?.has(version)) return false;
+    this.retiredCacheVersions ||= new Set();
+    if (this.cacheVersion) this.retiredCacheVersions.add(this.cacheVersion);
+    this.cacheVersion = version;
+    this.jevCache?.clear();
+    this.spec?.map?.clear();
+    if (this.spec) {
+      this.spec.pending?.clear(); this.spec.lastText = ''; this.spec.retry = null;
+      this.spec.latestMagic = null; this.spec.shownText = null;
+    }
+    return true;
+  }
+  async preloadSpellCache(language = this.settings.lang || 'en-US') {
+    const token = this.cacheLoadToken = {};
+    try {
+      const response = await fetch(`/api/spell-cache?language=${encodeURIComponent(language)}`, { signal: AbortSignal.timeout(3000), cache: 'no-store' });
+      if (!response.ok) return;
+      const body = await response.text();
+      if (body.length > 3 * 1024 * 1024) return;
+      const data = JSON.parse(body);
+      if (this.cacheLoadToken !== token || !data.ok || data.language !== language || !Array.isArray(data.entries) || typeof data.version !== 'string' || this.retiredCacheVersions?.has(data.version)) return;
+      this.adoptCacheVersion(data.version);
+      this.jevCache ||= new Map();
+      let loaded = 0;
+      for (const entry of data.entries.slice(0, 1000)) {
+        if (typeof entry.text !== 'string' || entry.text.length > 600 || !(entry.params?.isSpell >= 0.65)) continue;
+        const key = JSON.stringify(['jev', language, entry.text.trim().toLowerCase()]);
+        // Full responses already obtained this session retain their probabilities.
+        if (!this.jevCache.has(key)) this.jevCache.set(key, {
+          ok: true, cached: true, provider: 'jev', latency: 0, rtt: 0, cacheVersion: data.version,
+          params: entry.params, model: entry.model, endpoint: entry.endpoint,
+          raw: { model: entry.model, cachedSummary: true, params: entry.params },
+        });
+        loaded++;
+      }
+      while (this.jevCache.size > 5000) this.jevCache.delete(this.jevCache.keys().next().value);
+      this.spellCacheStats = { language, loaded, characters: body.length, shared: data.shared, version: data.version };
+    } catch { /* Preloading is optional; the server checks its cache on every request. */ }
+  }
   async checkJev() {
     try {
-      const s = await (await fetch('/api/status')).json();
+      const s = await (await fetch('/api/status', { signal: AbortSignal.timeout(3000), cache: 'no-store' })).json();
+      const knownVersion = this.cacheVersion;
+      if (this.adoptCacheVersion(s.cache?.version) && knownVersion) void this.preloadSpellCache();
       this.localStatus = s.local || { phase: 'outdated', error: t('local.restart') };
       this.capabilities = s.capabilities || { localModel: true };
       document.querySelector('#set-provider option[value=local]').disabled = !this.capabilities.localModel;
@@ -169,6 +251,7 @@ class Game {
         this.settings.spellProvider = 'jev'; $('set-provider').value = 'jev'; saveSettings(this.settings);
       }
       this.jevOnline = this.settings.spellProvider === 'local' ? s.local?.phase === 'ready' : !!s.jev.keyLoaded; this.jevModel = this.settings.spellProvider === 'local' ? 'Local MiniLM' : s.jev.model;
+      this.jevStatusError = s.jev.errorCode ? s.jev : null;
       this.serverUp = true;
     } catch { this.jevOnline = false; this.serverUp = false; }
     this.refreshJevLabels();
@@ -181,6 +264,12 @@ class Game {
       this.hud.jev(this.jevOnline ? 'on' : 'off', label);
       $('menu-status').textContent = label;
       $('local-model-status').textContent = this.serverUp === false ? t('jev.offline') : this.localStatus?.error || t(`local.${status}`);
+      return;
+    }
+    if (this.serverUp && this.jevStatusError) {
+      const message = this.jevError(this.jevStatusError);
+      this.hud.jev('off', message);
+      $('menu-status').textContent = message;
       return;
     }
     this.hud.jev(this.jevOnline ? 'on' : 'off', t(this.serverUp === false ? 'jev.offline' : this.jevOnline ? 'jev.ready' : 'jev.nokey'));
@@ -207,12 +296,13 @@ class Game {
     }
   }
   jevError(j) {
-    const codes = ['rate_limit', 'upstream_rate_limit', 'upstream_unavailable', 'timeout', 'network_error', 'service_error'];
-    return t(codes.includes(j?.errorCode) ? `chant.${j.errorCode}` : 'chant.jeverror');
+    const codes = ['rate_limit', 'upstream_rate_limit', 'upstream_unavailable', 'timeout', 'network_error', 'provider_network_error', 'service_error', 'invalid_endpoint', 'missing_credentials', 'authentication_failed', 'access_denied', 'billing_error', 'upstream_rejected', 'invalid_response'];
+    const endpoint = j?.endpoint === 'direct' ? 'Jev Direct' : j?.endpoint === 'gateway' ? 'Vercel AI Gateway' : '';
+    return (endpoint ? `${endpoint}: ` : '') + t(codes.includes(j?.errorCode) ? `chant.${j.errorCode}` : 'chant.jeverror');
   }
   noteJev(j) {
     if (!j) return;
-    if (j.ok) { this.jevFails = 0; this.jevOnline = true; this.hud.jev('on', `${j.provider === 'local' ? 'MiniLM' : 'Jev'} · ${j.cached ? 'cached' : j.latency + 'ms'}`); }
+    if (j.ok) { this.jevFails = 0; this.jevOnline = true; this.hud.jev('on', `${j.provider === 'local' ? 'MiniLM' : 'Jev'} · ${j.cached ? 'cached' : j.latency + 'ms'}${Number.isFinite(j.rtt) ? ` · RTT ${Math.round(j.rtt)}ms` : ''}`); }
     else { this.jevFails++; this.hud.jev('off', j.errorCode ? this.jevError(j) : t('jev.err')); if (this.jevFails >= 3) this.jevOnline = false; console.warn('Jev:', j.error); }
   }
 
@@ -283,6 +373,7 @@ class Game {
     this.hud.show(false);
   }
   startMode(mode) {
+    if (this.preparing) return;
     audio.init();
     this.clearArena();
     this.mode = mode;
@@ -312,6 +403,7 @@ class Game {
     this.lock();
   }
   endToMenu() {
+    this.online?.disconnect();
     document.exitPointerLock?.();
     this.startAttract();
     this.keys = {}; this.mouse.lmb = false; this.typing = false; this.backTo = null;
@@ -320,8 +412,22 @@ class Game {
     document.querySelector('#menu .mode-card')?.focus();
   }
   showScreen(id) {
+    if (id === 'settings') {
+      const online = this.mode === 'online' || this.backTo === 'online-lobby';
+      const note = $('settings-online-note');
+      note.classList.toggle('hidden', !online);
+      note.textContent = getLang() === 'ja'
+        ? (this.mode === 'online' ? '設定中も対戦は進行します。魔法の解釈はルームの設定が適用されます。' : 'ルームに参加したまま設定を変更できます。魔法の解釈はルームの設定が適用されます。')
+        : (this.mode === 'online' ? 'The duel continues while settings are open. Spell interpretation is set by the room.' : 'You stay in your room while adjusting settings. Spell interpretation is set by the room.');
+      $('settings').querySelector('[data-action="close-settings"]').textContent = this.backTo === 'online-lobby'
+        ? (getLang() === 'ja' ? 'ロビーに戻る' : 'Back to lobby')
+        : this.backTo === 'pause' ? (getLang() === 'ja' ? '対戦メニューに戻る' : 'Back to duel menu') : t('menu.back');
+      for (const key of ['set-provider', 'set-jev', 'set-loadmodel']) $(key).disabled = online;
+      $('settings').querySelector('.settings-advanced').classList.toggle('hidden', online);
+      $('set-botvoice').closest('label').classList.toggle('hidden', online);
+    }
     if (id === 'menu') void this.refreshVoiceDownload?.();
-    for (const s of ['menu', 'settings', 'howto', 'pause', 'inventory', 'duel-setup', 'royale-setup']) $(s).classList.toggle('hidden', s !== id);
+    for (const s of ['menu', 'settings', 'howto', 'pause', 'inventory', 'duel-setup', 'royale-setup', 'online-lobby']) $(s)?.classList.toggle('hidden', s !== id);
     this.paused = id === 'pause' || id === 'inventory' || ((id === 'settings' || id === 'howto') && this.mode !== 'menu');
     this.voice.setActive(this.mode !== 'menu' && !this.paused);
     audio.ambience?.(!this.paused);
@@ -335,16 +441,28 @@ class Game {
     }
   }
   lock() { $('c').requestPointerLock?.()?.catch?.(() => {}); }
+  openSettings(backTo = this.mode === 'menu' ? 'menu' : 'pause') {
+    this.backTo = backTo;
+    this.showScreen('settings');
+    $('set-quality').focus();
+  }
+  closeSettings() {
+    const target = this.backTo || (this.mode === 'menu' ? 'menu' : 'pause');
+    this.backTo = null;
+    this.showScreen(target);
+    const screen = $(target);
+    (target === 'online-lobby' ? $('online-settings') : screen?.querySelector('[data-action="settings"]'))?.focus();
+  }
 
   // ------------------------------------------------------------ voice & casting
   async initVoice() {
     if (this.voiceInit) return; this.voiceInit = true;
-    this.voice.lang = this.settings.lang; this.voice.handsFree = this.settings.handsFree;
-    this.voice.preferLocal = this.settings.localVoice; this.voice.prewarm = this.settings.warmVoice;
+    this.voice.lang = this.settings.lang; this.voice.handsFree = false;
+    this.voice.preferLocal = this.settings.localVoice; this.voice.prewarm = true;
     this.voice.onText = () => {
       if (this.paused || this.mode === 'menu') return;
       // Submit directly from recognition events; rendering must not drop revisions.
-      if (this.chanting || this.grace) this.speculate(this.voice.chantText() || this.voice.textOf(this.grace?.win));
+      if (this.chanting) this.speculate(this.voice.chantText());
       if (this.grace) this.resolveVoiceGrace();
     };
     this.voice.onStatus = (s) => {
@@ -398,17 +516,49 @@ class Game {
     this.hud.chant('', ''); this.hud.preview(null);
   }
   // speculative Jev: interpret the chant while it is still being spoken
-  speculate(text) {
+  requestJev(text, meta = {}) {
+    const online = this.mode === 'online';
+    const request = { ...meta, provider: online ? 'jev' : this.settings.spellProvider || 'jev', language: meta.language || this.voice.lang || this.settings.lang || 'en-US' };
+    const fetchResult = online && !this.online.ws?.host
+      ? (text, meta) => this.online.interpret(text, meta.language) : askJev;
+    return requestCachedSpell(this, text, request, fetchResult);
+  }
+  speculate(text, force = false) {
     const S = this.spec;
-    if (!S || S.closed || !text || !this.settings.useJev) return;
+    if (!S || S.closed || !text || (!this.settings.useJev && this.mode !== 'online')) return;
     const now = performance.now();
-    if (S.desiredText !== text) {
+    const changed = S.desiredText !== text;
+    if (changed) {
       S.desiredText = text;
+      S.changedAt = now;
+      S.shownText = null;
+      this.hud.preview(null); this.previewCost = 0;
       this.hud.jevPending?.(text, this.mode === 'practice');
     }
+    const provider = this.mode === 'online' ? 'jev' : this.settings.spellProvider || 'jev';
+    const key = JSON.stringify([provider, this.voice.lang || this.settings.lang || 'en-US', provider === 'jev' ? text.trim().toLowerCase() : text.trim()]);
+    this.jevCache ||= new Map();
+    const current = S.map.get(text);
+    const cached = current ? (changed ? cachedSpellResult(current) : current) : cachedSpellResult(this.jevCache.get(key));
+    if (cached) {
+      S.map.set(text, cached);
+      // A guest's downloaded cache may use another language than the host's.
+      // Warm the authoritative host while aiming so release can reuse it too.
+      if (this.mode === 'online' && !this.online.ws?.host && (force || now - Math.max(S.changedAt ?? now, this.voice.lastSpeechAt ?? 0) >= 300)) {
+        S.hostWarm ||= new Set();
+        if (!S.hostWarm.has(text)) { S.hostWarm.add(text); void this.online.interpret(text, this.voice.lang || this.settings.lang || 'en-US'); }
+      }
+      if (S.shownText !== text) {
+        S.shownText = text;
+        this.noteJev(cached);
+        if (cached.raw) this.hud.jevReply?.(cached.raw, text, this.mode === 'practice');
+      }
+      return;
+    }
+    if (!force && now - Math.max(S.changedAt ?? now, this.voice.lastSpeechAt ?? 0) < 300) return;
     // Deduplicate requests in flight, but do not permanently suppress failed words.
     if (text === S.lastText && (!S.retry || S.retry.text !== text || now < S.retry.at)) return;
-    if (!this.settings.instantCast && (now - S.lastSend < 160 || S.inflight >= 3)) return;
+    if (S.pending.has(text) && !(S.retry?.text === text && now >= S.retry.at)) return;
     S.retry = null;
     S.attempts ||= new Map();
     const attempt = (S.attempts.get(text) || 0) + 1;
@@ -416,10 +566,17 @@ class Game {
     S.lastText = text; S.lastSend = now; S.inflight++;
     this.hud.jevPending?.(text, this.mode === 'practice');
     const order = ++S.order;
-    const promise = askJev(text, { provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang, chantSeconds: this.chantT, loudness: this.voice.peak });
+    const requestCacheVersion = this.cacheVersion;
+    const promise = this.requestJev(text, { chantSeconds: this.chantT, loudness: this.voice.peak });
     S.pending.set(text, promise);
     promise.then((j) => {
       S.inflight--;
+      if (j.cacheVersion && this.cacheVersion !== requestCacheVersion && j.cacheVersion !== this.cacheVersion) return;
+      if (j.ok) {
+        this.adoptCacheVersion(j.cacheVersion);
+        this.jevCache.set(key, j);
+        if (this.jevCache.size > 5000) this.jevCache.delete(this.jevCache.keys().next().value);
+      }
       if (this.spec !== S || S.closed || this.paused || this.mode === 'menu') return;
       const current = text === S.desiredText;
       if (current) this.noteJev(j);
@@ -433,6 +590,7 @@ class Game {
       }
       S.map.set(text, j);
       if (current && j.raw && (!S.displayOrder || order > S.displayOrder)) {
+        S.shownText = text;
         S.displayOrder = order;
         this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
       }
@@ -454,46 +612,72 @@ class Game {
   }
   endChant() {
     if (!this.chanting) return;
+    this.releaseAim = { yaw: this.player.yaw, pitch: this.player.pitch };
     this.chanting = false; this.player.chanting = false; audio.chantStop();
     if (!this.voice.rec) { this.voice.cancelChant(); this.hud.chant(t('chant.nomic'), 'fizzle'); return; }
     const text = this.voice.chantText();
-    this.speculate(text);
+    // Only an already prepared exact preview may bypass recognition completion.
+    // Do not interpret an unfinished fragment just because the button was released.
     // Jev must receive the recognizer's final words, including audio buffered at key release.
     // stop() flushes the recognizer; onend follows its last result in normal browser operation.
-    const ready = !this.settings.useJev && this.readyToInterpret(text, this.voice.win);
+    const preview = this.bestJev(text);
+    const ready = (this.settings.useJev || this.mode === 'online') && preview?.ok && !preview.partial && preview.params?.isSpell >= 0.65
+      && performance.now() - Math.max(this.spec?.changedAt ?? performance.now(), this.voice.lastSpeechAt ?? 0) >= 300;
     const res = this.voice.endChant({ waitForWords: !ready });
     if (ready) { this.castIncantation(res.text, res, this.bestJev(res.text)); return; }
     // Missing or incomplete words: allow delayed spell words (a new press cancels instantly).
-    this.grace = { win: res.win, meta: res, until: performance.now() + 1800 };
+    this.grace = { win: res.win, meta: res, until: performance.now() + 5000 };
+    this.hud.chant(t('chant.recognizing'), '');
   }
   resolveVoiceGrace() {
     const g = this.grace;
     if (!g) return;
     const text = this.voice.textOf(g.win);
-    const ended = g.win?.ended || performance.now() > g.until;
+    const ended = g.win?.ended;
+    if (!ended && !g.win?.closed && performance.now() >= g.until) {
+      this.voice.finishChant(g.win); this.grace = null;
+      this.hud.chant(t('chant.recognitiontimeout'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
+      return; // Never turn a recognition timeout into a cast of partial words.
+    }
     if (g.win?.closed || (ended && !text)) {
       this.voice.finishChant(g.win); this.grace = null;
       this.hud.chant(t('chant.silence'), 'fizzle'); this.hud.preview(null); this.previewCost = 0;
-    } else if (text && (ended || (!this.settings.useJev && this.readyToInterpret(text, g.win)))) {
+    } else if (text && ended) {
+      this.speculate(text, true);
       this.grace = null; this.voice.finishChant(g.win);
       this.castIncantation(text, g.meta, this.bestJev(text));
     }
   }
+  cancelPendingCast() {
+    if (!this.grace && !this.pendingJevCast && !this.channel) return false;
+    // Invalidate callbacks before stopping recognition: abort may emit events.
+    this.grace = null; this.pendingJevCast = null; this.channel = null;
+    if (this.spec) this.spec.closed = true;
+    this.chanting = false; this.releaseAim = null;
+    if (this.player) this.player.chanting = false;
+    if (this.mouse) this.mouse.lmb = false;
+    this.voice.cancelChant(); this.voice.prepareNext?.();
+    audio.chantStop(); this.previewCost = 0; this.hud.preview(null);
+    this.hud.chant(t('chant.cancelled'), '');
+    return true;
+  }
   async castIncantation(text, meta, jev) {
+    meta ||= {};
+    const online = this.mode === 'online', aim = online && meta.win ? this.releaseAim : undefined;
     const p = this.player; if (!p || !p.alive) return;
     if (this.spec) this.spec.closed = true;
     let spec;
-    if (this.settings.useJev) {
+    if (this.settings.useJev || online) {
       const token = this.pendingJevCast = {}, mode = this.mode;
       this.previewCost = 0; this.hud.preview(null);
       this.hud.chant(t('chant.jevwait'), '');
       const request = { ...meta, provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang };
-      let j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || askJev(text, request));
+      let j = jev?.ok && !jev.partial ? jev : await (jev?.then ? jev : this.spec?.pending?.get(text) || this.requestJev(text, request));
       // A failed speculative request is not a cached verdict. Retry transient failures for these exact words.
-      if (!j.ok && j.retryable && this.pendingJevCast === token && this.player === p && p.alive && !this.paused && this.mode === mode && this.settings.useJev) {
-        j = await askJev(text, request);
+      if (!j.ok && j.retryable && this.pendingJevCast === token && this.player === p && p.alive && !this.paused && this.mode === mode && (this.settings.useJev || online)) {
+        j = await this.requestJev(text, request);
       }
-      if (this.pendingJevCast !== token || this.player !== p || !p.alive || this.paused || this.mode !== mode || this.mode === 'menu' || !this.settings.useJev) return;
+      if (this.pendingJevCast !== token || this.player !== p || !p.alive || this.paused || this.mode !== mode || this.mode === 'menu' || (!this.settings.useJev && !online)) return;
       this.pendingJevCast = null; this.noteJev(j);
       if (j.raw) this.hud.jevReply?.(j.raw, text, this.mode === 'practice');
       else if (!j.ok) this.hud.jevFailure?.(text, this.mode === 'practice', this.jevError(j));
@@ -506,24 +690,26 @@ class Game {
     if (spec.isSpell < 0.65) { this.voice.finishMetric(meta.win, 'no-magic'); this.hud.chant('“' + text + '” ' + t('chant.nomagic'), 'fizzle'); audio.ui('fizzle'); this.hud.preview(null); return; }
     if (p.canAct()) this.voice.markCast(meta.win);
     else this.voice.finishMetric(meta.win, 'interrupted');
-    this.performCast(spec, true);
+    if (online) this.online.cast(text, aim);
+    else this.performCast(spec, true);
   }
   performCast(spec, addToGrimoire) {
+    if (this.mode === 'online') { this.online.cast(spec.text); return; }
     const p = this.player;
     if (!p.canAct()) { this.hud.chant(t('chant.interrupted'), 'fizzle'); audio.ui('fizzle'); return; }
-    spec = { ...spec, cost: Math.round(spec.cost * p.costMult()) };
-    if (p.mana < spec.cost) {
+    const paidCost = effectiveManaCost(p, spec);
+    if (!spendSpellMana(p, spec)) {
       this.previewCost = 0; this.hud.preview(null);
       this.hud.chant(t('feed.starved'), 'fizzle'); audio.ui('fizzle');
       return;
-    } else p.mana -= spec.cost;
+    }
     this.previewCost = 0;
     this.lastEl = spec.element; this.viewModel.setElement(spec.element); this.hud.setEl(spec.element);
     this.spells.cast(spec, p);
     this.viewModel.kick = 1;
     this.hud.chant('“' + spec.text + '”', '');
     this.hud.preview(null);
-    this.hud.spellCard(spec);
+    this.hud.spellCard({ ...spec, cost: paidCost });
     this.onCast(p, spec);
     if (spec.tierInt >= 8) { this.slowmo = 0.35; this.screenFlash(hex(ELEMENTS[spec.element].color), 0.12); }
   }
@@ -532,27 +718,29 @@ class Game {
     const dur = Math.min(3.5, 0.3 + units * 0.16);
     const ch = (this.channel = { t: 0, dur, text, typed: true, jev: null });
     this.pendingJevCast = null;
-    if (this.settings.useJev) ch.jev = askJev(text, { provider: this.settings.spellProvider, language: this.voice.lang || this.settings.lang, chantSeconds: dur, loudness: 0.4 });
+    if (this.settings.useJev || this.mode === 'online') ch.jev = this.requestJev(text, { chantSeconds: dur, loudness: 0.4 });
     audio.chantStart(this.settings.useJev ? 'arcane' : localParse(text).element);
     const pv = this.settings.useJev ? null : finalizeSpec({ ...localParse(text), text });
-    this.hud.preview(pv); this.previewCost = pv?.cost || 0; this.hud.chant('“' + text + '”', '');
+    this.hud.preview(pv); this.previewCost = pv ? effectiveManaCost(this.player, pv) : 0; this.hud.chant('“' + text + '”', '');
   }
   fireBolt() {
     const p = this.player;
-    if (!p || !p.canAct() || this.boltCd > 0 || p.mana < 3 || this.chanting) return;
-    this.boltCd = p.enhP('lightning') !== null ? 0.18 : 0.28; p.mana -= 3;
+    if (!p || !p.canAct() || this.boltCd > 0 || this.chanting) return;
+    if (this.mode === 'online') { if (this.online.canPlay() && !this.paused) { this.online.send({ type: 'bolt' }); this.boltCd = p.enhP('lightning') !== null ? 0.36 : 0.56; } return; }
     const spec = boltSpec(this.lastEl);
+    if (!spendSpellMana(p, spec)) return;
+    this.boltCd = p.enhP('lightning') !== null ? 0.36 : 0.56;
     this.spells.cast(spec, p);
-    this.viewModel.flick = 1;
+    this.viewModel.kick = 0; this.viewModel.flick = 1;
     audio.bolt(this.lastEl);
   }
 
   // ------------------------------------------------------------ combat hooks
-  whoName(c) { return c === this.player ? `<b>${t('you')}</b>` : c.name; }
+  whoName(c) { return c === this.player ? `<b>${t('you')}</b>` : escapeHTML(c.name); }
   onCast(c, spec) {
     const col = hex(ELEMENTS[spec.element].color);
     if (this.royale && c !== this.player && this.player && c.pos.distanceTo(this.player.pos) > 40) return; // far-off duels stay off the feed
-    this.hud.feed(t('feed.cast', { who: this.whoName(c), spell: `<b style="color:${col}">${spec.name}</b>` }) + ` <span style="opacity:.6">(${shapeName(spec.shape)} · ${t('rank')} ${spec.tierInt})</span>`);
+    this.hud.feed(t('feed.cast', { who: this.whoName(c), spell: `<b style="color:${col}">${escapeHTML(spec.name)}</b>` }) + ` <span style="opacity:.6">(${shapeName(spec.shape)} · ${t('rank')} ${escapeHTML(spec.tierInt)})</span>`);
     if (c !== this.player && this.hud.cardTimer < 3 && !spec.basic) this.hud.spellCard(spec, c.name);
   }
   onDamage(target, res, pos, el, hit) {
@@ -567,7 +755,7 @@ class Game {
       if (this.chanting && res.dmg > 60 && p0EarthFree(target) && Math.random() < 0.5) { this.voice.cancelChant(); this.chanting = false; this.player.chanting = false; audio.chantStop(); this.hud.chant(t('chant.broken'), 'fizzle'); }
     }
     if (hit.src === this.player && target !== this.player) { this.hud.hitm = 1; audio.hitmarker(); if (res.dmg > 70 && !hit.dot && this.slowmo <= 0 && !this.settings.calm) this.timeScale = Math.min(this.timeScale, 0.2); } // hit-stop: heavy hits bite time for a beat
-    if (target.brain?.chant && res.dmg > 70 && Math.random() < 0.4) target.brain.cancelChant();
+    interruptBotOnDamage(target, res);
   }
   // Ultimate domain: sky, sunlight, fog and grade shift to the element for a few seconds; a colossal sigil opens overhead.
   domain(el, pal, pos) {
@@ -697,6 +885,7 @@ class Game {
     const canvas = $('c');
     $('inventory-close').addEventListener('click', () => this.toggleInventory());
     addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' && !$('settings').classList.contains('hidden')) { e.preventDefault(); this.closeSettings(); return; }
       if (this.typing) {
         if (e.code === 'Enter' && !e.isComposing) { const tx = $('type-input').value.trim(); this.closeTyping(); if (tx) this.typedCast(tx); }
         else if (e.code === 'Escape') this.closeTyping();
@@ -727,6 +916,7 @@ class Game {
     });
     canvas.addEventListener('mousedown', (e) => {
       if (this.mode === 'menu' || this.paused || this.typing) return;
+      if ((e.button === 0 || e.button === 2) && this.cancelPendingCast()) { e.preventDefault(); return; }
       if (document.pointerLockElement !== canvas) { this.lock(); return; }
       if (e.button === 0) this.mouse.lmb = true;
       if (e.button === 2) this.beginChant();
@@ -757,6 +947,7 @@ class Game {
   openTyping() { this.typing = true; $('type-box').classList.remove('hidden'); const i = $('type-input'); i.value = ''; setTimeout(() => i.focus(), 0); this.keys = {}; }
   closeTyping() { this.typing = false; $('type-box').classList.add('hidden'); $('type-input').blur(); }
   dashPlayer() {
+    if (this.mode === 'online') { if (this.online.canPlay() && !this.paused) this.online.send({ type: 'dash' }); return; }
     const p = this.player; if (!p || !p.canAct() || p.stamina < 30) return;
     p.stamina -= 30;
     const f = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw)), r = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
@@ -792,7 +983,7 @@ class Game {
       input: $('set-lang'), toggle: $('set-lang-toggle'), list: $('voice-language-list'),
       languages: VOICE_LANGUAGES, value: s.lang, normalizeCustom: recognitionLanguage,
       invalidMessage: () => t('set.voice.invalid'),
-      onSelect: language => { s.lang = language; saveSettings(s); this.voice.setLang(language); void this.refreshVoiceDownload?.(); },
+      onSelect: language => { s.lang = language; saveSettings(s); this.voice.setLang(language); void this.preloadSpellCache(language); void this.refreshVoiceDownload?.(); },
     });
     $('menu-enable-voice').addEventListener('click', () => { void this.enableVoice(); });
     $('menu-disable-voice').addEventListener('click', () => {
@@ -815,7 +1006,8 @@ class Game {
       }
       else if (a === 'begin-royale') this.startMode('royale');
       else if (a === 'howto') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('howto'); }
-      else if (a === 'settings') { this.backTo = this.mode === 'menu' ? 'menu' : 'pause'; this.showScreen('settings'); }
+      else if (a === 'settings') this.openSettings();
+      else if (a === 'close-settings') this.closeSettings();
       else if (a === 'resume') { this.showScreen(null); this.lock(); }
       else if (a === 'quit') this.endToMenu();
     }));
@@ -823,6 +1015,7 @@ class Game {
     document.querySelectorAll('.lang-switch button').forEach((b) => b.addEventListener('click', () => {
       const ui = b.dataset.lang; this.applyLanguage(ui);
       s.lang = defaultRecognitionLanguage(ui); this.voiceLanguagePicker.setValue(s.lang); this.voice.setLang(s.lang); saveSettings(s);
+      void this.preloadSpellCache(s.lang);
     }));
     const bind = (id, key, conv = (v) => v, prop = 'value', after) => {
       const el = $(id); el[prop] = s[key];
@@ -840,6 +1033,15 @@ class Game {
     });
     $('set-chantsize-value').textContent = `${s.chantSize} px`;
     bind('set-sens', 'sens', Number);
+    bind('set-fov', 'fov', Number, 'value', () => {
+      $('set-fov-value').textContent = `${s.fov}°`;
+      this.camera.fov = s.fov;
+      this.camera.updateProjectionMatrix();
+      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.fx.setScale(size.y, s.fov);
+      this.stillKey = null;
+    });
+    $('set-fov-value').textContent = `${s.fov}°`;
     bind('set-anime', 'anime', Boolean, 'checked', () => { MageModel.anime = s.anime; if (s.anime) loadAnimeMage(); });
     MageModel.anime = !!s.anime; if (s.anime) loadAnimeMage();
     bind('set-calm', 'calm', Boolean, 'checked', () => { this.fx.calm = s.calm; });
@@ -852,16 +1054,12 @@ class Game {
     });
     $('set-loadmodel').addEventListener('click', () => this.loadLocalModel());
     bind('set-jev', 'useJev', Boolean, 'checked', () => { this.pendingJevCast = null; this.spec = null; this.previewCost = 0; this.hud.preview(null); });
-    bind('set-instantcast', 'instantCast', Boolean, 'checked');
-    bind('set-botjev', 'botJev', Boolean, 'checked');
     bind('set-botvoice', 'botVoice', Boolean, 'checked');
-    bind('set-handsfree', 'handsFree', Boolean, 'checked', () => (this.voice.handsFree = s.handsFree));
     const voiceOptions = () => {
-      this.voice.preferLocal = s.localVoice; this.voice.prewarm = s.warmVoice;
+      this.voice.preferLocal = s.localVoice; this.voice.prewarm = true;
       this.voice.cancelChant(); this.voice.prepareNext();
     };
     bind('set-localvoice', 'localVoice', Boolean, 'checked', voiceOptions);
-    bind('set-warmvoice', 'warmVoice', Boolean, 'checked', voiceOptions);
     this.refreshVoiceDownload = bindVoiceDownload({
       button: $('set-downloadvoice'), status: $('voice-download-status'), getLanguage: () => s.lang,
       onInstalled: async (lang) => {
@@ -875,54 +1073,35 @@ class Game {
   }
 
   // ------------------------------------------------------------ physics
-  stepBody(c, dt, wish, speed, jump, glide, descend = false) {
-    const mm = c.moveMult() * (c.haste > 0 ? 1.35 : 1) * (c.channeling ? 0.5 : 1);
-    const fly = c.flying > 0, drop = c.dropping;
-    if (drop) speed *= 2;
-    const k = Math.min(1, (c.grounded || fly ? 11 : drop ? 3.5 : 2.5) * dt);
-    c.vel.x += (wish.x * speed * mm * (fly ? 1.3 : 1) - c.vel.x) * k;
-    c.vel.z += (wish.z * speed * mm * (fly ? 1.3 : 1) - c.vel.z) * k;
-    if (fly) { const vy = jump ? 7 : descend ? -7 : 0; c.vel.y += (vy - c.vel.y) * Math.min(1, dt * 5); if (c.pos.y > 40) c.vel.y = Math.min(c.vel.y, 0); }
-    else {
-      c.vel.y -= 24 * dt;
-      if (drop) c.vel.y = Math.max(c.vel.y, glide ? -7 : -22); // battle royale descent: steer the fall, Space slows it
-      else if (glide && c.vel.y < -2.2) c.vel.y = -2.2;
-      if (jump && c.grounded && c.canAct()) { c.vel.y = 8.5; c.grounded = false; }
-    }
-    const prevY = c.pos.y, prevX = c.pos.x, prevZ = c.pos.z;
-    c.pos.addScaledVector(c.vel, dt);
-    // cliffs: terrain more than a step above the feet blocks the move; slide along the face on whichever axis stays free
-    if (!fly) {
-      // blocked if the ground ahead is a tall step, or a cliff-steep rise the feet would end up inside (a jump that
-      // clears the lip still lands on top)
-      const H = (x, z) => this.world.heightAt(x, z), h0 = H(prevX, prevZ), top = Math.max(prevY, c.pos.y) + 0.7;
-      const bad = (x, z) => { const h = H(x, z); return h > top || (h - h0 > Math.hypot(x - prevX, z - prevZ) * 1.25 + 0.01 && h > c.pos.y - 0.05); };
-      if (bad(c.pos.x, c.pos.z)) {
-        if (!bad(c.pos.x, prevZ)) { c.pos.z = prevZ; c.vel.z = 0; }
-        else if (!bad(prevX, c.pos.z)) { c.pos.x = prevX; c.vel.x = 0; }
-        else { c.pos.x = prevX; c.pos.z = prevZ; c.vel.x = c.vel.z = 0; }
-      }
-    }
-    const gy = this.world.groundAt(c.pos.x, c.pos.z, Math.max(prevY, c.pos.y));
-    if (c.pos.y <= gy) { c.pos.y = gy; if (c.vel.y < 0) c.vel.y = 0; c.grounded = true; }
-    else c.grounded = c.pos.y - gy < 0.08 && c.vel.y <= 0;
-    // cliff faces can't be stood on (or jumped up in hops): slide off them
-    if (c.grounded && !fly && c.pos.y - this.world.heightAt(c.pos.x, c.pos.z) < 0.1) {
-      const n = this.world.normalAt(c.pos.x, c.pos.z);
-      if (n.y < 0.66) { c.vel.x += n.x * 60 * dt; c.vel.z += n.z * 60 * dt; c.grounded = false; }
-    }
-    // bump the head on the underside of a construct
-    for (const b of this.world.boxesAt(c.pos.x, c.pos.z)) if (c.vel.y > 0 && this.world.inBox(b, { x: c.pos.x, y: c.pos.y + 1.8, z: c.pos.z }, 0.2) && prevY + 1.8 <= b.y - b.hy + 0.05) { c.pos.y = b.y - b.hy - 1.81; c.vel.y = 0; }
-    this.world.collideBody(c.pos);
-    if (c.haste > 0) c.haste -= dt;
-  }
+  stepBody(...args) { return stepBody.apply(this, args); }
 
   // ------------------------------------------------------------ main loop
+  updatePerformance(rendered = true) {
+    const now = performance.now();
+    if (document.hidden) { this.fpsSample = null; return; }
+    const sample = this.fpsSample ||= { at: now, frames: 0 };
+    if (rendered) sample.frames++;
+    const elapsed = now - sample.at;
+    if (elapsed >= 500) {
+      $('performance-fps').textContent = String(Math.round(sample.frames * 1000 / elapsed));
+      sample.at = now; sample.frames = 0;
+    }
+    const calls = this.mode === 'online' && !this.online.ws?.host ? this.online.jevCalls || 0 : askJev.calls || 0;
+    if (calls !== this.displayedJevCalls) {
+      $('performance-jev').textContent = String(calls);
+      this.displayedJevCalls = calls;
+    }
+  }
   loop() {
     requestAnimationFrame(() => this.loop());
     const raw = Math.min(this.clock.getDelta(), 0.05);
+    if (this.preparing) return; // Warm-up owns the renderer; no menu fights or competing frames.
+    if (performance.now() >= (this.cacheCheckAt || 0) && !this.chanting && !this.grace && !this.pendingJevCast) {
+      this.cacheCheckAt = performance.now() + 60000;
+      void this.checkJev();
+    }
     if (this.slowmo > 0) { this.slowmo -= raw; this.timeScale = 0.25; } else this.timeScale += (1 - this.timeScale) * Math.min(1, raw * 6);
-    const dt = this.paused ? 0 : raw * this.timeScale;
+    const dt = this.mode === 'online' ? raw : this.paused ? 0 : raw * this.timeScale;
     TIME.value += dt;
     this.voice.update(raw);
     if (this.mode !== 'menu' && !this.paused) {
@@ -943,7 +1122,7 @@ class Game {
     u.uSat.value = p && !p.alive ? 0.3 : 1.04;
     // a paused world is a still image: redraw it only when the post grade or the canvas size changes
     const still = dt === 0 && this.mode !== 'menu' && !this.debugCam && `${u.uCA.value}|${u.uSat.value}|${u.uTint.value.toArray()}`;
-    if (still && still === this.stillKey) return;
+    if (still && still === this.stillKey) { this.updatePerformance(false); return; }
     this.stillKey = still;
     if (this.debugCam) { // observer view for rendering only; aim and cast origin keep using the player's camera
       const cam = this.camera, pos = cam.position.clone(), q = cam.quaternion.clone(), vm = this.viewModel.group.visible;
@@ -951,6 +1130,7 @@ class Game {
       this.post.render(TIME.value);
       cam.position.copy(pos); cam.quaternion.copy(q); cam.updateMatrixWorld(); this.viewModel.group.visible = vm;
     } else this.post.render(TIME.value);
+    this.updatePerformance();
   }
   updateMenuCam() {
     const tt = (performance.now() / 1000) * 0.05;
@@ -964,7 +1144,7 @@ class Game {
       p.yaw -= this.mouse.dx * sens; p.pitch = clamp(p.pitch - this.mouse.dy * sens, -1.5, 1.5);
       this.mouse.dx = this.mouse.dy = 0;
       const wish = new THREE.Vector3();
-      if (p.alive && !this.typing) {
+      if (p.alive && !this.typing && !this.paused && (this.mode !== 'online' || this.online.canPlay())) {
         const f = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw)), r = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
         if (this.keys.KeyW) wish.add(f); if (this.keys.KeyS) wish.sub(f); if (this.keys.KeyD) wish.add(r); if (this.keys.KeyA) wish.sub(r);
         if (wish.lengthSq()) wish.normalize();
@@ -972,13 +1152,14 @@ class Game {
       const sprint = this.keys.ShiftLeft && p.stamina > 1 && !this.chanting;
       if (sprint && wish.lengthSq()) p.stamina -= dt * 18;
       const speed = (sprint ? 10.5 : 7) * (this.chanting || this.channel ? 0.6 : 1);
+      if (this.mode === 'online') this.online.input(dt, wish);
       const fallV = p.vel.y, wasGrounded = p.grounded;
-      if (p.alive && !p.onShip) this.stepBody(p, dt, wish, speed, this.keys.Space, this.keys.Space, this.keys.ControlLeft || this.keys.KeyC);
+      if (p.alive && !p.onShip && (this.mode !== 'online' || this.online.canPlay())) this.stepBody(p, dt, wish, speed, !this.paused && this.keys.Space, !this.paused && this.keys.Space, !this.paused && (this.keys.ControlLeft || this.keys.KeyC));
       else if (p.onShip) { const o = (p.deckOff ||= { x: Math.cos(p.deckA) * 4.2, z: Math.sin(p.deckA) * 4.2 }); o.x += wish.x * 4 * dt; o.z += wish.z * 4 * dt; const L = Math.hypot(o.x, o.z); if (L > 6.8) { o.x *= 6.8 / L; o.z *= 6.8 / L; } } // stroll the ferry deck
       const onStone = Math.hypot(p.pos.x, p.pos.z) < 10.5 || p.pos.y - this.world.heightAt(p.pos.x, p.pos.z) > 0.25;
       if (!wasGrounded && p.grounded && fallV < -5) audio.land(clamp(-fallV / 22), onStone);
       if (p.alive && p.hp < p.maxHp * 0.3) { this.beatT = (this.beatT || 0) - dt; if (this.beatT <= 0) { this.beatT = 0.55 + (p.hp / p.maxHp) * 1.5; audio.heartbeat(); } }
-      p.updateStatus(dt, this);
+      if (this.mode !== 'online') p.updateStatus(dt, this);
       // camera + subtle head bob / strafe roll
       const eye = p.eye(new THREE.Vector3());
       const hs = Math.hypot(p.vel.x, p.vel.z);
@@ -991,7 +1172,7 @@ class Game {
       const sh = this.fx.shake * this.fx.shake;
       this.camera.rotation.set(p.pitch + (Math.random() - 0.5) * sh * 0.08, p.yaw + (Math.random() - 0.5) * sh * 0.08, this.roll + (Math.random() - 0.5) * sh * 0.05 + (p.alive ? 0 : 0.4));
       this.fovKick = Math.max(0, (this.fovKick || 0) - dt * 30);
-      const fovT = 78 + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4 + (this.settings.calm ? 0 : this.fovKick);
+      const fovT = this.settings.fov + (sprint && hs > 8 ? 6 : 0) - this.chantProgress * 4 + (this.settings.calm ? 0 : this.fovKick);
       if (Math.abs(this.camera.fov - fovT) > 0.05) { this.camera.fov += (fovT - this.camera.fov) * Math.min(1, dt * 6); this.camera.updateProjectionMatrix(); }
       // aim ray incl. enemies
       const dir = this.camera.getWorldDirection(new THREE.Vector3());
@@ -1010,12 +1191,13 @@ class Game {
       if (this.chanting) {
         this.chantT += dt;
         const text = this.voice.chantText();
-        const local = text && !this.settings.useJev ? localParse(text) : null;
+        const useJev = this.settings.useJev || this.mode === 'online';
+        const local = text && !useJev ? localParse(text) : null;
         this.speculate(text);
         const meta = { chantSeconds: this.chantT, loudness: this.voice.peak };
         const magic = this.settings.instantCast && this.spec?.latestMagic?.text === text ? this.spec.latestMagic : null;
-        const pv = this.settings.useJev ? buildJevSpec(magic?.text || text, magic?.j || this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
-        this.hud.chant(text || '…', ''); this.hud.preview(pv); this.previewCost = pv?.cost || 0;
+        const pv = useJev ? buildJevSpec(magic?.text || text, magic?.j || this.bestJev(text), meta) : local ? buildSpec(text, local, null, meta) : null;
+        this.hud.chant(text || '…', ''); this.hud.preview(pv); this.previewCost = pv ? effectiveManaCost(this.player, pv) : 0;
         const el = pv?.element || this.lastEl;
         this.hud.setEl(el); this.viewModel.setElement(el); this.viewModel.setTier(pv ? pv.tierInt : 1);
         this.chantAura(dt, pv, el);

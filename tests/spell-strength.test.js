@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { baseManaCost, effectiveManaCost, spendSpellMana } from '../public/js/mana.js';
 import { createApiHandler } from '../api-handler.js';
 import { ELEMENTS, SHAPES } from '../spell-ontology.js';
 
 const source = readFileSync(new URL('../public/js/spellbook.js', import.meta.url), 'utf8')
   .replace(/^import .*;\r?\n/gm, '').replaceAll('export ', '');
 const context = vm.createContext({
+  baseManaCost,
   clamp: n => Math.max(0, Math.min(1, n)), hashStr: () => 42, spellName: () => 'Test spell',
   ELEMENT_KEYS: Object.keys(ELEMENTS), SHAPE_KEYS: Object.keys(SHAPES),
   performance, AbortSignal,
@@ -98,7 +100,7 @@ test('server ignores legacy timing and loudness even on uncached JEV calls', asy
 test('insufficient mana blocks a player cast without weakening it or spending mana', () => {
   const main = readFileSync(new URL('../public/js/main.js', import.meta.url), 'utf8');
   const Game = vm.runInNewContext(main.slice(main.indexOf('class Game {'), main.indexOf('window.game = new Game();')) + '\nGame;', {
-    t: key => key, audio: { ui() {} },
+    t: key => key, audio: { ui() {} }, effectiveManaCost, spendSpellMana,
   });
   const g = Object.create(Game.prototype);
   g.player = { canAct: () => true, costMult: () => 1, mana: 5 };

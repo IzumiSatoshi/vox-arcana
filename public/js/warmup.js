@@ -32,7 +32,7 @@ function sandbox(g) {
   return { sg, fx, scene, caster };
 }
 
-export async function warmSpellShaders(g, { budgetMs = 6 } = {}) {
+export async function warmSpellShaders(g, { budgetMs = 6, onProgress = () => {} } = {}) {
   const { sg, fx, scene, caster } = sandbox(g), r = g.renderer;
   // Program keys depend on the bound target (screen = tone-mapped sRGB, targets = linear) and on the light count:
   // the first-person hands carry a point light that is hidden in the menu and while dead. Compile as the post stack
@@ -46,10 +46,11 @@ export async function warmSpellShaders(g, { budgetMs = 6 } = {}) {
   const compile = (s = scene) => {
     if (s === scene && !hasNewMaterial()) return; // most sim steps add nothing; compile() itself is not free
     const prev = r.getRenderTarget(), vis = vm.visible;
-    r.setRenderTarget(g.post.composer.readBuffer);
-    for (const v of [true, false]) { vm.visible = v; r.compile(s, g.camera, g.scene); }
-    if (s === scene && fx.distortScene.children.length) r.compile(fx.distortScene, g.camera);
-    vm.visible = vis; r.setRenderTarget(prev);
+    try {
+      r.setRenderTarget(g.post.composer.readBuffer);
+      for (const v of [true, false]) { vm.visible = v; r.compile(s, g.camera, g.scene); }
+      if (s === scene && fx.distortScene.children.length) r.compile(fx.distortScene, g.camera);
+    } finally { vm.visible = vis; r.setRenderTarget(prev); }
     if (s === scene) drawNew();
   };
   // ANGLE (Chrome on Windows) finishes the D3D shader for a program on its first draw, not at compile time, so a
@@ -69,22 +70,29 @@ export async function warmSpellShaders(g, { budgetMs = 6 } = {}) {
     g.scene.traverse((o) => { if (o.isLight) { lights.push([o, o.layers.mask]); o.layers.enable(LAYER); } });
     for (const s of [scene, fx.distortScene]) s.traverse((o) => { o.layers.set(LAYER); o.frustumCulled = false; });
     g.scene.add(scene); cam.layers.set(LAYER); r.shadowMap.autoUpdate = false;
-    r.setRenderTarget(g.post.composer.passes[0].target || g.post.composer.readBuffer); // overwritten by the next frame
-    for (const v of [true, false]) { vm.visible = v; r.render(g.scene, cam); }
-    if (fx.distortScene.children.length) { r.setRenderTarget(g.post.distortRT); r.render(fx.distortScene, cam); }
-    g.scene.remove(scene); cam.layers.mask = camMask; r.shadowMap.autoUpdate = auto; vm.visible = vis; r.setRenderTarget(prev);
-    for (const [o, mask] of lights) o.layers.mask = mask;
+    try {
+      r.setRenderTarget(g.post.composer.passes[0].target || g.post.composer.readBuffer); // overwritten by the next frame
+      for (const v of [true, false]) { vm.visible = v; r.render(g.scene, cam); }
+      if (fx.distortScene.children.length) { r.setRenderTarget(g.post.distortRT); r.render(fx.distortScene, cam); }
+    } finally {
+      g.scene.remove(scene); cam.layers.mask = camMask; r.shadowMap.autoUpdate = auto; vm.visible = vis; r.setRenderTarget(prev);
+      for (const [o, mask] of lights) o.layers.mask = mask;
+    }
   };
   // the arena itself, lit as in a match (hands and their light shown): compile, then draw once for the same reason
   compile(g.scene);
-  { const prev = r.getRenderTarget(), vis = vm.visible; vm.visible = true;
-    r.setRenderTarget(g.post.composer.passes[0].target || g.post.composer.readBuffer); r.render(g.scene, g.camera);
-    vm.visible = vis; r.setRenderTarget(prev); }
+  { const prev = r.getRenderTarget(), vis = vm.visible;
+    try {
+      vm.visible = true;
+      r.setRenderTarget(g.post.composer.passes[0].target || g.post.composer.readBuffer); r.render(g.scene, g.camera);
+    } finally { vm.visible = vis; r.setRenderTarget(prev); } }
   const jobs = [];
   // every form first, so the most common programs are ready within the first seconds
   for (const power of [0.45, 1]) for (const element of ELEMENT_KEYS) for (const shape of Object.keys(SHAPES)) jobs.push({ shape, element, power });
   const p0 = r.info.programs.length, t0 = performance.now();
-  let sliceStart = performance.now();
+  let sliceStart = performance.now(), completed = 0;
+  const failures = [];
+  onProgress(0, jobs.length + 1);
   const yieldIfDue = async () => { if (performance.now() - sliceStart > budgetMs) { await new Promise((res) => setTimeout(res)); sliceStart = performance.now(); } };
   for (const { shape, element, power } of jobs) {
     try {
@@ -96,9 +104,37 @@ export async function warmSpellShaders(g, { budgetMs = 6 } = {}) {
         sg.spells.update(STEP); fx.update(STEP); compile();
         await yieldIfDue();
       }
-    } catch (e) { console.warn('shader warm-up:', shape, element, e); }
+    } catch (e) { failures.push(e); console.warn('shader warm-up:', shape, element, e); }
     sg.spells.clear(); fx.clear();
+    onProgress(++completed, jobs.length + 1);
     await yieldIfDue();
   }
+  if (failures.length) throw new AggregateError(failures, 'Spell preparation failed');
+  // Exercise the complete post stack and particle pools with the first-person light enabled.
+  const visible = vm.visible;
+  try { vm.visible = true; g.post.render(0); }
+  finally { vm.visible = visible; }
+  await waitForGPU(r);
+  onProgress(jobs.length + 1, jobs.length + 1);
   return { casts: jobs.length, programs: r.info.programs.length - p0, ms: Math.round(performance.now() - t0) };
+}
+
+// Submitting draws is not completion: keep their GPU work behind the loading screen too.
+export async function waitForGPU(renderer) {
+  const gl = renderer.getContext();
+  if (gl.isContextLost()) throw new Error('Graphics context lost during preparation');
+  const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (!fence) throw new Error('Could not finish graphics preparation');
+  gl.flush();
+  const start = performance.now();
+  try {
+    for (;;) {
+      const status = gl.clientWaitSync(fence, 0, 0);
+      if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) return;
+      if (status === gl.WAIT_FAILED || gl.isContextLost() || performance.now() - start > 30000) {
+        throw new Error('Graphics preparation did not complete');
+      }
+      await new Promise(resolve => setTimeout(resolve, 16));
+    }
+  } finally { gl.deleteSync(fence); }
 }

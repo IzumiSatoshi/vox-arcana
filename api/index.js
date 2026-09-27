@@ -5,7 +5,11 @@ export default function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api' || url.pathname === '/api/index') {
     const route = req.query?.path || url.searchParams.get('path');
-    if (route) req.url = `/api/${Array.isArray(route) ? route.join('/') : route}`;
+    if (route) {
+      url.searchParams.delete('path');
+      const query = url.searchParams.toString();
+      req.url = `/api/${Array.isArray(route) ? route.join('/') : route}${query ? '?' + query : ''}`;
+    }
   }
   return handle(req, res);
 }

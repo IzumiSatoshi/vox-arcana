@@ -293,14 +293,14 @@ function canopyMaterial(color, sunView) {
     uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTex: { value: null }, uColor: { value: new THREE.Color(color) }, uTime: { value: 0 } }]), uCloudT: { value: CLOUD } },
     vertexShader: /* glsl */ `
       #include <fog_pars_vertex>
-      attribute vec2 aCorner; attribute float aRand; uniform float uTime;
+      attribute vec2 aCorner; attribute float aRand; attribute float aCardScale; uniform float uTime;
       varying vec2 vUv; varying vec3 vN; varying float vR; varying float vH; varying vec3 vCol; varying vec3 vVP;
       void main(){
         vec4 mvPosition=modelViewMatrix*vec4(position,1.0);
         float sw=sin(uTime*1.3+position.x*0.6+position.z*0.4+aRand*6.0)*0.06;
         float c=cos(aRand*6.28+sw), s=sin(aRand*6.28+sw);
         vec2 k=mat2(c,-s,s,c)*aCorner;
-        float size=0.9+aRand*0.5;
+        float size=(0.9+aRand*0.5)*aCardScale;
         mvPosition.xy+=k*size;
         vN=normalize(normalMatrix*normal); vUv=aCorner*0.5+0.5; vR=aRand; vH=normal.y;
         #ifdef USE_COLOR
@@ -335,7 +335,7 @@ function canopyMaterial(color, sunView) {
     fog: true,
   });
 }
-function canopyGeometry(rng, blobs, cardsPer) {
+function canopyGeometry(rng, blobs, cardsPer, cardScale = 1) {
   const pos = [], nrm = [], corner = [], rnd = [], idx = [];
   let v = 0;
   for (const b of blobs) {
@@ -355,7 +355,8 @@ function canopyGeometry(rng, blobs, cardsPer) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('aCorner', new THREE.Float32BufferAttribute(corner, 2));
   g.setAttribute('aRand', new THREE.Float32BufferAttribute(rnd, 1));
-  g.setIndex(idx); g.computeBoundingSphere(); g.boundingSphere.radius += 2;
+  g.setAttribute('aCardScale', new THREE.Float32BufferAttribute(new Float32Array(rnd.length).fill(cardScale), 1));
+  g.setIndex(idx); g.computeBoundingSphere(); g.boundingSphere.radius += 2 * cardScale;
   return g;
 }
 
@@ -1183,16 +1184,16 @@ export class World {
       this.obstacles.push({ x, z, r: 0.2, y0: y, h: H });
     });
   }
-  // Low leafy shrubs: soft cover to duck behind (they hide you, they don't stop spells)
+  // Knee-to-waist shrubs. Scale leaf cards too: tree-sized cards alone can hide an entire person.
   bushBlobs(rng) {
     const out = [];
     for (let i = 0, tries = 0; i < 200 && tries < 3000; tries++) {
       const outer = i >= 70, a = rng() * TAU, r = outer ? 135 + rng() * 190 : 16 + rng() * 96, x = Math.cos(a) * r, z = Math.sin(a) * r, y = this.heightAt(x, z);
       if (y < -1 || this.gridUp(x, z) < 0.85 || Math.min(Math.abs(x), Math.abs(z)) < 5 || this.onRamp(x, z) || (outer && (siteAt(x, z, 4) || this.blocked(x, z, 2.5)))) continue;
       const blobs = [], n = 2 + Math.floor(rng() * 3), s = 0.8 + rng() * 0.6;
-      for (let k = 0; k < n; k++) { const bx = x + (rng() - 0.5) * 2.6 * s, bz = z + (rng() - 0.5) * 2.6 * s, br = (0.9 + rng() * 0.5) * s; blobs.push({ c: new THREE.Vector3(bx, this.heightAt(bx, bz) + br * 0.55, bz), r: br }); }
+      for (let k = 0; k < n; k++) { const bx = x + (rng() - 0.5) * 1.3 * s, bz = z + (rng() - 0.5) * 1.3 * s, br = (0.9 + rng() * 0.5) * s * 0.32; blobs.push({ c: new THREE.Vector3(bx, this.heightAt(bx, bz) + br * 0.55, bz), r: br }); }
       const bloom = rng() < 0.35 ? new THREE.Color([0xffb3d1, 0xfff4ee, 0xffe07a, 0xd9b8ff][Math.floor(rng() * 4)]) : null; // flowering shrub
-      out.push({ blobs, color: new THREE.Color([0x3f8434, 0x4f9a38, 0x5a9e3a, 0x3a7a3c][Math.floor(rng() * 4)]), bloom }); i++;
+      out.push({ blobs, color: new THREE.Color([0x3f8434, 0x4f9a38, 0x5a9e3a, 0x3a7a3c][Math.floor(rng() * 4)]), bloom, cardScale: 0.22 }); i++;
     }
     return out;
   }
@@ -1258,8 +1259,8 @@ export class World {
       for (const bb of b.blobs) { const g = new THREE.IcosahedronGeometry(bb.r * 0.8, 1); g.translate(bb.c.x, bb.c.y, bb.c.z); proxies.push(g); }
     }
     // Per-tree bounds include the camera-facing card expansion, enabling safe culling.
-    const geos = cards.map(({ blobs, color, per, bloom }) => {
-      const g = canopyGeometry(rng, blobs, Math.round((this.quality > 0 ? 70 : 35) * (per || 1)));
+    const geos = cards.map(({ blobs, color, per, bloom, cardScale = 1 }) => {
+      const g = canopyGeometry(rng, blobs, Math.round((this.quality > 0 ? 70 : 35) * (per || 1)), cardScale);
       const n = g.attributes.position.count, col = new Float32Array(n * 3);
       for (let k = 0; k < n; k += 4) { // per card (4 verts): flowering shrubs dot a share of their cards with blossom
         const cc = bloom && rng() < 0.28 ? bloom : color;
@@ -1474,7 +1475,7 @@ export class World {
         const a = rng() * TAU, x = ox + Math.cos(a) * (rr + rng() * 0.8), z = oz + Math.sin(a) * (rr + rng() * 0.8);
         if (this.gridUp(x, z) < 0.85 || this.gridH(x, z) < -1 || Math.hypot(x, z) < 11.5 || this.onRamp(x, z)) continue;
         if ((Math.abs(Math.sin(Math.atan2(z, x) * 2)) < 0.1 && Math.hypot(x, z) < 100) || onRoad(x, z) || this.inSolid(x, z, 0.3)) continue; // off the paths, out of buildings
-        const s2 = 1.0 + rng() * 0.8; p.set(x, this.gridH(x, z) - 0.05, z); e.set((rng() - 0.5) * 0.2, rng() * TAU, (rng() - 0.5) * 0.2); q.setFromEuler(e); sc.set(s2, s2, s2);
+        const s2 = 0.42 + rng() * 0.28; p.set(x, this.gridH(x, z) - 0.05, z); e.set((rng() - 0.5) * 0.2, rng() * TAU, (rng() - 0.5) * 0.2); q.setFromEuler(e); sc.set(s2, s2, s2);
         list.push([m4.compose(p, q, sc).clone(), c.setHSL(0.24 + rng() * 0.07, 0.45 + rng() * 0.15, 0.4 + rng() * 0.12).clone()]);
       }
     }

@@ -2,7 +2,9 @@ node_modules/
 .cache/
 .vercel/
 dist/
+public/js/generated/
 .env*
 !.env.example
 jev.config.json
 logs/*.log
+reports/balance/

@@ -3,6 +3,8 @@ import { ELEMENTS, SHAPES, tierName, shapeName, reactName } from './elements.js'
 import { roman, clamp, TAU } from './util.js';
 import { ISLAND_R } from './world.js';
 import { t } from './i18n.js';
+import { effectiveManaCost, funnelUpkeep } from './mana.js';
+import { escapeHTML } from './safe-html.js';
 
 const $ = (id) => document.getElementById(id);
 const _html = new WeakMap(); // write innerHTML only when it actually changes
@@ -158,9 +160,10 @@ export class Hud {
     this.updatePlates(cam);
     // chant bubble over the chanting enemy
     const bub = $('bubble');
-    const chanter = !g.royale && g.combatants.find((c) => c !== p && c.chanting && c.chantText && c.alive);
-    const sp = chanter && this.project(chanter.pos.clone().setY(chanter.pos.y + 2.9), cam);
-    if (sp) { bub.classList.remove('hidden'); bub.style.left = sp.x + 'px'; bub.style.top = sp.y + 'px'; bub.textContent = '“' + chanter.chantText + '”'; }
+    const chanter = g.combatants.find((c) => c !== p && c.chanting && c.chantText && c.alive && (!g.royale || this.project(c.pos.clone().setY(c.pos.y + 2.9), cam)));
+    const projected = chanter && this.project(chanter.pos.clone().setY(chanter.pos.y + 2.9), cam);
+    const sp = projected && projected.x >= 0 && projected.x <= innerWidth && projected.y >= 0 && projected.y <= innerHeight ? projected : null;
+    if (chanter) { bub.classList.remove('hidden'); bub.style.left = sp ? sp.x + 'px' : '50%'; bub.style.top = sp ? sp.y + 'px' : '24%'; bub.textContent = '“' + chanter.chantText + '”'; }
     else bub.classList.add('hidden');
     for (let i = this.pops.length - 1; i >= 0; i--) {
       const o = this.pops[i]; o.t += dt;
@@ -192,7 +195,7 @@ export class Hud {
       el.style.display = '';
       const sc = clamp(1.3 - d / 70, 0.55, 1.1);
       el.style.transform = `translate(${sp.x}px, ${sp.y}px) translate(-50%,-100%) scale(${sc})`;
-      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span${g.player?.team && c.team === g.player.team ? ' style="color:#7fd0ff"' : ''}>${g.player?.team && c.team === g.player.team ? '◆ ' : ''}${g.royale?.leader === c ? '<b style="color:#ffd46a">♛</b> ' : ''}${c.name}</span>`);
+      setHTML(el.children[0], `${c.aura ? elChip(c.aura.el, 'aura-chip') : ''}<span${g.player?.team && c.team === g.player.team ? ' style="color:#7fd0ff"' : ''}>${g.player?.team && c.team === g.player.team ? '◆ ' : ''}${g.royale?.leader === c ? '<b style="color:#ffd46a">♛</b> ' : ''}${escapeHTML(c.name)}</span>`);
       el.children[1].children[0].style.width = clamp(c.hp / c.maxHp) * 100 + '%';
       el.children[1].children[1].style.width = clamp(c.shield / 300) * 100 + '%';
       setHTML(el.children[2], this.statusTags(c) + (c.chanting ? `<span class="status-tag" style="color:#ff8fb0">${t('st.chanting')}</span>` : ''));
@@ -252,7 +255,7 @@ export class Hud {
     const pv = $('chant-preview');
     if (!spec) { setHTML(pv, ''); return; }
     const S = SHAPES[spec.shape];
-    setHTML(pv, `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${spec.cost} ${t('mana')}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`);
+    setHTML(pv, `${elChip(spec.element)}${spec.element2 ? elChip(spec.element2) : ''}<span class="pv">${S.icon} ${shapeName(spec.shape)}</span><span class="pv">${t('rank')} ${roman(spec.tierInt)}</span><span class="pv" style="color:#7ab8ff">${effectiveManaCost(this.g.player, spec)} ${t('mana')}${spec.shape === 'funnels' ? ` + ${funnelUpkeep(spec).toFixed(1)} ${t('mana.upkeep')}` : ''}</span>${spec.source === 'jev' ? '<span class="pv" style="color:#6dffa8">JEV</span>' : ''}`);
   }
   hint(key) { $('chant-hint-txt').innerHTML = t(key); }
   hintHTML(html) { $('chant-hint-txt').innerHTML = html; }
@@ -324,7 +327,7 @@ export class Hud {
   jevReply(raw, chant, persistent = false) {
     if (!raw) return;
     $('jr-chant').textContent = `“${chant}”`;
-    $('jr-model').textContent = raw.model || '';
+    $('jr-model').textContent = (raw.model || '') + (raw.cachedSummary ? ' · ' + t('jev.cachedparams') : '');
     $('jr-json').textContent = JSON.stringify(raw, null, 2);
     $('jr-readout').innerHTML = this.jevReadout(raw);
     $('jev-reply').classList.remove('hidden');
@@ -345,7 +348,9 @@ export class Hud {
   // every Jev answer as one row: key, pick, confidence, and its top alternatives as a stacked probability strip
   jevReadout(raw) {
     const esc = (x) => String(x).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
-    const answers = raw.answers && typeof raw.answers === 'object' ? raw.answers : {};
+    const answers = raw.cachedSummary && raw.params
+      ? Object.fromEntries(Object.entries(raw.params).filter(([key]) => !key.endsWith('Conf')).map(([key, value]) => [key, { value }]))
+      : raw.answers && typeof raw.answers === 'object' ? raw.answers : {};
     const rows = Object.entries(answers).map(([key, a]) => {
       if (!a || typeof a !== 'object') return `<div class="jr-row"><span class="jr-k">${esc(key)}</span><span class="jr-v">${esc(JSON.stringify(a))}</span></div>`;
       const probs = a.probabilities && typeof a.probabilities === 'object'
@@ -398,6 +403,7 @@ export class Hud {
     const src = $('sc-src');
     src.className = 'src' + (spec.source === 'jev' ? '' : ' local');
     src.textContent = spec.source === 'jev' ? `JEV · ${spec.partial ? 'live' : spec.cached ? 'cached' : (spec.latency ?? '?') + 'ms'}` : spec.source === 'minilm' ? `MINILM · ${spec.cached ? 'cached' : (spec.latency ?? '?') + 'ms'}` : 'LOCAL';
+    if (['jev', 'minilm'].includes(spec.source) && Number.isFinite(spec.rtt)) src.textContent += ` · RTT ${Math.round(spec.rtt)}ms`;
     $('sc-quote').textContent = `“${spec.text}”${casterName ? ' — ' + casterName : ''}`;
     const P = [['p.power', spec.power], ['p.rank', spec.tier], ['p.speed', spec.speed], ['p.size', spec.size], ['p.heat', spec.temperature], ['p.weight', spec.weight], ['p.edge', spec.sharpness], ['p.count', spec.count], ['p.duration', spec.duration], ['p.chaos', spec.chaos], ['p.height', spec.height ?? 0.5], ['p.width', spec.width ?? 0.5]];
     if (spec.density != null) P.push(['p.density', spec.density]);
@@ -406,7 +412,7 @@ export class Hud {
     box.innerHTML = P.map(([k, v]) => `<div class="sp"><span class="sp-k">${t(k)}</span><span class="sp-n">${Math.round(v * 100)}</span><span class="pb"><i style="width:0"></i></span></div>`).join('');
     const bars = [...box.querySelectorAll('i')]; // bind now: a second card in the same frame must not mix bar lists
     requestAnimationFrame(() => bars.forEach((i, n) => (i.style.width = Math.round(P[n][1] * 100) + '%')));
-    $('sc-cost').innerHTML = `<span class="sc-mana"><b>${spec.cost}</b> ${t('mana')}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}${this.bonusTag(spec, casterName)}`;
+    $('sc-cost').innerHTML = `<span class="sc-mana"><b>${escapeHTML(spec.cost)}</b> ${t('mana')}${spec.shape === 'funnels' ? ` + ${funnelUpkeep(spec).toFixed(1)} ${t('mana.upkeep')}` : ''}</span><span class="sc-dmg">×<b>${spec.dmgMult.toFixed(2)}</b> ${t('damage')}</span>${spec.weakened ? `<span class="sc-weak">${t('weakened')}</span>` : ''}${this.bonusTag(spec, casterName)}`;
     this.cardTimer = this.g.mode === 'practice' && !casterName ? Infinity : 6;
   }
   banner(a, b, dur = 3) {

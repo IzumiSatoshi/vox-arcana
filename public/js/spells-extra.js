@@ -181,7 +181,9 @@ class PrisonSpell extends Spell {
     this.center = (this.target ? this.target.pos : aim.point).clone(); this.center.y = groundY(this.g, this.center);
     this.R = (1.6 + s.size * 1.4) * (0.75 + this.m * 0.3) * Math.sqrt(L.sx);
     this.H = (3.2 + s.size * 2.4) * (0.75 + this.m * 0.3) * L.sy;
-    this.life = 2.4 + s.duration * 2.6 + this.m;
+    this.windup = 0.9;
+    this.life = this.windup + 2.4 + s.duration * 2.6 + this.m;
+    this.broken = false;
     this.n = 9 + Math.round(s.size * 5 + this.level * 2);
     this.solid = solidKit(this);
     this.rough = this.solid && L.g.sharpness < 0.6; // blunt matter is rough-hewn stone (thick, grey, few veins), sharp matter clean crystal
@@ -209,11 +211,18 @@ class PrisonSpell extends Spell {
     this.mc = new MagicCircle({ seed: s.seed, tier: s.tierInt, color: this.pal.color, radius: this.R * 1.35, intensity: 1.3 });
     this.mc.group.rotation.x = -Math.PI / 2; this.mc.group.position.copy(this.center).y += 0.12; this.mc.spin = 1.2; this.add(this.mc.group);
     this.trapped = new Set(); this.tick = 0.3; this.closed = false;
+    // A visible, shootable anchor holds the cage together. Long-duration cages
+    // are tougher but sacrifice damage; destroying the anchor cancels the burst.
+    this.anchor = this.add(new THREE.Mesh(OCTA, new THREE.MeshBasicMaterial({ color: this.pal.core, wireframe: false })));
+    this.anchor.position.copy(this.center).add(new THREE.Vector3(this.R, 1.1, 0));
+    this.anchor.scale.set(0.42, 0.7, 0.42);
+    this.core = this.sys.addStructure(this, { pos: this.anchor.position, radius: 0.7, hp: 40 + 50 * s.duration, kind: 'prison-core', onBreak: () => this.breakCage() });
     this.loopSnd = this.g.audio.loop(this.el, this.center.clone().setY(this.center.y + 1.5), 0.22, this.look, { spin: 0.15 });
     this.g.audio.cast(this.el, this.m, this.center, this.look);
   }
   update(dt) {
     this.t += dt;
+    if (!this.caster.alive && !this.broken) this.breakCage();
     const c = this.center, fx = this.g.fx;
     const endT = this.life, out = clamp((this.t - endT) / 0.25);
     this.mc.update(dt); this.mc.target = this.t < endT ? 1 : 0;
@@ -225,14 +234,14 @@ class PrisonSpell extends Spell {
       if (this.mat.uniforms?.uFade) this.mat.uniforms.uFade.value = 1 - out;
     }
     const topY = c.y + this.H * 0.93;
-    if (this.t > 0.18) {
+    if (this.t > this.windup && !this.broken) {
       if (!this.closed) {
         this.closed = true; this.crown.visible = true;
         fx.ring(c.clone().setY(c.y + 0.2), this.pal.color, this.R * 2.4, 0.5); fx.shockwave(c.clone().setY(c.y + 1), this.R * 3, 1, 0.4); fx.addShake(0.2, c);
         this.g.audio.impact(this.el, 0.5 + this.m * 0.3, c, this.look); if (this.solid) this.g.audio.clang?.(c.clone().setY(c.y + this.H * 0.8)); // the bars slam home
-        for (const tg of this.targets()) if (Math.hypot(tg.pos.x - c.x, tg.pos.z - c.z) < this.R * 1.1) { this.trapped.add(tg); this.hit(tg, 20, tg.center(), { stun: 0.35 }); if (tg === this.g.player) this.g.hud.banner('', this.g.hud.tr?.('warn.trapped') || 'TRAPPED', 1.6); }
+        for (const tg of this.targets()) if (!tg.structure && Math.hypot(tg.pos.x - c.x, tg.pos.z - c.z) < this.R * 1.1) { this.trapped.add(tg); this.hit(tg, 12, tg.center(), { stun: 0.2 }); if (tg === this.g.player) this.g.hud.banner('', this.g.hud.tr?.('warn.trapped') || 'TRAPPED', 1.6); }
       }
-      const ck = easeOut((this.t - 0.18) / 0.2) * (1 - out);
+      const ck = easeOut((this.t - this.windup) / 0.2) * (1 - out);
       this.crown.position.set(c.x, topY, c.z); this.crown.scale.setScalar(Math.max(0.01, this.R * 0.55 * ck)); this.crown.scale.z = (0.8 + this.m * 0.4) * Math.max(0.01, ck);
       this.crown.rotation.z += dt * 0.8;
     }
@@ -245,7 +254,7 @@ class PrisonSpell extends Spell {
         if (d > lim) { tg.pos.x = c.x + (dx / d) * lim; tg.pos.z = c.z + (dz / d) * lim; tg.vel.x *= 0.2; tg.vel.z *= 0.2; }
         if (tg.pos.y > topY - 1.6) { tg.pos.y = topY - 1.6; tg.vel.y = Math.min(0, tg.vel.y); }
         tg.mud = Math.max(tg.mud, 0.3);
-        if (this.tick <= 0) this.hit(tg, 8, tg.center(), { noReact: true });
+        if (this.tick <= 0) this.hit(tg, 4 + 4 * this.spec.power * (1 - this.spec.duration), tg.center(), { noReact: true });
       }
       if (this.tick <= 0) this.tick = 0.45;
       if (Math.random() < 0.5) { const a = rand(0, TAU); fx.element(this.el, new THREE.Vector3(c.x + Math.cos(a) * this.R, c.y + rand(0.3, this.H * 0.8), c.z + Math.sin(a) * this.R), { count: 1, speed: 0.5, size: 0.3, palette: this.pal, look: this.look }); }
@@ -260,7 +269,7 @@ class PrisonSpell extends Spell {
     // collapse: the bars snap inward and burst
     if (this.t >= endT && !this.burst) {
       this.burst = true; this.loopSnd?.stop(); this.loopSnd = null;
-      this.explode(c.clone().setY(c.y + 1), this.R * 1.25, 48, { knock: 9, lift: 7 });
+      this.explode(c.clone().setY(c.y + 1), this.R * 1.25, 24 + 24 * this.spec.power * (1 - this.spec.duration), { knock: 9, lift: 7 });
       fx.addShake(0.3 + this.m * 0.2, c);
       if (this.solid) fx.debris?.(c.clone().setY(c.y + 1), this.R, this.el, this.pal, this.look);
     }
@@ -268,7 +277,14 @@ class PrisonSpell extends Spell {
     this.updateCommon(dt);
     return !this.finished() || this.mc.opacity > 0.02;
   }
-  threats() { return this.t < this.life ? [{ pos: this.center, vel: new THREE.Vector3(), radius: this.R + 0.5, area: true }] : []; }
+  breakCage() {
+    if (this.broken) return;
+    this.broken = true; this.burst = true; this.trapped.clear(); this.life = this.t;
+    this.anchor.visible = false; this.core.alive = false;
+    this.g.fx.explosion(this.el, this.anchor.position, 1, 0.25, this.pal);
+    this.loopSnd?.stop(); this.loopSnd = null;
+  }
+  threats() { return !this.broken && this.t < this.life ? [{ pos: this.center, vel: new THREE.Vector3(), radius: this.R + 0.5, area: true }] : []; }
   dispose() { super.dispose(); this.mat.dispose(); this.glowMat?.dispose(); }
 }
 

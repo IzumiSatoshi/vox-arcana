@@ -74,6 +74,8 @@ test('Vercel wildcard rewrite reaches the status endpoint', async () => {
   let code, data;
   await handler({url:'/api?path=status',method:'GET',headers:{}},{writeHead(c){code=c;},end(s){data=JSON.parse(s);}});
   assert.equal(code,200); assert.equal(data.capabilities.localModel,false);
+  await handler({url:'/api?path=spell-cache&language=ja-JP',method:'GET',headers:{}},{writeHead(c){code=c;},end(s){data=JSON.parse(s);}});
+  assert.equal(code,200); assert.equal(data.language,'ja-JP');
 });
 
 test('hosted spell calls use the budgeted gateway and hide provider errors', async () => {

@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { baseManaCost } from '../public/js/mana.js';
 import { ELEMENTS, SHAPES } from '../spell-ontology.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const source = read('../public/js/spellbook.js').replace(/^import .*;\r?\n/gm, '').replaceAll('export ', '');
 const context = vm.createContext({
+  baseManaCost,
   clamp: n => Math.max(0, Math.min(1, n)), hashStr: () => 42, spellName: () => 'Test spell',
   ELEMENT_KEYS: Object.keys(ELEMENTS), SHAPE_KEYS: Object.keys(SHAPES), performance, AbortSignal,
 });
